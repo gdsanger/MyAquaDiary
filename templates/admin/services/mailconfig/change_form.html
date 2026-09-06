@@ -1,0 +1,10 @@
+{% extends "admin/change_form.html" %}
+
+{% block object-tools-items %}
+  {% if mail_configured %}
+    <li>
+      <a href="{% url 'admin:services_mailconfig_testmail' %}" class="historylink">Testmail senden</a>
+    </li>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}
