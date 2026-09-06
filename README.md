@@ -191,3 +191,94 @@ devices.execute(device, "on", user=request.user)        # schalten + protokollie
 service_for(device).read_status()                       # nur lesen, ohne Persistenz
 energy.usage_by_tank(user, energy.PERIOD_MONTH)         # Vergleich je Becken
 ```
+
+## KI-Assistenz (Anthropic Claude)
+
+Angebunden über die [Messages-API](https://platform.claude.com/docs) mit dem
+offiziellen `anthropic`-SDK. Die Assistenz ist **Assistenz und kein Automat**:
+jeder Aufruf geht von einer Handlung des Benutzers aus, jedes Ergebnis ist ein
+Vorschlag, und nichts davon schaltet ein Gerät oder legt einen Termin an.
+
+Konfiguriert wird im Admin unter *Services → KI-Konfiguration*; der API-Key
+liegt verschlüsselt in der Datenbank. Alternativ lassen sich Key und Modell
+über `ANTHROPIC_*` aus dem Environment vorgeben (siehe `.env.example`) — ein im
+Admin gepflegter Datensatz hat Vorrang. **Ohne Key läuft die Anwendung normal
+weiter**: Menüpunkt und KI-Seiten existieren dann schlicht nicht.
+
+Zugang prüfen:
+
+```bash
+docker compose exec web python manage.py ai_test
+```
+
+### Anwendungsfälle
+
+| Aktion | Wo | Ergebnis |
+|---|---|---|
+| Pflanze/Tier bestimmen | *KI → Art bestimmen* | Kandidaten mit Konfidenz und Katalogtreffern |
+| Steckbrief entwerfen | Vorschlagsseite | vorbefüllte Felder, die geprüft werden müssen |
+| Messwerte deuten | `ai.read_measurements` | Einordnung des Verlaufs als Markdown |
+| Besatz prüfen | `ai.check_stocking` | Befunde zu Beckengröße, Gruppen, Verträglichkeit |
+| Beckenbericht | `ai.tank_report` | Zusammenfassung eines Zeitraums als Markdown |
+
+Die drei Auswertungen nehmen einfache Datenstrukturen entgegen
+(`TankFacts`, `StockItem`, `ReportPeriod`) statt Modellinstanzen — Becken,
+Messreihen und Besatz liegen in einem anderen Schritt des Epics. Ihre
+Oberfläche entsteht mit den Beckenseiten; die Service-Schicht steht.
+
+```python
+from services import ai
+
+found = ai.identify(request.FILES["photo"], "animal", user=request.user)
+suggestion = ai.save_suggestion(request.user, "animal", found.candidates[0])
+ai.draft_profile(suggestion)          # füllt suggestion.payload
+ai.confirm_suggestion(suggestion)     # der einzige Weg in den Katalog
+
+ai.read_measurements(ai.TankFacts(name="Becken 1", volume_liters=180), messwerte)
+ai.check_stocking(becken, [ai.StockItem("Neonsalmler", count=4)])
+```
+
+Alle Aufrufe werfen keine Ausnahme: Fehler landen im Log und unter *Services →
+KI-Verbrauch*, ein Aufrufer bricht daran nicht ab.
+
+### Jeder Vorschlag ist ein Vorschlag
+
+Eine Bestimmung und ein Steckbrief entstehen als `AISuggestion` mit
+`verified=False`. Erst eine ausdrückliche Bestätigung durch den Benutzer legt
+daraus einen Katalogeintrag an — ein unbestätigt übernommener Steckbrief würde
+Fehler über alle Nutzer verbreiten. Verworfene Vorschläge bleiben als Protokoll
+stehen.
+
+Der Katalog wird über `apps.get_model` aufgelöst statt importiert (siehe
+`services/ai/catalog.py`): solange `catalog.CatalogAnimal` und
+`catalog.CatalogPlant` im Epic fehlen, bleibt der Abgleich leer und eine
+Bestätigung merkt sich den Entwurf, statt zu scheitern.
+
+Bei Messwerten ist Zurückhaltung eingebaut: der System-Prompt verbietet die
+Diagnose ausdrücklich, es wird eingeordnet und auf Auffälligkeiten hingewiesen.
+Die Verantwortung für die Tiere bleibt beim Halter. Jede Antwort ist in der
+Oberfläche als KI-Vorschlag gekennzeichnet.
+
+### Kostenkontrolle
+
+Bilderkennung ist der teure Teil — ein Foto verbraucht ein Vielfaches der Token
+eines Textprompts. Drei Stellen begrenzen das:
+
+- **Bilder** werden vor dem Versand auf `AI_IMAGE_MAX_EDGE` (Default 1024 px)
+  heruntergerechnet und als JPEG neu kodiert. Nebeneffekt: die EXIF-Daten
+  fallen weg, ein Aufnahmeort verlässt das Haus also nicht. Gespeichert wird
+  das Foto nicht.
+- **Budgets** greifen vor dem ersten Byte an die API: `monthly_token_budget`
+  über alle Benutzer und `per_user_daily_limit` je Benutzer und Tag (jeweils
+  `0` = ohne Grenze). Ist eine Grenze erreicht, wird der Aufruf abgelehnt und
+  dem Benutzer erklärt, warum und ab wann es weitergeht.
+- **Verbrauch** steht je Aufruf in `AIUsageLog`: Token, Kosten in USD, Dauer,
+  Erfolg. Auch ein am Budget gescheiterter Versuch wird protokolliert.
+
+Der API-Key erscheint in keinem Log und in keiner Meldung — `AIService` filtert
+ihn aus jedem Fehlertext, bevor er irgendwohin geht.
+
+Das Modell steht in der Konfiguration (Default `claude-opus-5`) und lässt sich
+im Admin umstellen, ohne dass eine Migration nötig wird. Modelle ohne
+Structured Outputs werden erkannt; deren Antworten werden nachsichtig geparst,
+statt die Anfrage mit einem Fehler zu quittieren.

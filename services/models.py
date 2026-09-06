@@ -418,3 +418,236 @@ class DeviceEvent(models.Model):
 
     def __str__(self):
         return f"{self.device} – {self.title}"
+
+
+# --------------------------------------------------------------------------
+# KI-Assistenz (Anthropic Claude)
+# --------------------------------------------------------------------------
+
+#: Startmodell der KI-Assistenz. Im Admin frei änderbar — deshalb ein
+#: CharField und keine Auswahlliste: ein neues Modell soll keine Migration
+#: kosten. Structured Outputs (erzwungenes JSON-Schema) beherrschen nicht alle
+#: Modelle; siehe ``services.ai.pricing.supports_structured_output``.
+DEFAULT_AI_MODEL = "claude-opus-5"
+
+
+class AIConfig(models.Model):
+    """Zugang und Grenzen der KI-Assistenz.
+
+    Singleton wie :class:`MailConfig` (``pk=1``). Der API-Key liegt
+    verschlüsselt in der Datenbank und wird weder angezeigt noch protokolliert
+    — auch nicht in Fehlermeldungen (siehe ``services.ai.client``).
+
+    Ohne Key ist die Anwendung vollständig benutzbar, sämtliche KI-Funktionen
+    sind dann schlicht ausgeblendet.
+    """
+
+    api_key = EncryptedTextField("API-Key", blank=True, default="")
+    model_name = models.CharField(
+        "Modell",
+        max_length=100,
+        default=DEFAULT_AI_MODEL,
+        help_text="Modell-ID von Anthropic, z. B. claude-opus-5, claude-sonnet-5 "
+        "oder claude-haiku-4-5.",
+    )
+    is_enabled = models.BooleanField(
+        "KI-Funktionen aktiv",
+        default=True,
+        help_text="Schaltet die Assistenz ab, ohne den Key zu löschen.",
+    )
+    monthly_token_budget = models.BigIntegerField(
+        "Token-Budget je Monat",
+        default=2_000_000,
+        help_text="Über alle Benutzer, je Kalendermonat. 0 = ohne Begrenzung.",
+    )
+    per_user_daily_limit = models.IntegerField(
+        "Token-Limit je Benutzer und Tag",
+        default=50_000,
+        help_text="0 = ohne Begrenzung.",
+    )
+    updated_at = models.DateTimeField("zuletzt geändert", auto_now=True)
+
+    class Meta:
+        verbose_name = "KI-Konfiguration"
+        verbose_name_plural = "KI-Konfiguration"
+
+    def __str__(self):
+        return "KI-Konfiguration"
+
+    def save(self, *args, **kwargs):
+        self.pk = SINGLETON_PK
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def defaults_from_env(cls) -> dict:
+        """Startwerte aus ``settings.ANTHROPIC``."""
+        configured = getattr(settings, "ANTHROPIC", {}) or {}
+        return {
+            "api_key": configured.get("API_KEY", ""),
+            "model_name": configured.get("MODEL", DEFAULT_AI_MODEL),
+        }
+
+    @classmethod
+    def load(cls) -> "AIConfig":
+        """Gespeicherte Konfiguration oder — falls keine existiert — eine
+        ungespeicherte Instanz mit den Environment-Werten."""
+        existing = cls.objects.filter(pk=SINGLETON_PK).first()
+        if existing is not None:
+            return existing
+        return cls(pk=SINGLETON_PK, **cls.defaults_from_env())
+
+    @property
+    def is_configured(self) -> bool:
+        """True, wenn Anfragen an Claude gestellt werden dürfen."""
+        return bool(self.is_enabled and self.api_key and self.model_name)
+
+
+class AIUsageLog(models.Model):
+    """Ein Eintrag je Aufruf — auch je abgelehntem.
+
+    Grundlage der Budgetprüfung und der Kostenanzeige im Admin. Gespeichert
+    werden ausschließlich Metadaten: keine Prompts, keine Antworten, kein Key.
+    """
+
+    class Action(models.TextChoices):
+        IDENTIFY_ANIMAL = "identify_animal", "Tier bestimmen"
+        IDENTIFY_PLANT = "identify_plant", "Pflanze bestimmen"
+        PROFILE_ANIMAL = "profile_animal", "Steckbrief Tier"
+        PROFILE_PLANT = "profile_plant", "Steckbrief Pflanze"
+        MEASUREMENTS = "measurements", "Messwerte deuten"
+        STOCKING = "stocking", "Besatz prüfen"
+        TANK_REPORT = "tank_report", "Beckenbericht"
+        TEST = "test", "Verbindungstest"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Benutzer",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ai_usage",
+    )
+    action = models.CharField("Aktion", max_length=50, choices=Action.choices)
+    # Das Modell steht am Protokolleintrag, nicht nur in der Konfiguration:
+    # der Preis hängt am Modell, und die Konfiguration ändert sich.
+    model_name = models.CharField("Modell", max_length=100, blank=True)
+    prompt_tokens = models.IntegerField("Token Eingabe", default=0)
+    completion_tokens = models.IntegerField("Token Ausgabe", default=0)
+    total_cost_usd = models.DecimalField(
+        "Kosten (USD)", max_digits=8, decimal_places=4, default=0
+    )
+    duration_ms = models.IntegerField("Dauer (ms)", default=0)
+    success = models.BooleanField("erfolgreich", default=True)
+    error_message = models.TextField("Fehler", blank=True)
+    created_at = models.DateTimeField("Zeitpunkt", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "KI-Verbrauch"
+        verbose_name_plural = "KI-Verbrauch"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["-created_at"]),
+            models.Index(fields=["user", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.get_action_display()} – {self.total_tokens} Token"
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+
+class AISuggestion(models.Model):
+    """Ein KI-Vorschlag — Entwurf, kein Ergebnis.
+
+    Eine Bestimmung oder ein Steckbrief entsteht hier mit ``verified=False``
+    und wird erst durch eine ausdrückliche Bestätigung in den Katalog
+    übernommen. Ein unbestätigt übernommener Steckbrief verbreitet Fehler über
+    alle Benutzer — deshalb der Zwischenschritt.
+
+    ``payload`` trägt die Felder so, wie der Katalog sie erwartet
+    (``scientific_name``, ``common_name``, ``difficulty`` …). Solange die
+    Katalog-Modelle im Epic noch fehlen, bleibt der bestätigte Entwurf hier
+    liegen und wird beim Bestätigen übernommen, sobald der Katalog da ist
+    (siehe :mod:`services.ai.catalog`).
+    """
+
+    class Kind(models.TextChoices):
+        ANIMAL = "animal", "Tier"
+        PLANT = "plant", "Pflanze"
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Entwurf"
+        VERIFIED = "verified", "bestätigt"
+        REJECTED = "rejected", "verworfen"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Benutzer",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ai_suggestions",
+    )
+    kind = models.CharField("Art", max_length=10, choices=Kind.choices)
+    scientific_name = models.CharField("Wissenschaftlicher Name", max_length=160, blank=True)
+    common_name = models.CharField("Deutscher Name", max_length=160, blank=True)
+    confidence = models.DecimalField(
+        "Konfidenz",
+        max_digits=4,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text="Selbsteinschätzung des Modells zwischen 0 und 1 — keine Messgröße.",
+    )
+    reasoning = models.TextField("Begründung", blank=True)
+    payload = models.JSONField("Entwurf", default=dict, blank=True)
+    status = models.CharField(
+        "Status", max_length=10, choices=Status.choices, default=Status.DRAFT
+    )
+    catalog_ref = models.CharField(
+        "Katalogeintrag",
+        max_length=100,
+        blank=True,
+        help_text="Gesetzt, sobald der bestätigte Entwurf im Katalog gelandet ist.",
+    )
+    decided_at = models.DateTimeField("entschieden am", null=True, blank=True)
+    created_at = models.DateTimeField("erstellt", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "KI-Vorschlag"
+        verbose_name_plural = "KI-Vorschläge"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["user", "status", "-created_at"])]
+
+    def __str__(self):
+        return self.label
+
+    @property
+    def label(self) -> str:
+        """Anzeigename — der wissenschaftliche Name führt, wie im Katalog."""
+        if self.scientific_name and self.common_name:
+            return f"{self.scientific_name} ({self.common_name})"
+        return self.scientific_name or self.common_name or "Unbenannter Vorschlag"
+
+    @property
+    def verified(self) -> bool:
+        """Ein Vorschlag gilt erst als bestätigt, wenn ein Mensch ihn geprüft hat."""
+        return self.status == self.Status.VERIFIED
+
+    @property
+    def is_draft(self) -> bool:
+        return self.status == self.Status.DRAFT
+
+    @property
+    def confidence_percent(self):
+        """Konfidenz in Prozent für die Anzeige, ``None`` wenn unbekannt."""
+        if self.confidence is None:
+            return None
+        return round(float(self.confidence) * 100)
+
+    @property
+    def has_profile(self) -> bool:
+        """True, sobald ein Steckbrief-Entwurf am Vorschlag hängt."""
+        return bool(self.payload)

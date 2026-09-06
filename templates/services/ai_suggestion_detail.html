@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}{{ suggestion.label }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<nav aria-label="Pfad" class="mb-2">
+  <a class="small" href="{% url 'services:ai_suggestion_list' %}">← Alle Vorschläge</a>
+</nav>
+
+<div class="d-flex flex-wrap justify-content-between align-items-start mb-3 gap-2">
+  <div>
+    <h1 class="h3 mb-1">{{ suggestion.label }}</h1>
+    <p class="small text-body-secondary mb-0">
+      {{ suggestion.get_kind_display }} · {{ suggestion.created_at|date:"d.m.Y H:i" }}
+      {% if suggestion.confidence_percent is not None %}
+        · Konfidenz {{ suggestion.confidence_percent }} %
+      {% endif %}
+    </p>
+  </div>
+  <span class="badge {% if suggestion.verified %}text-bg-success{% elif suggestion.is_draft %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
+    {{ suggestion.get_status_display }}
+  </span>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    {% include "services/_ai_notice.html" %}
+    {% if suggestion.reasoning %}
+      <p class="mb-0 mt-2">{{ suggestion.reasoning }}</p>
+    {% endif %}
+  </div>
+</div>
+
+{% if matches %}
+  <div class="alert alert-info" role="alert">
+    Im Katalog gibt es bereits:
+    {% for match in matches %}
+      <strong>{{ match.label }}</strong> ({{ match.status_label }}){% if not forloop.last %}, {% endif %}
+    {% endfor %}
+  </div>
+{% endif %}
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h2 class="h5 card-title">Steckbrief-Entwurf</h2>
+    {% if fields %}
+      <dl class="row mb-0">
+        {% for label, value in fields %}
+          <dt class="col-sm-4 col-lg-3 small text-body-secondary">{{ label }}</dt>
+          <dd class="col-sm-8 col-lg-9">{{ value }}</dd>
+        {% endfor %}
+      </dl>
+    {% else %}
+      <p class="text-body-secondary">
+        Noch kein Steckbrief. Claude kann die Felder vorbefüllen — geprüft werden
+        müssen sie trotzdem, Feld für Feld.
+      </p>
+      {% if suggestion.is_draft %}
+        <form method="post" action="{% url 'services:ai_suggestion_profile' suggestion.pk %}">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-outline-primary">Steckbrief entwerfen lassen</button>
+        </form>
+      {% endif %}
+    {% endif %}
+  </div>
+</div>
+
+{% if suggestion.is_draft %}
+  <div class="card">
+    <div class="card-body">
+      <h2 class="h5 card-title">Entscheidung</h2>
+      <p class="text-body-secondary">
+        Ein bestätigter Steckbrief ist für alle Nutzer sichtbar. Ein Fehler darin
+        verbreitet sich damit über alle Becken — bitte erst prüfen, dann bestätigen.
+      </p>
+      <div class="d-flex flex-wrap gap-2">
+        <form method="post" action="{% url 'services:ai_suggestion_decide' suggestion.pk 'bestaetigen' %}">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-primary">Geprüft und bestätigen</button>
+        </form>
+        <form method="post" action="{% url 'services:ai_suggestion_decide' suggestion.pk 'verwerfen' %}">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-outline-secondary">Verwerfen</button>
+        </form>
+      </div>
+    </div>
+  </div>
+{% elif suggestion.verified %}
+  <div class="card">
+    <div class="card-body">
+      <p class="mb-0">
+        Bestätigt am {{ suggestion.decided_at|date:"d.m.Y H:i" }}.
+        {% if suggestion.catalog_ref %}
+          Im Katalog abgelegt ({{ suggestion.catalog_ref }}).
+        {% else %}
+          Der Katalog ist noch nicht angebunden — der Entwurf wandert dorthin, sobald es ihn gibt.
+        {% endif %}
+      </p>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

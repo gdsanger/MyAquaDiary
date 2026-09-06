@@ -5,6 +5,8 @@ nachgeladen (:func:`device_status`). Ein Gerät, das nicht antwortet, kostet
 damit nur einen Platzhalter im Layout und blockiert keine Seite.
 """
 
+from functools import wraps
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
@@ -12,6 +14,7 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
+from . import ai
 from . import devices as device_service
 from . import energy
 from .charts import bar_chart, power_chart, rpm_chart
@@ -24,19 +27,68 @@ from .eheim import (
     normalize_mac,
 )
 from .forms import (
+    CandidateForm,
     DeviceDiscoveryForm,
     DeviceForm,
     DevicePasswordForm,
+    IdentifyForm,
     ShellyDeviceForm,
     controls_for,
 )
-from .models import Device
+from .models import AISuggestion, Device
 from .shelly import ShellyClient, ShellyError, ShellyService
 
 #: So viele Messwerte gehen in das Verlaufsdiagramm.
 CHART_READINGS = 200
 #: So viele Protokollzeilen zeigt die Detailseite.
 EVENT_ROWS = 20
+
+#: Beschriftungen der Steckbrief-Felder. Die Schlüssel sind die Feldnamen des
+#: Katalogs (siehe services.ai.schemas), damit ein bestätigter Entwurf ohne
+#: Übersetzung dorthin wandert.
+_SHARED_LABELS = {
+    "scientific_name": "Wissenschaftlicher Name",
+    "common_name": "Deutscher Name",
+    "family": "Familie",
+    "origin": "Herkunft",
+    "difficulty": "Anspruch",
+    "temp_min_c": "Temperatur ab (°C)",
+    "temp_max_c": "Temperatur bis (°C)",
+    "ph_min": "pH ab",
+    "ph_max": "pH bis",
+    "description": "Beschreibung",
+    "care_notes": "Pflege",
+    "warning": "Warnung",
+    "uncertainties": "Unsicher",
+}
+PROFILE_LABELS = {
+    AISuggestion.Kind.ANIMAL: {
+        **_SHARED_LABELS,
+        "group": "Gruppe",
+        "size_max_cm": "Endgröße (cm)",
+        "min_tank_liters": "Mindestvolumen (l)",
+        "min_tank_length_cm": "Mindestkantenlänge (cm)",
+        "min_group_size": "Mindestgruppe",
+        "social_behavior": "Sozialverhalten",
+        "zone": "Schwimmzone",
+        "lifespan_years": "Lebenserwartung (Jahre)",
+        "gh_min": "GH ab",
+        "gh_max": "GH bis",
+        "diet": "Ernährung",
+        "compatibility_notes": "Verträglichkeit",
+    },
+    AISuggestion.Kind.PLANT: {
+        **_SHARED_LABELS,
+        "growth_form": "Wuchsform",
+        "placement": "Platzierung",
+        "growth_rate": "Wuchs",
+        "light_demand": "Licht",
+        "co2_demand": "CO2",
+        "height_min_cm": "Höhe ab (cm)",
+        "height_max_cm": "Höhe bis (cm)",
+        "propagation": "Vermehrung",
+    },
+}
 
 
 def _device(request, pk) -> Device:
@@ -349,3 +401,185 @@ def energy_overview(request):
             "has_meters": energy.metered_devices(request.user).exists(),
         },
     )
+
+
+# --------------------------------------------------------------------------
+# KI-Assistenz
+# --------------------------------------------------------------------------
+
+
+def _ai_view(view):
+    """Blendet eine KI-Seite aus, solange kein API-Key hinterlegt ist.
+
+    Kein Key heißt: die Seite existiert nicht. Das ist ehrlicher als ein
+    Formular, das erst nach dem Absenden mitteilt, dass es nicht geht — und
+    zusammen mit dem ausgeblendeten Menüpunkt sieht ein Benutzer ohne
+    KI-Konfiguration nichts davon.
+    """
+
+    @wraps(view)
+    def wrapper(request, *args, **kwargs):
+        if not ai.ai_enabled():
+            raise Http404("Die KI-Assistenz ist nicht eingerichtet")
+        return view(request, *args, **kwargs)
+
+    return login_required(wrapper)
+
+
+def _suggestion(request, pk) -> AISuggestion:
+    """Vorschlag des angemeldeten Benutzers — fremde gibt es nicht."""
+    return get_object_or_404(AISuggestion, pk=pk, user=request.user)
+
+
+@_ai_view
+@require_http_methods(["GET", "POST"])
+def ai_identify(request):
+    """Art aus einem Foto bestimmen.
+
+    Das Ergebnis ist bewusst nichts als eine Liste von Vorschlägen: erst der
+    Klick auf „Als Entwurf übernehmen“ legt etwas an, und auch das ist noch
+    kein Katalogeintrag.
+    """
+    form = IdentifyForm(request.POST or None, request.FILES or None)
+    found = None
+
+    if request.method == "POST" and form.is_valid():
+        # Auch der Fehlerfall gehört in die Ergebnisspalte und nicht in eine
+        # Meldung über der Seite: dort steht er neben dem Formular, mit dem
+        # man es gleich noch einmal versuchen kann.
+        found = ai.identify(
+            form.cleaned_data["photo"],
+            form.cleaned_data["kind"],
+            user=request.user,
+            notes=form.cleaned_data.get("notes", ""),
+        )
+
+    return render(
+        request,
+        "services/ai_identify.html",
+        {
+            "form": form,
+            "found": found,
+            "kind": form.data.get("kind", ""),
+            "budget": ai.budget_status(request.user),
+            "open_drafts": AISuggestion.objects.filter(
+                user=request.user, status=AISuggestion.Status.DRAFT
+            ).count(),
+        },
+    )
+
+
+@_ai_view
+@require_http_methods(["POST"])
+def ai_suggestion_create(request):
+    """Übernimmt einen Kandidaten der Bestimmung als Entwurf."""
+    form = CandidateForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Der Vorschlag konnte nicht übernommen werden.")
+        return redirect("services:ai_identify")
+
+    suggestion = ai.save_suggestion(
+        request.user,
+        form.cleaned_data["kind"],
+        ai.Candidate(
+            scientific_name=form.cleaned_data.get("scientific_name", ""),
+            common_name=form.cleaned_data.get("common_name", ""),
+            confidence=form.cleaned_data.get("confidence"),
+            reasoning=form.cleaned_data.get("reasoning", ""),
+        ),
+    )
+    messages.success(request, f"{suggestion.label} als Entwurf übernommen.")
+    return redirect("services:ai_suggestion_detail", pk=suggestion.pk)
+
+
+@_ai_view
+def ai_suggestion_list(request):
+    """Alle eigenen Vorschläge — offene zuerst."""
+    suggestions = AISuggestion.objects.filter(user=request.user)
+    return render(
+        request,
+        "services/ai_suggestion_list.html",
+        {
+            "drafts": suggestions.filter(status=AISuggestion.Status.DRAFT),
+            "decided": suggestions.exclude(status=AISuggestion.Status.DRAFT)[:50],
+            "budget": ai.budget_status(request.user),
+        },
+    )
+
+
+@_ai_view
+def ai_suggestion_detail(request, pk):
+    """Ein Vorschlag mit Steckbrief-Entwurf und den beiden Entscheidungen."""
+    suggestion = _suggestion(request, pk)
+    return render(
+        request,
+        "services/ai_suggestion_detail.html",
+        {
+            "suggestion": suggestion,
+            "fields": _profile_rows(suggestion),
+            "matches": ai.find_matches(
+                suggestion.kind, suggestion.scientific_name, suggestion.common_name
+            ),
+        },
+    )
+
+
+@_ai_view
+@require_http_methods(["POST"])
+def ai_suggestion_profile(request, pk):
+    """Steckbrief zu einem Vorschlag entwerfen lassen."""
+    suggestion = _suggestion(request, pk)
+    if not suggestion.is_draft:
+        raise Http404("Der Vorschlag ist bereits entschieden")
+
+    answer = ai.draft_profile(suggestion, user=request.user)
+    if answer:
+        messages.success(
+            request,
+            "Steckbrief-Entwurf erstellt. Bitte Feld für Feld prüfen — die Angaben "
+            "stammen von Claude und sind noch nicht bestätigt.",
+        )
+    else:
+        messages.error(request, answer.error)
+    return redirect("services:ai_suggestion_detail", pk=suggestion.pk)
+
+
+@_ai_view
+@require_http_methods(["POST"])
+def ai_suggestion_decide(request, pk, decision):
+    """Bestätigen oder verwerfen — der einzige Weg in den Katalog."""
+    suggestion = _suggestion(request, pk)
+    if not suggestion.is_draft:
+        raise Http404("Der Vorschlag ist bereits entschieden")
+    if decision not in ("bestaetigen", "verwerfen"):
+        raise Http404("Unbekannte Entscheidung")
+
+    if decision == "verwerfen":
+        ai.reject_suggestion(suggestion)
+        messages.info(request, f"{suggestion.label} verworfen.")
+        return redirect("services:ai_suggestion_list")
+
+    ai.confirm_suggestion(suggestion, user=request.user)
+    if suggestion.catalog_ref:
+        messages.success(request, f"{suggestion.label} ist im Katalog.")
+    else:
+        messages.success(
+            request,
+            f"{suggestion.label} bestätigt. Der Katalog ist noch nicht angebunden — "
+            "der Entwurf steht bereit und wandert dorthin, sobald es ihn gibt.",
+        )
+    return redirect("services:ai_suggestion_detail", pk=suggestion.pk)
+
+
+def _profile_rows(suggestion: AISuggestion):
+    """Steckbrief-Entwurf als beschriftete Zeilen für die Anzeige.
+
+    Ein Schlüssel ohne Beschriftung wird trotzdem angezeigt — lieber ein
+    technischer Feldname als eine verschluckte Angabe.
+    """
+    labels = PROFILE_LABELS.get(suggestion.kind, {})
+    return [
+        (labels.get(key, key), value)
+        for key, value in (suggestion.payload or {}).items()
+        if value not in (None, "", [])
+    ]

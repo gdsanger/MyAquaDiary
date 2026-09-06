@@ -1,0 +1,35 @@
+{# Verbrauch gegen Budget. Ohne Grenze (0) gibt es nichts anzuzeigen. #}
+{% if budget.monthly_limit or budget.daily_limit %}
+  <div class="card mb-3">
+    <div class="card-body py-2">
+      <p class="small text-body-secondary mb-1">Token-Verbrauch</p>
+      {% if budget.monthly_limit %}
+        <div class="d-flex justify-content-between small">
+          <span>Monat (alle Benutzer)</span>
+          <span>{{ budget.monthly_used }} / {{ budget.monthly_limit }}</span>
+        </div>
+        <div class="progress mb-2" style="height: 4px;" role="progressbar"
+             aria-label="Monatsbudget" aria-valuenow="{{ budget.monthly_percent }}"
+             aria-valuemin="0" aria-valuemax="100">
+          <div class="progress-bar{% if budget.monthly_exceeded %} bg-danger{% endif %}"
+               style="width: {{ budget.monthly_percent }}%"></div>
+        </div>
+      {% endif %}
+      {% if budget.daily_limit %}
+        <div class="d-flex justify-content-between small">
+          <span>Heute (du)</span>
+          <span>{{ budget.daily_used }} / {{ budget.daily_limit }}</span>
+        </div>
+        <div class="progress" style="height: 4px;" role="progressbar"
+             aria-label="Tageslimit" aria-valuenow="{{ budget.daily_percent }}"
+             aria-valuemin="0" aria-valuemax="100">
+          <div class="progress-bar{% if budget.daily_exceeded %} bg-danger{% endif %}"
+               style="width: {{ budget.daily_percent }}%"></div>
+        </div>
+      {% endif %}
+      {% if budget.message %}
+        <p class="small text-danger mb-0 mt-2">{{ budget.message }}</p>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}

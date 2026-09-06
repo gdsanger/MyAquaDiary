@@ -63,6 +63,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "services.context_processors.ai_status",
             ],
         },
     },
@@ -131,6 +132,24 @@ SHELLY_TIMEOUT = env.int("SHELLY_TIMEOUT", default=5)
 # Arbeitspreis je Kilowattstunde für die Verbrauchsauswertung. Reine
 # Anzeigehilfe: gespeichert werden Kilowattstunden, keine Beträge.
 ENERGY_PRICE_PER_KWH = env("ENERGY_PRICE_PER_KWH", default="0.35")
+
+# Startwerte für die AIConfig-Singleton (Anthropic Claude). Ohne API-Key sind
+# sämtliche KI-Funktionen ausgeblendet, die Anwendung läuft normal weiter.
+# Ein im Admin gepflegter Datensatz hat Vorrang.
+ANTHROPIC = {
+    "API_KEY": env("ANTHROPIC_API_KEY", default=""),
+    "MODEL": env("ANTHROPIC_MODEL", default="claude-opus-5"),
+}
+
+# Längste Bildkante, auf die ein Foto vor dem Versand an Claude gerechnet wird.
+# Bilder sind der teure Teil der Bilderkennung; 1024 px reichen für eine
+# Artbestimmung und kosten einen Bruchteil der Token eines Originalfotos.
+AI_IMAGE_MAX_EDGE = env.int("AI_IMAGE_MAX_EDGE", default=1024)
+
+# Timeout (Sekunden) für einen Aufruf der Claude-API. Großzügiger als bei den
+# Geräten im LAN: hier denkt ein Modell nach, und der Aufruf passiert bewusst
+# nur auf ausdrückliche Anforderung des Benutzers.
+AI_TIMEOUT = env.int("AI_TIMEOUT", default=120)
 
 # Basis-URL für absolute Links in Mails (Mails haben keinen Request-Kontext).
 SITE_URL = env("SITE_URL", default="http://localhost:8000")
