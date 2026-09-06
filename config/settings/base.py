@@ -154,6 +154,18 @@ AI_TIMEOUT = env.int("AI_TIMEOUT", default=120)
 # Basis-URL für absolute Links in Mails (Mails haben keinen Request-Kontext).
 SITE_URL = env("SITE_URL", default="http://localhost:8000")
 
+# Aufrufe je MCP-Token und Minute. Schützt vor einem fehlkonfigurierten Client,
+# der in einer Schleife schreibt. 0 schaltet die Prüfung ab.
+MCP_RATE_LIMIT_PER_MINUTE = env.int("MCP_RATE_LIMIT_PER_MINUTE", default=60)
+
+# Abstand der Keep-alive-Zeilen im SSE-Strom. Kurz genug, dass kein Proxy die
+# ruhige Verbindung für tot hält.
+MCP_KEEPALIVE_SECONDS = env.int("MCP_KEEPALIVE_SECONDS", default=15)
+
+# So lange darf eine SSE-Sitzung ohne Lebenszeichen im Speicher liegen, bevor
+# sie beim nächsten Verbindungsaufbau aufgeräumt wird.
+MCP_SESSION_IDLE_TIMEOUT = env.int("MCP_SESSION_IDLE_TIMEOUT", default=3600)
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
