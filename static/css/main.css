@@ -1,0 +1,58 @@
+/*
+ * MyAquaDiary — Light-Mode-Farbpalette.
+ * Anwendung ist bewusst Light-Mode-only: das Farbschema wird hier fest
+ * verdrahtet statt der Systemeinstellung des Betriebssystems zu folgen.
+ */
+:root,
+[data-bs-theme="light"] {
+  --mad-primary: #0f7a8c;
+  --mad-primary-dark: #0b5a68;
+  --mad-secondary: #3fa7d6;
+  --mad-accent: #8bc5a5;
+  --mad-bg: #f5fafb;
+  --mad-surface: #ffffff;
+  --mad-border: #dceaee;
+  --mad-text: #1b2b2e;
+  --mad-muted: #5b7278;
+  --mad-success: #4caf7d;
+  --mad-warning: #e0a62b;
+  --mad-danger: #d2483b;
+
+  --bs-body-bg: var(--mad-bg);
+  --bs-body-color: var(--mad-text);
+  --bs-border-color: var(--mad-border);
+  --bs-secondary-color: var(--mad-muted);
+
+  --bs-primary: var(--mad-primary);
+  --bs-primary-rgb: 15, 122, 140;
+  --bs-link-color: var(--mad-primary);
+  --bs-link-color-rgb: 15, 122, 140;
+  --bs-link-hover-color: var(--mad-primary-dark);
+  --bs-link-hover-color-rgb: 11, 90, 104;
+
+  --bs-success: var(--mad-success);
+  --bs-warning: var(--mad-warning);
+  --bs-danger: var(--mad-danger);
+}
+
+body {
+  background-color: var(--mad-bg);
+}
+
+.navbar-brand {
+  color: var(--mad-primary) !important;
+  font-weight: 600;
+}
+
+.btn-primary {
+  --bs-btn-bg: var(--mad-primary);
+  --bs-btn-border-color: var(--mad-primary);
+  --bs-btn-hover-bg: var(--mad-primary-dark);
+  --bs-btn-hover-border-color: var(--mad-primary-dark);
+  --bs-btn-active-bg: var(--mad-primary-dark);
+  --bs-btn-active-border-color: var(--mad-primary-dark);
+}
+
+.card {
+  border-color: var(--mad-border);
+}
