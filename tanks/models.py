@@ -135,6 +135,25 @@ class Tank(models.Model):
         return self.dissolved_on is not None
 
     @property
+    def has_history(self):
+        """Hängt am Becken etwas Erfasstes?
+
+        Entscheidet darüber, ob es gelöscht oder aufgelöst wird: Löschen ist
+        für den Fehlgriff beim Anlegen da, alles andere hat eine Geschichte,
+        die niemand versehentlich wegwerfen können soll.
+        """
+        related = [
+            self.measurements,
+            self.events,
+            self.stockings,
+            self.plantings,
+            self.tasks,
+            self.devices,
+            self.photos,
+        ]
+        return any(manager.exists() for manager in related)
+
+    @property
     def accent_class(self):
         """CSS-Klasse der Farbkennung — die Farbe selbst steht im Stylesheet."""
         return f"mad-tank-accent-{self.accent}"
@@ -221,6 +240,11 @@ class TankParameterTarget(models.Model):
 
     def __str__(self):
         return f"{self.tank} · {self.parameter}"
+
+    @property
+    def range_label(self):
+        """Zielbereich als Text — Templates rufen keine Methoden mit Argumenten."""
+        return self.parameter.format_range(self.minimum, self.maximum)
 
 
 def classify_value(value, minimum, maximum):

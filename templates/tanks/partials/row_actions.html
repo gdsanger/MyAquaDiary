@@ -1,0 +1,17 @@
+{% comment %}
+Aktionen einer Zeile. Erwartet `edit_url` und optional `second_url` mit
+`second_label` (Löschen, Abgang buchen, Deaktivieren).
+
+Jede Aktion ist ein Link mit href: ohne JavaScript führt er auf die
+Beckenseite mit geöffnetem Formular, mit HTMX tauscht er nur den Reiter.
+{% endcomment %}
+<div class="mad-actions">
+  {% if edit_url %}
+    <a class="btn btn-outline-secondary btn-sm" href="{{ edit_url }}"
+       hx-get="{{ edit_url }}" hx-target="#tab-area" hx-swap="outerHTML">{{ edit_label|default:"Bearbeiten" }}</a>
+  {% endif %}
+  {% if second_url %}
+    <a class="btn btn-outline-secondary btn-sm" href="{{ second_url }}"
+       hx-get="{{ second_url }}" hx-target="#tab-area" hx-swap="outerHTML">{{ second_label|default:"Löschen" }}</a>
+  {% endif %}
+</div>

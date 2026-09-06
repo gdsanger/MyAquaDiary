@@ -5,6 +5,8 @@ from datetime import datetime, time
 from django import forms
 from django.utils import timezone
 
+from core.forms import BootstrapMixin
+
 from .eheim import DEFAULT_PASSWORD, DEFAULT_USERNAME
 from .models import AIConfig, AISuggestion, Device, MailConfig, MCPToken
 from .shelly import GEN2_USERNAME
@@ -80,25 +82,6 @@ class AIConfigForm(forms.ModelForm):
         if not value and self.instance.pk:
             return self.instance.api_key
         return value
-
-
-class BootstrapMixin:
-    """Setzt die Bootstrap-Klassen auf allen Widgets.
-
-    Die Anwendung nutzt Bootstrap 5.3 ohne crispy-forms; die Klassen einmal
-    hier zu setzen ist weniger Wiederholung als in jedem Template.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        for field in self.fields.values():
-            widget = field.widget
-            if isinstance(widget, forms.CheckboxInput):
-                widget.attrs.setdefault("class", "form-check-input")
-            elif isinstance(widget, forms.Select):
-                widget.attrs.setdefault("class", "form-select")
-            else:
-                widget.attrs.setdefault("class", "form-control")
 
 
 DEFAULT_PASSWORD_HINT = (

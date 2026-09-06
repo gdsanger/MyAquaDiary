@@ -1,5 +1,10 @@
 <section class="mad-card">
-  <div class="mad-card__header"><h2 class="mad-card__title">Galerie</h2></div>
+  <div class="mad-card__header">
+    <h2 class="mad-card__title">Galerie</h2>
+    <a class="btn btn-primary btn-sm" href="{% url 'tanks:photo-create' tank.slug %}"
+       hx-get="{% url 'tanks:photo-create' tank.slug %}"
+       hx-target="#tab-area" hx-swap="outerHTML">Fotos hochladen</a>
+  </div>
   <div class="mad-card__body">
     {% if photos %}
       <div class="mad-gallery">
@@ -10,6 +15,9 @@
             <figcaption class="mad-list__meta mt-1">
               {{ photo.taken_on|date:"d.m.Y" }}{% if photo.caption %} · {{ photo.caption }}{% endif %}
             </figcaption>
+            {% url 'tanks:photo-update' tank.slug photo.pk as edit_url %}
+            {% url 'tanks:photo-delete' tank.slug photo.pk as delete_url %}
+            {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=delete_url edit_label="Unterschrift" %}
           </figure>
         {% endfor %}
       </div>

@@ -8,7 +8,14 @@
     <h1 class="mad-page-title">{{ species.display_name }}</h1>
     <p class="mad-page-subtitle"><i>{{ species.scientific_name }}</i></p>
   </div>
-  <a href="{% url 'catalog:plant-list' %}" class="btn btn-outline-secondary btn-sm">Zurück zum Katalog</a>
+  <div class="mad-actions">
+    <a href="{% url 'catalog:plant-list' %}" class="btn btn-outline-secondary btn-sm">Zurück zum Katalog</a>
+    {# Ohne Pflegerecht gibt es diese Schaltflächen nicht. #}
+    {% if can_edit_catalog %}
+      <a href="{{ edit_url }}" class="btn btn-outline-secondary btn-sm">Bearbeiten</a>
+      <a href="{{ delete_url }}" class="btn btn-outline-secondary btn-sm">Löschen</a>
+    {% endif %}
+  </div>
 </div>
 
 <div class="row g-4">

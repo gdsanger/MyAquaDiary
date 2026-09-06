@@ -8,6 +8,9 @@
     <h1 class="mad-page-title">Pflanzen</h1>
     <p class="mad-page-subtitle">Katalog aller erfassten Pflanzenarten</p>
   </div>
+  {% if can_edit_catalog %}
+    <a href="{{ create_url }}" class="btn btn-primary btn-sm">Pflanzenart anlegen</a>
+  {% endif %}
 </div>
 
 {% include "catalog/partials/filters.html" %}

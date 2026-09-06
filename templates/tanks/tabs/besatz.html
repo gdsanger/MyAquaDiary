@@ -1,5 +1,10 @@
 <section class="mad-card">
-  <div class="mad-card__header"><h2 class="mad-card__title">Besatz</h2></div>
+  <div class="mad-card__header">
+    <h2 class="mad-card__title">Besatz</h2>
+    <a class="btn btn-primary btn-sm" href="{% url 'tanks:stocking-create' tank.slug %}"
+       hx-get="{% url 'tanks:stocking-create' tank.slug %}"
+       hx-target="#tab-area" hx-swap="outerHTML">Besatz einsetzen</a>
+  </div>
   <ul class="mad-list">
     {% for stocking in stockings %}
       <li>
@@ -23,6 +28,17 @@
             </span>
           {% else %}
             <span class="mad-status mad-status--ok">Gruppengröße in Ordnung</span>
+          {% endif %}
+          {% comment %}
+          Kein Löschen: dass hier einmal Tiere schwammen, gehört zur
+          Beckengeschichte. Weg sind sie über den gebuchten Abgang.
+          {% endcomment %}
+          {% url 'tanks:stocking-update' tank.slug stocking.pk as edit_url %}
+          {% if stocking.is_active %}
+            {% url 'tanks:stocking-remove' tank.slug stocking.pk as remove_url %}
+            {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=remove_url second_label="Abgang buchen" %}
+          {% else %}
+            {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url="" %}
           {% endif %}
         </div>
       </li>

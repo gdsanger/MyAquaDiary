@@ -8,6 +8,7 @@
     <h1 class="mad-page-title">Becken</h1>
     <p class="mad-page-subtitle">{{ active_tanks|length }} aktive Becken</p>
   </div>
+  <a href="{% url 'tanks:create' %}" class="btn btn-primary btn-sm">Becken anlegen</a>
 </div>
 
 {% if active_tanks %}
@@ -18,7 +19,10 @@
   </div>
 {% else %}
   <div class="mad-card">
-    <p class="mad-empty mb-0">Noch kein Becken angelegt.</p>
+    <p class="mad-empty mb-0">
+      Noch kein Becken angelegt.
+      <a href="{% url 'tanks:create' %}">Jetzt das erste Becken anlegen.</a>
+    </p>
   </div>
 {% endif %}
 

@@ -223,6 +223,7 @@ h1, h2, h3, h4, h5, h6 {
 
 .mad-card__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
   gap: 0.5rem;
@@ -708,6 +709,72 @@ h1, h2, h3, h4, h5, h6 {
   min-width: 0;
 }
 
+/*
+ * Aktionen einer Zeile oder eines Kartenkopfs. Umbricht statt zu ueberlaufen —
+ * auf 375 px stehen „Bearbeiten" und „Loeschen" sonst nebeneinander im Nichts.
+ */
+.mad-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Formular, das direkt in einer Karte steht (Zielbereiche am Becken). */
+.mad-inline-form {
+  border-top: 1px solid var(--mad-border);
+  padding-top: 1rem;
+  margin-top: 0.25rem;
+}
+
+/* ---------------------------------------------------------- Formular-Overlay */
+
+/*
+ * Erfassen und Rueckfragen liegen als Overlay ueber dem Reiterbereich. Ohne
+ * JavaScript: das Overlay ist Teil der Antwort, und der naechste Reiterwechsel
+ * ersetzt es mitsamt seinem Container.
+ */
+.mad-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 1.5rem 1rem;
+  overflow-y: auto;
+  background-color: rgba(31, 41, 51, 0.45);
+}
+
+.mad-modal__dialog {
+  width: min(36rem, 100%);
+  background-color: var(--mad-surface);
+  border: 1px solid var(--mad-border);
+  border-radius: var(--mad-radius);
+  box-shadow: var(--mad-shadow);
+}
+
+.mad-modal__header {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--mad-border);
+}
+
+.mad-modal__body {
+  padding: 1.25rem;
+}
+
+.mad-modal__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--mad-border);
+  background-color: var(--mad-surface-sunken);
+  border-bottom-left-radius: var(--mad-radius);
+  border-bottom-right-radius: var(--mad-radius);
+}
+
 /* -------------------------------------------------------------- Buttons */
 
 .btn-primary {
@@ -834,6 +901,23 @@ h1, h2, h3, h4, h5, h6 {
 
   .mad-page-header {
     align-items: flex-start;
+  }
+
+  /* Das Overlay nutzt die volle Breite und beginnt oben — auf einem schmalen
+   * Display ist ein zentriertes Fenster mit Rand nur verschenkter Platz. */
+  .mad-modal {
+    padding: 0.75rem 0.5rem;
+  }
+
+  .mad-modal__header,
+  .mad-modal__body,
+  .mad-modal__footer {
+    padding-inline: 0.875rem;
+  }
+
+  /* Aktionen fuellen die Zeile, statt als Streifen nebeneinander zu kleben. */
+  .mad-actions .btn {
+    flex: 1 1 auto;
   }
 }
 

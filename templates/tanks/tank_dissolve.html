@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tank.name }} auflösen – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="mad-page-header">
+  <div>
+    <h1 class="mad-page-title">Becken auflösen</h1>
+    <p class="mad-page-subtitle">{{ tank.name }}</p>
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ tank.get_absolute_url }}">Abbrechen</a>
+</div>
+
+<div class="row">
+  <div class="col-12 col-lg-8">
+    <section class="mad-card">
+      <div class="mad-card__body">
+        {% if tank.is_dissolved %}
+          <p>
+            Das Becken ist seit dem {{ tank.dissolved_on|date:"d.m.Y" }} aufgelöst. Seine
+            Geschichte bleibt vollständig lesbar.
+          </p>
+          <form method="post">
+            {% csrf_token %}
+            {% include "partials/form_fields.html" %}
+            <div class="mad-actions">
+              <button type="submit" class="btn btn-primary">Datum ändern</button>
+              <button type="submit" name="reaktivieren" value="1" class="btn btn-outline-secondary">
+                Wieder in Betrieb nehmen
+              </button>
+            </div>
+          </form>
+        {% else %}
+          <p>
+            Beim Auflösen bleibt alles erhalten: Messreihen, Ereignisse, Besatz, Termine
+            und Fotos. Das Becken zählt danach nicht mehr zu den aktiven und steht in der
+            Übersicht bei den aufgelösten.
+          </p>
+          <form method="post">
+            {% csrf_token %}
+            {% include "partials/form_fields.html" %}
+            <div class="mad-actions">
+              <button type="submit" class="btn btn-primary">Becken auflösen</button>
+              <a class="btn btn-outline-secondary" href="{{ tank.get_absolute_url }}">Abbrechen</a>
+            </div>
+          </form>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

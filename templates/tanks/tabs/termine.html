@@ -1,7 +1,12 @@
 <section class="mad-card">
   <div class="mad-card__header">
     <h2 class="mad-card__title">Termine</h2>
-    <a href="{% url 'dashboard:index' %}" class="mad-muted">Quittieren auf dem Dashboard</a>
+    <div class="mad-actions">
+      <a href="{% url 'dashboard:index' %}" class="mad-muted">Quittieren auf dem Dashboard</a>
+      <a class="btn btn-primary btn-sm" href="{% url 'tanks:task-create' tank.slug %}"
+         hx-get="{% url 'tanks:task-create' tank.slug %}"
+         hx-target="#tab-area" hx-swap="outerHTML">Termin anlegen</a>
+    </div>
   </div>
   <ul class="mad-list">
     {% for task in tasks %}
@@ -20,6 +25,23 @@
             <span class="mad-status mad-status--{{ task.status_value }}">{{ task.due_label }}</span>
           {% else %}
             <span class="mad-status mad-status--ok">Abgeschlossen</span>
+          {% endif %}
+          {% comment %}
+          Termine werden deaktiviert statt gelöscht — die Quittierungen daran
+          sind der Nachweis, wann zuletzt gewartet wurde.
+          {% endcomment %}
+          {% url 'tanks:task-update' tank.slug task.pk as edit_url %}
+          {% url 'tanks:task-toggle' tank.slug task.pk as toggle_url %}
+          {% if task.is_active %}
+            {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=toggle_url second_label="Deaktivieren" %}
+          {% else %}
+            <form method="post" action="{{ toggle_url }}" class="mad-actions"
+                  hx-post="{{ toggle_url }}" hx-target="#tab-area" hx-swap="outerHTML">
+              {% csrf_token %}
+              <a class="btn btn-outline-secondary btn-sm" href="{{ edit_url }}"
+                 hx-get="{{ edit_url }}" hx-target="#tab-area" hx-swap="outerHTML">Bearbeiten</a>
+              <button type="submit" class="btn btn-outline-secondary btn-sm">Aktivieren</button>
+            </form>
           {% endif %}
         </div>
       </li>

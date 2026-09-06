@@ -14,7 +14,7 @@
       <div class="card-body">
         <form method="post">
           {% csrf_token %}
-          {% include "services/_form_fields.html" %}
+          {% include "partials/form_fields.html" %}
           <button type="submit" class="btn btn-primary">Speichern</button>
           <a class="btn btn-outline-secondary" href="{% url 'services:device_detail' device.pk %}">Abbrechen</a>
         </form>

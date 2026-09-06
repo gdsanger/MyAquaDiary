@@ -15,7 +15,7 @@
         <form method="post" action="{% url 'services:device_control' device.pk action %}">
           {% csrf_token %}
           {% if form %}
-            {% include "services/_form_fields.html" %}
+            {% include "partials/form_fields.html" %}
           {% else %}
             <p>Soll <strong>{{ device.name }}</strong> {{ label|lower }}?</p>
           {% endif %}
