@@ -108,7 +108,9 @@ class IdentifyPageTests(AIViewTestCase):
         self.assertTrue(identify.called)
 
     def test_reports_a_failure_without_crashing(self):
-        failed = ai.Identification(ok=False, error="Anthropic war nicht erreichbar.")
+        failed = ai.Identification(
+            ok=False, error="Anthropic war nicht erreichbar.", image_notes="Zu unscharf."
+        )
         with patch("services.views.ai.identify", return_value=failed):
             response = self.client.post(
                 reverse("services:ai_identify"),
@@ -117,6 +119,11 @@ class IdentifyPageTests(AIViewTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Anthropic war nicht erreichbar.")
+        # Der Hinweis zum Foto steht in der Ergebniskarte, nicht nur in der
+        # Meldung — das Ergebnisobjekt ist falsy und darf die Karte nicht
+        # verschlucken.
+        self.assertContains(response, "Zu unscharf.")
+        self.assertNotContains(response, "Als Entwurf übernehmen")
 
     def test_shows_the_budget(self):
         response = self.client.get(reverse("services:ai_identify"))

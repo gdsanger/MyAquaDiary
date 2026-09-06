@@ -31,7 +31,9 @@
   </div>
 
   <div class="col-12 col-lg-7">
-    {% if found and found.ok %}
+    {# Auf .ok prüfen, nicht auf found: das Ergebnisobjekt ist selbst falsy,
+       wenn die Bestimmung gescheitert ist. #}
+    {% if found.ok %}
       <div class="card mb-3">
         <div class="card-body">
           {% include "services/_ai_notice.html" %}
@@ -80,7 +82,7 @@
           </div>
         </div>
       {% endfor %}
-    {% elif found %}
+    {% elif found.error %}
       <div class="card">
         <div class="card-body">
           <p class="mb-0">{{ found.error }}</p>
