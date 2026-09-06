@@ -1,0 +1,28 @@
+<tr id="target-row-{{ parameter.id }}">
+  <td>
+    {{ parameter.name }}
+    {% if parameter.unit %}<span class="text-body-secondary small">({{ parameter.unit }})</span>{% endif %}
+  </td>
+  <td>{{ form.minimum }}</td>
+  <td>{{ form.target }}</td>
+  <td>{{ form.maximum }}</td>
+  <td class="text-nowrap">
+    {% csrf_token %}
+    {% if form.errors %}
+      <div class="text-danger small">{{ form.errors|striptags }}</div>
+    {% endif %}
+    <button type="button" class="btn btn-primary btn-sm"
+            hx-post="{% url 'tanks:target-edit' tank.slug parameter.id %}"
+            hx-include="closest tr"
+            hx-target="#target-row-{{ parameter.id }}"
+            hx-swap="outerHTML">
+      Speichern
+    </button>
+    <button type="button" class="btn btn-outline-secondary btn-sm"
+            hx-get="{% url 'tanks:target-detail' tank.slug parameter.id %}"
+            hx-target="#target-row-{{ parameter.id }}"
+            hx-swap="outerHTML">
+      Abbrechen
+    </button>
+  </td>
+</tr>

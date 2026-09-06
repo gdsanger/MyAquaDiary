@@ -3,8 +3,101 @@
 {% block title %}{{ tank.name }} – MyAquaDiary{% endblock %}
 
 {% block content %}
-<h1 class="h3 mb-3">{{ tank.name }}</h1>
-{% if tank.volume_liters %}
-  <p class="text-body-secondary">{{ tank.volume_liters }} l</p>
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h3 mb-1">
+      {{ tank.name }}
+      {% if tank.is_dissolved %}<span class="badge text-bg-secondary">Aufgelöst</span>{% endif %}
+    </h1>
+    {% if tank.model_name %}
+      <p class="text-body-secondary mb-0">{{ tank.model_name }}</p>
+    {% endif %}
+  </div>
+  <div class="text-nowrap">
+    <a href="{% url 'tanks:update' tank.slug %}" class="btn btn-outline-secondary btn-sm">Bearbeiten</a>
+    <a href="{% url 'tanks:delete' tank.slug %}" class="btn btn-outline-danger btn-sm">Löschen</a>
+  </div>
+</div>
+
+{% if tank.photos.all %}
+  <div class="row row-cols-2 row-cols-md-4 g-2 mb-4">
+    {% for photo in tank.photos.all %}
+      <div class="col">
+        <figure class="mb-0">
+          <img src="{{ photo.image.url }}" class="img-fluid rounded {% if photo.pk == tank.cover_photo_id %}border border-primary{% endif %}" alt="{{ photo.caption|default:tank.name }}">
+          {% if photo.caption %}
+            <figcaption class="small text-body-secondary">{{ photo.caption }}</figcaption>
+          {% endif %}
+        </figure>
+      </div>
+    {% endfor %}
+  </div>
 {% endif %}
+
+<h2 class="h5">Stammdaten</h2>
+<dl class="row">
+  <dt class="col-sm-3">Wassertyp</dt><dd class="col-sm-9">{{ tank.get_water_type_display }}</dd>
+  {% if tank.biotope %}
+    <dt class="col-sm-3">Biotop</dt><dd class="col-sm-9">{{ tank.biotope }}</dd>
+  {% endif %}
+  {% if tank.length_cm or tank.height_cm or tank.depth_cm %}
+    <dt class="col-sm-3">Maße (L×H×T)</dt>
+    <dd class="col-sm-9">{{ tank.length_cm|default:"?" }}×{{ tank.height_cm|default:"?" }}×{{ tank.depth_cm|default:"?" }} cm</dd>
+  {% endif %}
+  {% if tank.volume_gross_l %}
+    <dt class="col-sm-3">Bruttovolumen</dt><dd class="col-sm-9">{{ tank.volume_gross_l }} l</dd>
+  {% endif %}
+  {% if tank.volume_net_l %}
+    <dt class="col-sm-3">Nettovolumen</dt><dd class="col-sm-9">{{ tank.volume_net_l }} l</dd>
+  {% endif %}
+  <dt class="col-sm-3">Inbetriebnahme</dt><dd class="col-sm-9">{{ tank.started_on }}</dd>
+  {% if tank.shut_down_on %}
+    <dt class="col-sm-3">Auflösung</dt><dd class="col-sm-9">{{ tank.shut_down_on }}</dd>
+  {% endif %}
+</dl>
+
+{% if tank.description %}
+  <h2 class="h5">Beschreibung</h2>
+  <p>{{ tank.description|linebreaksbr }}</p>
+{% endif %}
+
+<h2 class="h5">Technik</h2>
+<dl class="row">
+  {% if tank.substrate %}
+    <dt class="col-sm-3">Bodengrund</dt><dd class="col-sm-9">{{ tank.substrate|linebreaksbr }}</dd>
+  {% endif %}
+  {% if tank.hardscape %}
+    <dt class="col-sm-3">Hardscape</dt><dd class="col-sm-9">{{ tank.hardscape|linebreaksbr }}</dd>
+  {% endif %}
+  {% if tank.filtration %}
+    <dt class="col-sm-3">Filterung</dt><dd class="col-sm-9">{{ tank.filtration|linebreaksbr }}</dd>
+  {% endif %}
+  {% if tank.lighting %}
+    <dt class="col-sm-3">Beleuchtung</dt><dd class="col-sm-9">{{ tank.lighting|linebreaksbr }}</dd>
+  {% endif %}
+  {% if tank.co2 %}
+    <dt class="col-sm-3">CO2</dt><dd class="col-sm-9">{{ tank.co2|linebreaksbr }}</dd>
+  {% endif %}
+  {% if tank.fertilization %}
+    <dt class="col-sm-3">Düngung</dt><dd class="col-sm-9">{{ tank.fertilization|linebreaksbr }}</dd>
+  {% endif %}
+</dl>
+
+<h2 class="h5">Zielbereiche</h2>
+<table class="table table-sm align-middle">
+  <thead>
+    <tr>
+      <th>Parameter</th>
+      <th>Minimum</th>
+      <th>Ziel</th>
+      <th>Maximum</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in parameter_rows %}
+      {% include "tanks/_parameter_target_row.html" with parameter=row.parameter target=row.target %}
+    {% endfor %}
+  </tbody>
+</table>
 {% endblock %}

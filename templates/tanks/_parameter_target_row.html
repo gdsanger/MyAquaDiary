@@ -1,0 +1,17 @@
+<tr id="target-row-{{ parameter.id }}">
+  <td>
+    {{ parameter.name }}
+    {% if parameter.unit %}<span class="text-body-secondary small">({{ parameter.unit }})</span>{% endif %}
+  </td>
+  <td>{{ target.minimum|default:"–" }}</td>
+  <td>{{ target.target|default:"–" }}</td>
+  <td>{{ target.maximum|default:"–" }}</td>
+  <td>
+    <button type="button" class="btn btn-outline-secondary btn-sm"
+            hx-get="{% url 'tanks:target-edit' tank.slug parameter.id %}"
+            hx-target="#target-row-{{ parameter.id }}"
+            hx-swap="outerHTML">
+      Bearbeiten
+    </button>
+  </td>
+</tr>
