@@ -1,58 +1,845 @@
 /*
- * MyAquaDiary — Light-Mode-Farbpalette.
- * Anwendung ist bewusst Light-Mode-only: das Farbschema wird hier fest
- * verdrahtet statt der Systemeinstellung des Betriebssystems zu folgen.
+ * MyAquaDiary — Farbkonzept und Basiskomponenten.
+ *
+ * Die Anwendung ist bewusst Light-Mode-only: es gibt keinen Umschalter und
+ * keinen `prefers-color-scheme`-Zweig. Das Farbschema ist hier fest verdrahtet.
+ *
+ * Alle Farben sind ausschliesslich hier als CSS-Variablen definiert. Templates
+ * verwenden Klassen bzw. Variablen, niemals Hex-Werte.
+ *
+ * Farbe traegt Bedeutung:
+ *   gruen   = Wert im Zielbereich / erledigt
+ *   orange  = Abweichung / faellig
+ *   rot     = kritisch / ueberfaellig / Fehler
+ * Diese Zuordnung gilt ueberall gleich. Becken- und Wassertyp-Markierungen
+ * verwenden deshalb ausschliesslich kuehle Toene, damit sie nicht mit den
+ * Statusfarben verwechselt werden koennen.
  */
+
 :root,
 [data-bs-theme="light"] {
-  --mad-primary: #0f7a8c;
-  --mad-primary-dark: #0b5a68;
-  --mad-secondary: #3fa7d6;
-  --mad-accent: #8bc5a5;
-  --mad-bg: #f5fafb;
-  --mad-surface: #ffffff;
-  --mad-border: #dceaee;
-  --mad-text: #1b2b2e;
-  --mad-muted: #5b7278;
-  --mad-success: #4caf7d;
-  --mad-warning: #e0a62b;
-  --mad-danger: #d2483b;
+  color-scheme: light;
 
+  /* --- Basispalette ------------------------------------------------- */
+  --mad-primary: #1b6b8c;          /* Wasser / Tiefe */
+  --mad-secondary: #3e8e5a;        /* Pflanzen */
+  --mad-accent: #d98a2b;           /* Warnung */
+  --mad-danger: #c4523e;           /* Fehler */
+  --mad-bg: #f7f9fa;               /* Hintergrund */
+  --mad-surface: #ffffff;          /* Karten */
+  --mad-text: #1f2933;             /* Text */
+  --mad-text-muted: #5c6b73;       /* Sekundaertext */
+
+  /* --- Abgeleitete Toene --------------------------------------------
+   * *-strong: abgedunkelt, damit Text auf hellem Grund WCAG AA (4.5:1)
+   *           erreicht. Die Basistoene selbst sind dafuer zu hell.
+   * *-tint:   Flaechenfarbe fuer Badges, Hinweisboxen, Tabellenzeilen.
+   */
+  --mad-primary-strong: #14526c;
+  --mad-primary-tint: #e8f1f5;
+  --mad-secondary-strong: #2b6f47;
+  --mad-secondary-tint: #eaf4ee;
+  --mad-accent-strong: #8f5210;
+  --mad-accent-tint: #fbf0e1;
+  --mad-danger-strong: #a13525;
+  --mad-danger-tint: #faeae7;
+
+  --mad-border: #dce3e7;
+  /* Begrenzungen bedienbarer Elemente (Eingaben, Outline-Buttons) — dunkel
+   * genug fuer die 3:1-Anforderung aus WCAG 1.4.11. */
+  --mad-border-strong: #818c92;
+  --mad-surface-sunken: #eef2f4;
+  --mad-shadow: 0 1px 2px rgba(31, 41, 51, 0.06), 0 1px 8px rgba(31, 41, 51, 0.04);
+
+  /* --- Semantik: Messwert- und Terminstatus --------------------------- */
+  --mad-status-ok: var(--mad-secondary);
+  --mad-status-ok-text: var(--mad-secondary-strong);
+  --mad-status-ok-tint: var(--mad-secondary-tint);
+  --mad-status-warn: var(--mad-accent);
+  --mad-status-warn-text: var(--mad-accent-strong);
+  --mad-status-warn-tint: var(--mad-accent-tint);
+  --mad-status-critical: var(--mad-danger);
+  --mad-status-critical-text: var(--mad-danger-strong);
+  --mad-status-critical-tint: var(--mad-danger-tint);
+  --mad-status-neutral: var(--mad-border-strong);
+  --mad-status-neutral-text: var(--mad-text-muted);
+  --mad-status-neutral-tint: var(--mad-surface-sunken);
+
+  /* --- Semantik: Wassertyp (kuehle Toene, nie Statusfarben) ----------- */
+  --mad-water-fresh: #1b6b8c;
+  --mad-water-brackish: #4a6572;
+  --mad-water-marine: #34478c;
+
+  /* --- Beckenmarkierung: 8 unterscheidbare, kuehle Kennfarben --------- */
+  --mad-tank-1: #1b6b8c;
+  --mad-tank-2: #2e7d7a;
+  --mad-tank-3: #34478c;
+  --mad-tank-4: #55519b;
+  --mad-tank-5: #6b4c8c;
+  --mad-tank-6: #8c4c7a;
+  --mad-tank-7: #4a6572;
+  --mad-tank-8: #1f5e6e;
+
+  /* --- Typografie und Raster ----------------------------------------- */
+  --mad-radius: 10px;
+  --mad-radius-sm: 6px;
+  --mad-gap: 1rem;
+
+  /* --- Bootstrap-Anbindung -------------------------------------------
+   * Nur die Variablen, die Bootstrap 5.3 zur Laufzeit auswertet.
+   */
   --bs-body-bg: var(--mad-bg);
   --bs-body-color: var(--mad-text);
+  --bs-body-font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --bs-border-color: var(--mad-border);
-  --bs-secondary-color: var(--mad-muted);
+  --bs-border-radius: var(--mad-radius);
+  --bs-secondary-color: var(--mad-text-muted);
+  --bs-emphasis-color: var(--mad-text);
+  --bs-heading-color: var(--mad-text);
 
   --bs-primary: var(--mad-primary);
-  --bs-primary-rgb: 15, 122, 140;
-  --bs-link-color: var(--mad-primary);
-  --bs-link-color-rgb: 15, 122, 140;
-  --bs-link-hover-color: var(--mad-primary-dark);
-  --bs-link-hover-color-rgb: 11, 90, 104;
-
-  --bs-success: var(--mad-success);
-  --bs-warning: var(--mad-warning);
+  --bs-primary-rgb: 27, 107, 140;
+  --bs-success: var(--mad-secondary);
+  --bs-success-rgb: 62, 142, 90;
+  --bs-warning: var(--mad-accent);
+  --bs-warning-rgb: 217, 138, 43;
   --bs-danger: var(--mad-danger);
+  --bs-danger-rgb: 196, 82, 62;
+
+  --bs-link-color: var(--mad-primary-strong);
+  --bs-link-color-rgb: 20, 82, 108;
+  --bs-link-hover-color: var(--mad-primary);
+  --bs-link-hover-color-rgb: 27, 107, 140;
+  --bs-focus-ring-color: rgba(27, 107, 140, 0.35);
 }
+
+/* ---------------------------------------------------------------- Basis */
 
 body {
   background-color: var(--mad-bg);
+  color: var(--mad-text);
 }
 
-.navbar-brand {
-  color: var(--mad-primary) !important;
+h1, h2, h3, h4, h5, h6 {
+  color: var(--mad-text);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.mad-muted {
+  color: var(--mad-text-muted);
+}
+
+/* Sichtbarer Fokus ueberall — Tastaturbedienung am Becken und am Desktop. */
+:focus-visible {
+  outline: 2px solid var(--mad-primary);
+  outline-offset: 2px;
+  border-radius: var(--mad-radius-sm);
+}
+
+.mad-skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 1100;
+  padding: 0.5rem 1rem;
+  background: var(--mad-surface);
+  color: var(--mad-primary-strong);
+  border: 1px solid var(--mad-primary);
+  border-radius: 0 0 var(--mad-radius-sm) 0;
+}
+
+.mad-skip-link:focus {
+  left: 0;
+}
+
+/* ------------------------------------------------------------ Navigation */
+
+.mad-navbar {
+  background-color: var(--mad-surface);
+  border-bottom: 1px solid var(--mad-border);
+}
+
+.mad-navbar .navbar-brand {
+  color: var(--mad-primary-strong);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.mad-navbar .nav-link {
+  color: var(--mad-text-muted);
+  font-weight: 500;
+  border-radius: var(--mad-radius-sm);
+  padding-inline: 0.6rem;
+}
+
+.mad-navbar .nav-link:hover,
+.mad-navbar .nav-link:focus {
+  color: var(--mad-primary-strong);
+}
+
+.mad-navbar .nav-link.active {
+  color: var(--mad-primary-strong);
+  background-color: var(--mad-primary-tint);
+}
+
+/* ---------------------------------------------------------- Seitenkopf */
+
+.mad-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--mad-gap);
+  margin-bottom: 1.5rem;
+}
+
+.mad-page-header .mad-page-title {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.mad-page-header .mad-page-subtitle {
+  margin: 0.25rem 0 0;
+  color: var(--mad-text-muted);
+}
+
+.mad-section-title {
+  font-size: 1.0625rem;
+  margin: 0 0 0.75rem;
+}
+
+/* --------------------------------------------------------------- Karten */
+
+.mad-card {
+  background-color: var(--mad-surface);
+  border: 1px solid var(--mad-border);
+  border-radius: var(--mad-radius);
+  box-shadow: var(--mad-shadow);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.mad-card__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.875rem 1.125rem;
+  border-bottom: 1px solid var(--mad-border);
+}
+
+.mad-card__title {
+  margin: 0;
+  font-size: 1rem;
   font-weight: 600;
 }
+
+.mad-card__body {
+  padding: 1.125rem;
+  flex: 1 1 auto;
+}
+
+.mad-card__body--flush {
+  padding: 0;
+}
+
+.mad-card__footer {
+  padding: 0.75rem 1.125rem;
+  border-top: 1px solid var(--mad-border);
+  background-color: var(--mad-bg);
+  border-radius: 0 0 var(--mad-radius) var(--mad-radius);
+}
+
+/* ----------------------------------------------------------- KPI-Kachel */
+
+.mad-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--mad-gap);
+}
+
+.mad-kpi {
+  background-color: var(--mad-surface);
+  border: 1px solid var(--mad-border);
+  border-radius: var(--mad-radius);
+  box-shadow: var(--mad-shadow);
+  padding: 1rem 1.125rem;
+}
+
+.mad-kpi__label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--mad-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mad-kpi__value {
+  display: block;
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+  margin-top: 0.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.mad-kpi__unit {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--mad-text-muted);
+  margin-left: 0.2rem;
+}
+
+/* -------------------------------------------------------------- Status */
+
+.mad-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  background-color: var(--mad-status-neutral-tint);
+  color: var(--mad-status-neutral-text);
+  border: 1px solid transparent;
+}
+
+.mad-status::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background-color: currentColor;
+  flex: none;
+}
+
+.mad-status--ok {
+  background-color: var(--mad-status-ok-tint);
+  color: var(--mad-status-ok-text);
+}
+
+.mad-status--warn {
+  background-color: var(--mad-status-warn-tint);
+  color: var(--mad-status-warn-text);
+}
+
+.mad-status--critical {
+  background-color: var(--mad-status-critical-tint);
+  color: var(--mad-status-critical-text);
+}
+
+.mad-status--info {
+  background-color: var(--mad-primary-tint);
+  color: var(--mad-primary-strong);
+}
+
+/* Wertdarstellung mit Statusfarbe, ohne Badge-Flaeche. */
+.mad-value--ok { color: var(--mad-status-ok-text); }
+.mad-value--warn { color: var(--mad-status-warn-text); }
+.mad-value--critical { color: var(--mad-status-critical-text); }
+
+.mad-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* Hinweisleisten (Warnungen) — farbige Kante links, getoente Flaeche. */
+.mad-alert {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 0.75rem 1rem;
+  border-radius: var(--mad-radius-sm);
+  border-left: 3px solid var(--mad-status-neutral);
+  background-color: var(--mad-status-neutral-tint);
+  color: var(--mad-text);
+}
+
+.mad-alert--warn {
+  border-left-color: var(--mad-status-warn);
+  background-color: var(--mad-status-warn-tint);
+}
+
+.mad-alert--critical {
+  border-left-color: var(--mad-status-critical);
+  background-color: var(--mad-status-critical-tint);
+}
+
+.mad-alert--ok {
+  border-left-color: var(--mad-status-ok);
+  background-color: var(--mad-status-ok-tint);
+}
+
+.mad-alert__title {
+  font-weight: 600;
+  margin: 0;
+}
+
+.mad-alert__meta {
+  margin: 0.15rem 0 0;
+  font-size: 0.875rem;
+  color: var(--mad-text-muted);
+}
+
+/* --------------------------------------------------- Beckenmarkierung */
+
+.mad-tank-accent-1 { --mad-tank-accent: var(--mad-tank-1); }
+.mad-tank-accent-2 { --mad-tank-accent: var(--mad-tank-2); }
+.mad-tank-accent-3 { --mad-tank-accent: var(--mad-tank-3); }
+.mad-tank-accent-4 { --mad-tank-accent: var(--mad-tank-4); }
+.mad-tank-accent-5 { --mad-tank-accent: var(--mad-tank-5); }
+.mad-tank-accent-6 { --mad-tank-accent: var(--mad-tank-6); }
+.mad-tank-accent-7 { --mad-tank-accent: var(--mad-tank-7); }
+.mad-tank-accent-8 { --mad-tank-accent: var(--mad-tank-8); }
+
+/* Farbpunkt vor einem Beckennamen (Listen, Termine, Aktivitaeten). */
+.mad-tank-dot {
+  display: inline-block;
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 50%;
+  background-color: var(--mad-tank-accent, var(--mad-primary));
+  flex: none;
+  margin-right: 0.4rem;
+  vertical-align: baseline;
+}
+
+/* Farbkante an einer Karte oder Zeile. */
+.mad-tank-edge {
+  border-left: 4px solid var(--mad-tank-accent, var(--mad-primary));
+}
+
+.mad-tank-label {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 500;
+  color: var(--mad-text);
+}
+
+/* ------------------------------------------------------------ Wassertyp */
+
+.mad-watertype {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--mad-water, var(--mad-primary-strong));
+}
+
+.mad-watertype::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 2px;
+  background-color: currentColor;
+}
+
+.mad-watertype--fresh { --mad-water: var(--mad-water-fresh); }
+.mad-watertype--brackish { --mad-water: var(--mad-water-brackish); }
+.mad-watertype--marine { --mad-water: var(--mad-water-marine); }
+
+/* ------------------------------------------------------------- Raster */
+
+.mad-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1.25rem;
+}
+
+.mad-grid--compact {
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 1rem;
+}
+
+/* ---------------------------------------------------------- Bildflaeche */
+
+.mad-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  background-color: var(--mad-surface-sunken);
+  border-radius: var(--mad-radius) var(--mad-radius) 0 0;
+}
+
+.mad-thumb--square {
+  aspect-ratio: 1 / 1;
+}
+
+/* Platzhalter, wenn kein Bild hinterlegt ist: ruhige Flaeche, kein Emoji. */
+.mad-thumb--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mad-text-muted);
+  font-size: 0.8125rem;
+  border-bottom: 1px solid var(--mad-border);
+}
+
+.mad-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+
+.mad-gallery img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: var(--mad-radius-sm);
+  border: 1px solid var(--mad-border);
+  background-color: var(--mad-surface-sunken);
+}
+
+/* --------------------------------------------------------------- Listen */
+
+.mad-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mad-list > li {
+  padding: 0.75rem 1.125rem;
+  border-bottom: 1px solid var(--mad-border);
+}
+
+.mad-list > li:last-child {
+  border-bottom: 0;
+}
+
+.mad-list__row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.mad-list__main {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.mad-list__title {
+  margin: 0;
+  font-weight: 500;
+}
+
+.mad-list__meta {
+  margin: 0.1rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--mad-text-muted);
+}
+
+.mad-empty {
+  padding: 1.5rem 1.125rem;
+  text-align: center;
+  color: var(--mad-text-muted);
+}
+
+.mad-definition {
+  display: grid;
+  grid-template-columns: minmax(8rem, 40%) 1fr;
+  gap: 0.4rem 1rem;
+  margin: 0;
+}
+
+.mad-definition dt {
+  color: var(--mad-text-muted);
+  font-weight: 500;
+}
+
+.mad-definition dd {
+  margin: 0;
+  font-weight: 500;
+}
+
+/* -------------------------------------------------------------- Tabellen */
+
+.mad-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.mad-table th,
+.mad-table td {
+  padding: 0.6rem 1.125rem;
+  border-bottom: 1px solid var(--mad-border);
+  text-align: left;
+}
+
+.mad-table th {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--mad-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background-color: var(--mad-bg);
+}
+
+.mad-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.mad-table__num {
+  text-align: right;
+}
+
+.mad-table-scroll {
+  overflow-x: auto;
+}
+
+/* ------------------------------------------------------------ Register */
+
+.mad-tabs {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--mad-border);
+  margin-bottom: 1.25rem;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mad-tabs__link {
+  flex: none;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 2px solid transparent;
+  color: var(--mad-text-muted);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.mad-tabs__link:hover {
+  color: var(--mad-primary-strong);
+}
+
+.mad-tabs__link[aria-selected="true"] {
+  color: var(--mad-primary-strong);
+  border-bottom-color: var(--mad-primary);
+}
+
+/* ------------------------------------------------------------ Diagramm */
+
+.mad-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.mad-chart__grid {
+  stroke: var(--mad-border);
+  stroke-width: 1;
+}
+
+.mad-chart__band {
+  fill: var(--mad-status-ok-tint);
+}
+
+.mad-chart__line {
+  fill: none;
+  stroke: var(--mad-primary);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.mad-chart__point {
+  fill: var(--mad-primary);
+}
+
+/* Messpunkte tragen dieselbe Statusfarbe wie Badges und Warnungen. */
+.mad-chart__point--ok { fill: var(--mad-status-ok); }
+.mad-chart__point--warn { fill: var(--mad-status-warn); }
+.mad-chart__point--critical { fill: var(--mad-status-critical); }
+
+.mad-chart__label {
+  fill: var(--mad-text-muted);
+  font-size: 10px;
+}
+
+.mad-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--mad-text-muted);
+  margin-top: 0.5rem;
+}
+
+/* ------------------------------------------------------- Formularfelder */
+
+.form-control,
+.form-select {
+  border-color: var(--mad-border-strong);
+  color: var(--mad-text);
+}
+
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--mad-primary);
+  box-shadow: 0 0 0 0.2rem var(--bs-focus-ring-color);
+}
+
+.form-label {
+  font-weight: 500;
+  color: var(--mad-text);
+}
+
+.mad-filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-bottom: 1.25rem;
+}
+
+.mad-filterbar__field {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+/* -------------------------------------------------------------- Buttons */
 
 .btn-primary {
   --bs-btn-bg: var(--mad-primary);
   --bs-btn-border-color: var(--mad-primary);
-  --bs-btn-hover-bg: var(--mad-primary-dark);
-  --bs-btn-hover-border-color: var(--mad-primary-dark);
-  --bs-btn-active-bg: var(--mad-primary-dark);
-  --bs-btn-active-border-color: var(--mad-primary-dark);
+  --bs-btn-hover-bg: var(--mad-primary-strong);
+  --bs-btn-hover-border-color: var(--mad-primary-strong);
+  --bs-btn-active-bg: var(--mad-primary-strong);
+  --bs-btn-active-border-color: var(--mad-primary-strong);
+  --bs-btn-disabled-bg: var(--mad-primary);
+  --bs-btn-disabled-border-color: var(--mad-primary);
 }
 
-.card {
-  border-color: var(--mad-border);
+.btn-outline-primary {
+  --bs-btn-color: var(--mad-primary-strong);
+  --bs-btn-border-color: var(--mad-border-strong);
+  --bs-btn-hover-bg: var(--mad-primary-tint);
+  --bs-btn-hover-color: var(--mad-primary-strong);
+  --bs-btn-hover-border-color: var(--mad-primary);
+  --bs-btn-active-bg: var(--mad-primary-tint);
+  --bs-btn-active-color: var(--mad-primary-strong);
+  --bs-btn-active-border-color: var(--mad-primary);
+}
+
+.btn-outline-secondary {
+  --bs-btn-color: var(--mad-text-muted);
+  --bs-btn-border-color: var(--mad-border-strong);
+  --bs-btn-hover-bg: var(--mad-surface-sunken);
+  --bs-btn-hover-color: var(--mad-text);
+  --bs-btn-hover-border-color: var(--mad-border-strong);
+  --bs-btn-active-bg: var(--mad-surface-sunken);
+  --bs-btn-active-color: var(--mad-text);
+  --bs-btn-active-border-color: var(--mad-border-strong);
+}
+
+/* Quittierungs-Schaltflaeche: gruen = erledigen, konsistent zur Statusfarbe. */
+.mad-btn-ack {
+  --bs-btn-color: var(--mad-status-ok-text);
+  --bs-btn-bg: var(--mad-status-ok-tint);
+  --bs-btn-border-color: var(--mad-status-ok);
+  --bs-btn-hover-color: var(--mad-surface);
+  --bs-btn-hover-bg: var(--mad-status-ok-text);
+  --bs-btn-hover-border-color: var(--mad-status-ok-text);
+  --bs-btn-active-color: var(--mad-surface);
+  --bs-btn-active-bg: var(--mad-status-ok-text);
+  --bs-btn-active-border-color: var(--mad-status-ok-text);
+}
+
+/* -------------------------------------------------- HTMX-Ladezustaende */
+
+/*
+ * Jede Dashboard-Kachel laedt eigenstaendig. Bis das Fragment da ist, steht
+ * ein ruhiger Platzhalter — keine Animation, nur ein Hinweistext.
+ */
+.mad-placeholder {
+  padding: 1.5rem 1.125rem;
+  color: var(--mad-text-muted);
+  font-size: 0.875rem;
+}
+
+.mad-placeholder__bar {
+  height: 0.75rem;
+  border-radius: var(--mad-radius-sm);
+  background-color: var(--mad-surface-sunken);
+  margin-bottom: 0.6rem;
+}
+
+.mad-placeholder__bar:last-child {
+  width: 60%;
+  margin-bottom: 0;
+}
+
+.htmx-indicator {
+  visibility: hidden;
+}
+
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+  visibility: visible;
+}
+
+.htmx-request.mad-card__body {
+  opacity: 0.6;
+}
+
+/* --------------------------------------------------------- Responsiv */
+
+/* Ab 375 px nutzbar: zwei KPI-Kacheln pro Zeile, keine horizontale Scrollbar. */
+@media (max-width: 575.98px) {
+  .mad-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+
+  .mad-kpi {
+    padding: 0.75rem 0.875rem;
+  }
+
+  .mad-kpi__value {
+    font-size: 1.375rem;
+  }
+
+  .mad-grid,
+  .mad-grid--compact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mad-card__header,
+  .mad-card__body,
+  .mad-list > li,
+  .mad-table th,
+  .mad-table td {
+    padding-inline: 0.875rem;
+  }
+
+  .mad-definition {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0 0;
+  }
+
+  .mad-definition dd {
+    margin-bottom: 0.5rem;
+  }
+
+  .mad-page-header {
+    align-items: flex-start;
+  }
+}
+
+@media print {
+  .mad-navbar,
+  .mad-tabs {
+    display: none;
+  }
 }

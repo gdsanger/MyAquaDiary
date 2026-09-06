@@ -1,0 +1,6 @@
+{% comment %}
+Beckenname mit Farbmarkierung. Die Farbe kommt ueber die Akzentklasse aus dem
+Stylesheet — im Template steht kein Farbwert.
+{% endcomment %}
+<a class="mad-tank-label {{ tank.accent_class }}" href="{{ tank.get_absolute_url }}"
+   ><span class="mad-tank-dot" aria-hidden="true"></span>{{ tank.name }}</a>
