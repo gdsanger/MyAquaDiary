@@ -20,6 +20,7 @@ from .eheim import (
     EheimError,
     EheimFirmwareTooOld,
     FIRMWARE_HINT,
+    error_text,
     is_supported_firmware,
     service_for,
 )
@@ -115,13 +116,9 @@ def check_firmware(device: Device) -> str:
 
 
 # --------------------------------------------------------------------------
-# Schreiben
+# Schreiben — welche Aktionen es gibt, steht in services.forms.CONTROL_FORMS.
+# Ein Firmware-Update ist keine davon; der Client sperrt ``/doupdate`` zudem.
 # --------------------------------------------------------------------------
-
-#: Schreibende Aktionen des classicVARIO+e. Je Aktion der Anzeigetext, die
-#: erwarteten Parameter und der Aufruf am Service. ``/doupdate`` steht hier
-#: bewusst nicht — der Client sperrt den Pfad zusätzlich.
-CLASSICVARIO_ACTIONS = ("on", "off", "manual", "bio", "pulse")
 
 
 def execute(device: Device, action: str, params: dict | None = None, *, user=None) -> CommandResult:
@@ -314,7 +311,7 @@ def warnings_for(user) -> list[DeviceWarning]:
         DeviceWarning(
             device=device,
             error_code=device.latest_error,
-            error_text=DeviceReading(error_code=device.latest_error).error_text,
+            error_text=error_text(device.latest_error),
             read_at=device.latest_read_at,
         )
         for device in devices

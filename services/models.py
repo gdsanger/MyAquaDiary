@@ -11,11 +11,11 @@ from core.fields import EncryptedTextField
 from services.eheim import (
     DEFAULT_PASSWORD,
     DEFAULT_USERNAME,
-    ERROR_LABELS,
     KIND_CLASSICVARIO,
     KIND_EHEIM_OTHER,
-    PUMP_MODE_LABELS,
+    error_text,
     is_supported_firmware,
+    mode_label,
     normalize_mac,
 )
 
@@ -306,15 +306,11 @@ class DeviceReading(models.Model):
 
     @property
     def error_text(self) -> str:
-        if self.error_code is None:
-            return ""
-        return ERROR_LABELS.get(self.error_code, f"unbekannter Fehler ({self.error_code})")
+        return error_text(self.error_code)
 
     @property
     def mode_label(self) -> str:
-        if self.pump_mode is None:
-            return ""
-        return PUMP_MODE_LABELS.get(self.pump_mode, f"unbekannter Modus ({self.pump_mode})")
+        return mode_label(self.pump_mode)
 
     @property
     def service_due_in_days(self):

@@ -63,6 +63,20 @@ MIN_SPEED_PERCENT = 0
 MAX_SPEED_PERCENT = 100
 
 
+def error_text(code) -> str:
+    """Fehlercode im Klartext — unbekannte Codes bleiben sichtbar."""
+    if code is None:
+        return ""
+    return ERROR_LABELS.get(code, f"unbekannter Fehler ({code})")
+
+
+def mode_label(code) -> str:
+    """Pumpenmodus im Klartext."""
+    if code is None:
+        return ""
+    return PUMP_MODE_LABELS.get(code, f"unbekannter Modus ({code})")
+
+
 @dataclass(frozen=True)
 class DeviceStatus:
     """Ausgewerteter Gerätestatus samt unveränderter Rohantwort.
@@ -87,15 +101,11 @@ class DeviceStatus:
 
     @property
     def error_text(self) -> str:
-        if self.error_code is None:
-            return ""
-        return ERROR_LABELS.get(self.error_code, f"unbekannter Fehler ({self.error_code})")
+        return error_text(self.error_code)
 
     @property
     def mode_label(self) -> str:
-        if self.pump_mode is None:
-            return ""
-        return PUMP_MODE_LABELS.get(self.pump_mode, f"unbekannter Modus ({self.pump_mode})")
+        return mode_label(self.pump_mode)
 
     @property
     def service_due_in_days(self):
