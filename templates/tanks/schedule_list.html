@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Termine – {{ tank.name }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h3 mb-1">Termine – {{ tank.name }}</h1>
+    <a href="{% url 'tanks:detail' tank.slug %}" class="small">zurück zum Becken</a>
+  </div>
+  <div class="text-nowrap">
+    <a href="{% url 'tanks:schedule-create' tank.slug %}" class="btn btn-primary btn-sm">Termin anlegen</a>
+  </div>
+</div>
+
+{% if schedules %}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>Titel</th>
+          <th>Kategorie</th>
+          <th>Intervall</th>
+          <th>Nächster Termin</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for schedule in schedules %}
+          <tr class="{% if not schedule.is_active %}text-body-secondary{% endif %}">
+            <td>{{ schedule.title }}</td>
+            <td>{{ schedule.get_event_category_display }}</td>
+            <td>
+              {{ schedule.get_interval_display }}
+              {% if schedule.interval == "custom" %}({{ schedule.interval_days }} Tage){% endif %}
+            </td>
+            <td>{{ schedule.next_due_on }}</td>
+            <td>
+              {% if not schedule.is_active %}
+                <span class="badge text-bg-secondary">Deaktiviert</span>
+              {% elif schedule.is_due %}
+                <span class="badge text-bg-danger">Fällig</span>
+              {% elif schedule.is_upcoming %}
+                <span class="badge text-bg-warning">Anstehend</span>
+              {% else %}
+                <span class="badge text-bg-success">OK</span>
+              {% endif %}
+            </td>
+            <td class="text-nowrap">
+              {% if schedule.is_active %}
+                <a href="{% url 'tanks:event-create' tank.slug %}?termin={{ schedule.pk }}" class="btn btn-outline-success btn-sm">Quittieren</a>
+              {% endif %}
+              <a href="{% url 'tanks:schedule-update' tank.slug schedule.pk %}" class="btn btn-outline-secondary btn-sm">Bearbeiten</a>
+              <a href="{% url 'tanks:schedule-delete' tank.slug schedule.pk %}" class="btn btn-outline-danger btn-sm">Löschen</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="text-body-secondary">Noch kein Termin angelegt.</p>
+{% endif %}
+{% endblock %}

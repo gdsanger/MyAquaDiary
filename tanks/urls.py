@@ -75,4 +75,24 @@ urlpatterns = [
         views.EventDeleteView.as_view(),
         name="event-delete",
     ),
+    path(
+        "<slug:slug>/termine/",
+        views.ScheduleListView.as_view(),
+        name="schedule-list",
+    ),
+    path(
+        "<slug:slug>/termine/neu/",
+        views.ScheduleCreateView.as_view(),
+        name="schedule-create",
+    ),
+    path(
+        "<slug:slug>/termine/<int:pk>/bearbeiten/",
+        views.ScheduleUpdateView.as_view(),
+        name="schedule-update",
+    ),
+    path(
+        "<slug:slug>/termine/<int:pk>/loeschen/",
+        views.ScheduleDeleteView.as_view(),
+        name="schedule-delete",
+    ),
 ]
