@@ -1,0 +1,36 @@
+{% load l10n %}
+{% comment %}
+Verlaufsdiagramm eines Parameters als serverseitig berechnetes SVG.
+
+`localize off` ist notwendig: die deutsche Lokalisierung wuerde die
+Koordinaten als "12,34" ausgeben und das SVG damit unbrauchbar machen.
+Farben stehen im Stylesheet (.mad-chart__*), nicht hier.
+{% endcomment %}
+<figure class="mb-3">
+  <figcaption class="d-flex justify-content-between align-items-baseline mb-1">
+    <span class="fw-semibold">{{ chart.parameter.name }}</span>
+    <span class="mad-value mad-value--{{ chart.latest_status }}">{{ chart.latest.display_value }}</span>
+  </figcaption>
+  {% localize off %}
+  <svg class="mad-chart" viewBox="0 0 {{ chart.view_width }} {{ chart.view_height }}"
+       role="img" aria-label="{{ chart.summary }}">
+    {% if chart.band %}
+      <rect class="mad-chart__band" x="0" y="{{ chart.band.y }}"
+            width="{{ chart.view_width }}" height="{{ chart.band.height }}"></rect>
+    {% endif %}
+    <line class="mad-chart__grid" x1="0" y1="{{ chart.baseline_y }}"
+          x2="{{ chart.view_width }}" y2="{{ chart.baseline_y }}"></line>
+    <polyline class="mad-chart__line" points="{{ chart.polyline }}"></polyline>
+    {% for point in chart.points %}
+      <circle class="mad-chart__point mad-chart__point--{{ point.status }}"
+              cx="{{ point.x }}" cy="{{ point.y }}" r="2.5"></circle>
+    {% endfor %}
+    <text class="mad-chart__label" x="0" y="{{ chart.view_height }}" dy="-4">{{ chart.first_label }}</text>
+    <text class="mad-chart__label" x="{{ chart.view_width }}" y="{{ chart.view_height }}" dy="-4"
+          text-anchor="end">{{ chart.last_label }}</text>
+  </svg>
+  {% endlocalize %}
+  <p class="mad-chart-legend mb-0">
+    <span class="mad-status mad-status--ok">Zielbereich {{ chart.target_label }}</span>
+  </p>
+</figure>

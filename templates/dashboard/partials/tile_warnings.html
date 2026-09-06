@@ -1,0 +1,31 @@
+<section class="mad-card" id="tile-warnings" aria-label="Warnungen">
+  <div class="mad-card__header">
+    <h2 class="mad-card__title">Warnungen</h2>
+    <button type="button" class="btn btn-sm btn-outline-secondary"
+            hx-get="{% url 'dashboard:tile-warnings' %}" hx-target="#tile-warnings" hx-swap="outerHTML">
+      Aktualisieren
+    </button>
+  </div>
+
+  {% if warnings %}
+    <div class="mad-card__body d-grid gap-2">
+      {% for warning in warnings %}
+        <div class="mad-alert mad-alert--{{ warning.status }}">
+          <div>
+            <p class="mad-alert__title">{{ warning.title }}</p>
+            <p class="mad-alert__meta">
+              <span class="{{ warning.tank.accent_class }}"><span class="mad-tank-dot" aria-hidden="true"></span></span>
+              <a href="{{ warning.tank.get_absolute_url }}">{{ warning.tank.name }}</a> · {{ warning.detail }}
+            </p>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="mad-empty mb-0">Alles in Ordnung — keine Auffälligkeiten.</p>
+  {% endif %}
+
+  {% if warning_overflow %}
+    <div class="mad-card__footer mad-muted">und {{ warning_overflow }} weitere</div>
+  {% endif %}
+</section>
