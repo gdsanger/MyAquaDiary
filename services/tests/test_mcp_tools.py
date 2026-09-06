@@ -419,6 +419,16 @@ class CreateMeasurementTests(ToolTestCase):
         self.assertFalse(StubMeasurement.objects.exists())
         self.assertFalse(StubMeasurementValue.objects.exists())
 
+    def test_the_same_parameter_twice_is_refused(self):
+        with self.assertRaises(ToolError):
+            self.call(
+                "create_measurement",
+                tank_id=self.tank.pk,
+                values=[{"parameter": "ph", "value": 7.1}, {"parameter": "ph", "value": 7.4}],
+            )
+
+        self.assertFalse(StubMeasurement.objects.exists())
+
     def test_an_unknown_parameter_names_the_known_ones(self):
         with self.assertRaises(ToolError) as caught:
             self.call(
@@ -707,6 +717,14 @@ class AccessLogTests(ToolTestCase):
         entry = MCPAccessLog.objects.get()
         self.assertFalse(entry.succeeded)
         self.assertIn("keinen Eintrag", entry.error_message)
+
+    def test_a_call_marks_the_token_as_used(self):
+        self.assertIsNone(self.token.last_used_at)
+
+        self.call("list_tanks")
+
+        self.token.refresh_from_db()
+        self.assertIsNotNone(self.token.last_used_at)
 
     def test_reading_is_not_logged(self):
         self.call("list_tanks")

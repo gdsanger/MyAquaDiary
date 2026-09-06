@@ -208,6 +208,11 @@ class StubMeasurementValue(models.Model):
     class Meta:
         app_label = "services"
         ordering = ["parameter__position", "parameter__name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["measurement", "parameter"], name="unique_stub_measurement_parameter"
+            ),
+        ]
 
     measurement = models.ForeignKey(
         StubMeasurement, on_delete=models.CASCADE, related_name="values"

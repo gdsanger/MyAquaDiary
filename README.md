@@ -291,7 +291,8 @@ Er teilt sich Modelle und Service-Schicht mit der Web-App: kein paralleler
 Datenzugriff, keine zweite Geschäftslogik, nur eine weitere Oberfläche auf
 dieselbe Anwendung.
 
-Der Server läuft als **eigener Dienst** neben der Web-App:
+Der Server läuft als **eigener Dienst** neben der Web-App — in
+`docker compose` als Dienst `mcp` auf Port 8001, sonst:
 
 ```bash
 # Entwicklung

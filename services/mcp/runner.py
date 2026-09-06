@@ -62,6 +62,9 @@ def call_tool(context: Context, name: str, arguments: dict):
         raise WriteNotAllowed(message)
 
     ratelimit.check(context.token)
+    # „Zuletzt benutzt“ zählt den Werkzeugaufruf, nicht die offene Verbindung:
+    # ein Client, der nur die Leitung hält, hat den Zugang nicht gebraucht.
+    context.token.touch()
 
     try:
         result = found.handler(context, Arguments(arguments))

@@ -100,10 +100,11 @@ def create_measurement(context, arguments):
                 value=row.decimal("value"),
                 below_detection=row.boolean("below_detection"),
             )
-            # full_clean() setzt die Regeln des Modells durch — etwa, dass ein
-            # Wert und „n. n.“ sich ausschließen. Die Meldung daraus geht
-            # unverändert an den Client.
-            value.full_clean(exclude=["measurement"])
+            # full_clean() setzt die Regeln des Modells durch — dass ein Wert
+            # und „n. n.“ sich ausschließen ebenso wie „jede Messgröße nur
+            # einmal je Messreihe“. Die Meldung daraus geht unverändert an den
+            # Client.
+            value.full_clean()
             value.save()
 
     measurement.refresh_from_db()
@@ -359,7 +360,7 @@ def record_animal_movement(context, arguments):
         target_tank=target_tank,
         note=arguments.text("note", max_length=2000),
     )
-    movement.full_clean(exclude=["tank_animal"])
+    movement.full_clean()
     # save() schreibt den Bestand fort und lehnt einen Abgang ab, der ihn unter
     # null drücken würde — dieselbe Prüfung wie in der Oberfläche.
     movement.save()
