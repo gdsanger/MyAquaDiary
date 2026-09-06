@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% load tanks_extras %}
+
+{% block title %}Messungen – {{ tank.name }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h3 mb-1">Messungen – {{ tank.name }}</h1>
+    <a href="{% url 'tanks:detail' tank.slug %}" class="small">zurück zum Becken</a>
+  </div>
+  <div class="text-nowrap">
+    <a href="{% url 'tanks:measurement-export' tank.slug %}" class="btn btn-outline-secondary btn-sm">CSV-Export</a>
+    <a href="{% url 'tanks:measurement-create' tank.slug %}" class="btn btn-primary btn-sm">Messung erfassen</a>
+  </div>
+</div>
+
+{% if parameters %}
+  <div class="row g-2 align-items-end mb-3">
+    <div class="col-auto">
+      <label for="chart-parameter" class="form-label">Parameter</label>
+      <select id="chart-parameter" class="form-select form-select-sm">
+        {% for parameter in parameters %}
+          <option value="{{ parameter.key }}">{{ parameter.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto">
+      <label for="chart-from" class="form-label">Von</label>
+      <input type="date" id="chart-from" class="form-control form-control-sm">
+    </div>
+    <div class="col-auto">
+      <label for="chart-to" class="form-label">Bis</label>
+      <input type="date" id="chart-to" class="form-control form-control-sm">
+    </div>
+    <div class="col-auto">
+      <button type="button" id="chart-reload" class="btn btn-outline-secondary btn-sm">Aktualisieren</button>
+    </div>
+  </div>
+  <canvas id="measurement-chart" height="90" class="mb-4"></canvas>
+{% endif %}
+
+{% if measurements %}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>Quelle</th>
+          {% for parameter in parameters %}
+            <th>{{ parameter.name }}{% if parameter.unit %} <span class="text-body-secondary small">({{ parameter.unit }})</span>{% endif %}</th>
+          {% endfor %}
+          <th>CO₂ <span class="text-body-secondary small">(mg/l, berechnet)</span></th>
+          <th>Notiz</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for measurement in measurements %}
+          <tr>
+            <td>{{ measurement.measured_at|date:"d.m.Y H:i" }}</td>
+            <td>{{ measurement.get_source_display }}</td>
+            {% for parameter in parameters %}
+              {% with value=measurement.value_map|get_item:parameter.id %}
+                {% if value %}
+                  <td class="{% if value.status == 'low' %}table-warning{% elif value.status == 'high' %}table-danger{% elif value.status == 'ok' %}table-success{% endif %}">
+                    {% if value.below_detection %}n.n.{% else %}{{ value.value }}{% endif %}
+                  </td>
+                {% else %}
+                  <td>–</td>
+                {% endif %}
+              {% endwith %}
+            {% endfor %}
+            <td>{{ measurement.co2_mg_l|default:"–" }}</td>
+            <td>{{ measurement.note|truncatechars:40 }}</td>
+            <td class="text-nowrap">
+              <a href="{% url 'tanks:measurement-update' tank.slug measurement.pk %}" class="btn btn-outline-secondary btn-sm">Bearbeiten</a>
+              <a href="{% url 'tanks:measurement-delete' tank.slug measurement.pk %}" class="btn btn-outline-danger btn-sm">Löschen</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="text-body-secondary">Noch keine Messung erfasst.</p>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+{% if parameters %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  const chartCanvas = document.getElementById("measurement-chart");
+  const parameterSelect = document.getElementById("chart-parameter");
+  const fromInput = document.getElementById("chart-from");
+  const toInput = document.getElementById("chart-to");
+  const reloadButton = document.getElementById("chart-reload");
+  let chart = null;
+
+  function loadChart() {
+    const params = new URLSearchParams({ parameter: parameterSelect.value });
+    if (fromInput.value) params.set("von", fromInput.value);
+    if (toInput.value) params.set("bis", toInput.value);
+    fetch(`{% url 'tanks:measurement-chart-data' tank.slug %}?${params}`)
+      .then((response) => response.json())
+      .then((data) => {
+        const label = parameterSelect.options[parameterSelect.selectedIndex].text
+          + (data.unit ? ` (${data.unit})` : "");
+        if (chart) {
+          chart.data.labels = data.labels;
+          chart.data.datasets[0].data = data.values;
+          chart.data.datasets[0].label = label;
+          chart.update();
+        } else {
+          chart = new Chart(chartCanvas, {
+            type: "line",
+            data: {
+              labels: data.labels,
+              datasets: [{ label: label, data: data.values, borderColor: "#0d6efd", tension: 0.2 }],
+            },
+            options: { scales: { y: { beginAtZero: false } } },
+          });
+        }
+      });
+  }
+
+  parameterSelect.addEventListener("change", loadChart);
+  reloadButton.addEventListener("click", loadChart);
+  loadChart();
+})();
+</script>
+{% endif %}
+{% endblock %}

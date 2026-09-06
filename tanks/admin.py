@@ -1,10 +1,11 @@
 from django.contrib import admin
 
-from .models import Parameter, Photo, Tank, TankParameterTarget
+from .models import Measurement, MeasurementValue, Parameter, Photo, Tank, TankParameterTarget
 
 
 class PhotoInline(admin.TabularInline):
     model = Photo
+    fk_name = "tank"
     extra = 1
 
 
@@ -24,7 +25,7 @@ class TankAdmin(admin.ModelAdmin):
 
 @admin.register(Photo)
 class PhotoAdmin(admin.ModelAdmin):
-    list_display = ("tank", "caption", "taken_on", "position")
+    list_display = ("tank", "measurement", "caption", "taken_on", "position")
     list_filter = ("tank",)
 
 
@@ -38,3 +39,15 @@ class ParameterAdmin(admin.ModelAdmin):
 class TankParameterTargetAdmin(admin.ModelAdmin):
     list_display = ("tank", "parameter", "target", "minimum", "maximum")
     list_filter = ("parameter",)
+
+
+class MeasurementValueInline(admin.TabularInline):
+    model = MeasurementValue
+    extra = 0
+
+
+@admin.register(Measurement)
+class MeasurementAdmin(admin.ModelAdmin):
+    list_display = ("tank", "measured_at", "source")
+    list_filter = ("tank", "source")
+    inlines = [MeasurementValueInline]

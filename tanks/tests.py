@@ -1,11 +1,13 @@
 import datetime
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import Parameter, Tank, TankParameterTarget, WaterType
+from .models import Measurement, MeasurementValue, Parameter, Tank, TankParameterTarget, WaterType
 
 User = get_user_model()
 
@@ -259,3 +261,211 @@ class SeedParametersCommandTests(TestCase):
         call_command("seed_parameters")
         call_command("seed_parameters")
         self.assertEqual(Parameter.objects.count(), 14)
+
+
+class MeasurementCo2PropertyTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+        self.ph = Parameter.objects.create(key="ph", name="pH-Wert", decimals=1)
+        self.kh = Parameter.objects.create(key="kh", name="KH", unit="°dKH", decimals=1)
+
+    def test_co2_is_computed_from_kh_and_ph(self):
+        measurement = Measurement.objects.create(tank=self.tank)
+        MeasurementValue.objects.create(measurement=measurement, parameter=self.ph, value=Decimal("7.0"))
+        MeasurementValue.objects.create(measurement=measurement, parameter=self.kh, value=Decimal("6.0"))
+        self.assertEqual(measurement.co2_mg_l, Decimal("18.0"))
+
+    def test_co2_is_none_when_ph_or_kh_missing(self):
+        measurement = Measurement.objects.create(tank=self.tank)
+        MeasurementValue.objects.create(measurement=measurement, parameter=self.ph, value=Decimal("7.0"))
+        self.assertIsNone(measurement.co2_mg_l)
+
+    def test_co2_is_not_stored_and_reflects_later_corrections(self):
+        measurement = Measurement.objects.create(tank=self.tank)
+        ph_value = MeasurementValue.objects.create(
+            measurement=measurement, parameter=self.ph, value=Decimal("7.0")
+        )
+        MeasurementValue.objects.create(measurement=measurement, parameter=self.kh, value=Decimal("6.0"))
+        self.assertEqual(measurement.co2_mg_l, Decimal("18.0"))
+        ph_value.value = Decimal("6.7")
+        ph_value.save()
+        self.assertEqual(measurement.co2_mg_l, Decimal("35.9"))
+
+
+class MeasurementValueValidationTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+        self.ph = Parameter.objects.create(key="ph", name="pH-Wert", decimals=1)
+        self.no3 = Parameter.objects.create(
+            key="no3", name="Nitrat (NO3)", decimals=1, supports_below_detection=True
+        )
+        self.measurement = Measurement.objects.create(tank=self.tank)
+
+    def test_rejects_neither_value_nor_below_detection(self):
+        value = MeasurementValue(measurement=self.measurement, parameter=self.ph)
+        with self.assertRaises(ValidationError):
+            value.full_clean()
+
+    def test_rejects_both_value_and_below_detection(self):
+        value = MeasurementValue(
+            measurement=self.measurement, parameter=self.no3, value=Decimal("0.1"), below_detection=True
+        )
+        with self.assertRaises(ValidationError):
+            value.full_clean()
+
+    def test_rejects_below_detection_for_parameter_without_support(self):
+        value = MeasurementValue(measurement=self.measurement, parameter=self.ph, below_detection=True)
+        with self.assertRaises(ValidationError):
+            value.full_clean()
+
+    def test_below_detection_is_valid_for_supported_parameter(self):
+        value = MeasurementValue(measurement=self.measurement, parameter=self.no3, below_detection=True)
+        value.full_clean()  # should not raise
+        value.save()
+        self.assertIsNone(value.value)
+        self.assertTrue(value.below_detection)
+
+
+class MeasurementValueStatusTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+        self.ph = Parameter.objects.create(key="ph", name="pH-Wert", decimals=1)
+        TankParameterTarget.objects.create(
+            tank=self.tank, parameter=self.ph, minimum=Decimal("6.5"), maximum=Decimal("7.5")
+        )
+        self.measurement = Measurement.objects.create(tank=self.tank)
+
+    def test_value_below_target_is_low(self):
+        value = MeasurementValue.objects.create(measurement=self.measurement, parameter=self.ph, value=Decimal("6.0"))
+        self.assertEqual(value.status, "low")
+
+    def test_value_within_target_is_ok(self):
+        value = MeasurementValue.objects.create(measurement=self.measurement, parameter=self.ph, value=Decimal("7.0"))
+        self.assertEqual(value.status, "ok")
+
+    def test_value_above_target_is_high(self):
+        value = MeasurementValue.objects.create(measurement=self.measurement, parameter=self.ph, value=Decimal("8.0"))
+        self.assertEqual(value.status, "high")
+
+    def test_value_without_target_has_no_status(self):
+        other = Parameter.objects.create(key="gh", name="GH", decimals=1)
+        value = MeasurementValue.objects.create(measurement=self.measurement, parameter=other, value=Decimal("8.0"))
+        self.assertIsNone(value.status)
+
+
+def measurement_post_data(value_rows, **overrides):
+    data = {
+        "measured_at": "2024-03-01T10:00",
+        "note": "",
+        "source": "manual",
+        "values-TOTAL_FORMS": str(len(value_rows)),
+        "values-INITIAL_FORMS": "0",
+        "values-MIN_NUM_FORMS": "0",
+        "values-MAX_NUM_FORMS": "1000",
+        "photos-TOTAL_FORMS": "0",
+        "photos-INITIAL_FORMS": "0",
+        "photos-MIN_NUM_FORMS": "0",
+        "photos-MAX_NUM_FORMS": "1000",
+    }
+    for index, row in enumerate(value_rows):
+        data[f"values-{index}-parameter"] = str(row["parameter"].pk)
+        data[f"values-{index}-value"] = row.get("value", "")
+        if row.get("below_detection"):
+            data[f"values-{index}-below_detection"] = "on"
+    data.update(overrides)
+    return data
+
+
+class MeasurementViewTests(TestCase):
+    def setUp(self):
+        self.user_a = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.user_b = User.objects.create_user(
+            username="bob", email="bob@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user_a)
+        self.ph = Parameter.objects.create(key="ph", name="pH-Wert", decimals=1)
+        self.no3 = Parameter.objects.create(
+            key="no3", name="Nitrat (NO3)", decimals=1, supports_below_detection=True
+        )
+        self.client.force_login(self.user_a)
+
+    def test_create_measurement_stores_below_detection_and_not_zero(self):
+        response = self.client.post(
+            reverse("tanks:measurement-create", kwargs={"slug": self.tank.slug}),
+            measurement_post_data(
+                [
+                    {"parameter": self.ph, "value": "7.2"},
+                    {"parameter": self.no3, "below_detection": True},
+                ]
+            ),
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        measurement = Measurement.objects.get(tank=self.tank)
+        no3_value = measurement.values.get(parameter=self.no3)
+        self.assertIsNone(no3_value.value)
+        self.assertTrue(no3_value.below_detection)
+        ph_value = measurement.values.get(parameter=self.ph)
+        self.assertEqual(ph_value.value, Decimal("7.200"))
+
+    def test_create_rejects_value_and_below_detection_together(self):
+        response = self.client.post(
+            reverse("tanks:measurement-create", kwargs={"slug": self.tank.slug}),
+            measurement_post_data(
+                [{"parameter": self.no3, "value": "0.1", "below_detection": True}]
+            ),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Measurement.objects.filter(tank=self.tank).exists())
+
+    def test_list_view_denies_access_to_other_users_tank(self):
+        self.client.force_login(self.user_b)
+        response = self.client.get(reverse("tanks:measurement-list", kwargs={"slug": self.tank.slug}))
+        self.assertEqual(response.status_code, 404)
+
+    def test_owner_can_delete_a_measurement(self):
+        measurement = Measurement.objects.create(tank=self.tank)
+        response = self.client.post(
+            reverse("tanks:measurement-delete", kwargs={"slug": self.tank.slug, "pk": measurement.pk})
+        )
+        self.assertRedirects(response, reverse("tanks:measurement-list", kwargs={"slug": self.tank.slug}))
+        self.assertFalse(Measurement.objects.filter(pk=measurement.pk).exists())
+
+    def test_csv_export_marks_below_detection_and_includes_co2(self):
+        kh = Parameter.objects.create(key="kh", name="KH", decimals=1)
+        measurement = Measurement.objects.create(tank=self.tank)
+        MeasurementValue.objects.create(measurement=measurement, parameter=self.ph, value=Decimal("7.0"))
+        MeasurementValue.objects.create(measurement=measurement, parameter=kh, value=Decimal("6.0"))
+        MeasurementValue.objects.create(measurement=measurement, parameter=self.no3, below_detection=True)
+
+        response = self.client.get(reverse("tanks:measurement-export", kwargs={"slug": self.tank.slug}))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn("n.n.", content)
+        self.assertIn("18.0", content)
+
+    def test_chart_data_endpoint_returns_values_for_parameter(self):
+        measurement = Measurement.objects.create(
+            tank=self.tank,
+            measured_at=datetime.datetime(2024, 3, 1, 10, 0, tzinfo=datetime.timezone.utc),
+        )
+        MeasurementValue.objects.create(measurement=measurement, parameter=self.ph, value=Decimal("7.1"))
+
+        response = self.client.get(
+            reverse("tanks:measurement-chart-data", kwargs={"slug": self.tank.slug}),
+            {"parameter": "ph"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["values"], [7.1])
