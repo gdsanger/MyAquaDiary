@@ -7,6 +7,7 @@ damit nur einen Platzhalter im Layout und blockiert keine Seite.
 
 from functools import wraps
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
@@ -32,10 +33,11 @@ from .forms import (
     DeviceForm,
     DevicePasswordForm,
     IdentifyForm,
+    MCPTokenForm,
     ShellyDeviceForm,
     controls_for,
 )
-from .models import AISuggestion, Device
+from .models import AISuggestion, Device, MCPToken
 from .shelly import ShellyClient, ShellyError, ShellyService
 
 #: So viele Messwerte gehen in das Verlaufsdiagramm.
@@ -583,3 +585,51 @@ def _profile_rows(suggestion: AISuggestion):
         for key, value in (suggestion.payload or {}).items()
         if value not in (None, "", [])
     ]
+
+
+# --------------------------------------------------------------------------
+# MCP-Zugänge
+# --------------------------------------------------------------------------
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def mcp_token_list(request):
+    """Eigene MCP-Zugänge ansehen und anlegen.
+
+    Nach dem Anlegen wird die Seite unmittelbar gerendert statt umgeleitet:
+    der Klartext des Tokens existiert genau in dieser einen Antwort. Er landet
+    weder in der Session noch in einer Meldung, die ein zweiter Aufruf wieder
+    hervorholen könnte — auch nicht in der Datenbank.
+    """
+    form = MCPTokenForm(request.POST or None)
+    issued_key = ""
+    if request.method == "POST" and form.is_valid():
+        token, issued_key = form.issue(request.user)
+        messages.success(request, f"Zugang „{token.name}“ angelegt.")
+        form = MCPTokenForm()
+
+    return render(
+        request,
+        "services/mcp_token_list.html",
+        {
+            "form": form,
+            "tokens": request.user.mcp_tokens.all(),
+            "issued_key": issued_key,
+            "sse_url": f"{settings.SITE_URL.rstrip('/')}/mcp/sse/",
+        },
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def mcp_token_revoke(request, pk):
+    """Entzieht einen eigenen Zugang.
+
+    Nur widerrufen, nicht löschen: das Protokoll der Schreibzugriffe soll auch
+    danach noch sagen können, welcher Zugang einen Datensatz angelegt hat.
+    """
+    token = get_object_or_404(MCPToken, pk=pk, user=request.user)
+    token.revoke()
+    messages.info(request, f"Zugang „{token.name}“ widerrufen.")
+    return redirect("services:mcp_token_list")

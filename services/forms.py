@@ -1,9 +1,12 @@
 """Formulare der Services-Administration und der Geräteverwaltung."""
 
+from datetime import datetime, time
+
 from django import forms
+from django.utils import timezone
 
 from .eheim import DEFAULT_PASSWORD, DEFAULT_USERNAME
-from .models import AIConfig, AISuggestion, Device, MailConfig
+from .models import AIConfig, AISuggestion, Device, MailConfig, MCPToken
 from .shelly import GEN2_USERNAME
 
 
@@ -356,3 +359,54 @@ class CandidateForm(forms.Form):
         if not (cleaned.get("scientific_name") or cleaned.get("common_name")):
             raise forms.ValidationError("Ohne Namen lässt sich kein Vorschlag ablegen.")
         return cleaned
+
+
+class MCPTokenForm(BootstrapMixin, forms.Form):
+    """Ein neuer Zugang zum MCP-Endpunkt.
+
+    Kein ModelForm: der Token entsteht nicht aus Formularfeldern, sondern in
+    :meth:`services.models.MCPToken.issue` — dort, wo auch der Klartext
+    entsteht, den es genau einmal zu sehen gibt.
+
+    Schreibrecht ist bewusst nicht vorbelegt. Ein Zugang, der nur auswerten
+    soll, braucht keines, und ein Haken, den man setzen muss, wird bewusster
+    gesetzt als einer, den man wegnehmen müsste.
+    """
+
+    name = forms.CharField(
+        label="Name",
+        max_length=120,
+        help_text="Wofür der Zugang gedacht ist, z. B. „Claude Desktop, Arbeitsrechner“.",
+    )
+    allow_write = forms.BooleanField(
+        label="Darf schreiben",
+        required=False,
+        help_text="Ohne Haken kann der Zugang Messreihen, Ereignisse und Besatz "
+        "nur lesen — nichts anlegen.",
+    )
+    expires_at = forms.DateField(
+        label="Gültig bis",
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text="Leer lassen für einen unbefristeten Zugang.",
+    )
+
+    def clean_expires_at(self):
+        """Das Ablaufdatum gilt bis zum Ende des gewählten Tages."""
+        value = self.cleaned_data.get("expires_at")
+        if value is None:
+            return None
+        if value < timezone.localdate():
+            raise forms.ValidationError("Das Ablaufdatum liegt in der Vergangenheit.")
+        return timezone.make_aware(
+            datetime.combine(value, time.max), timezone.get_current_timezone()
+        )
+
+    def issue(self, user):
+        """Legt den Token an und gibt ihn mit seinem Klartext zurück."""
+        return MCPToken.issue(
+            user,
+            self.cleaned_data["name"],
+            allow_write=self.cleaned_data["allow_write"],
+            expires_at=self.cleaned_data["expires_at"],
+        )
