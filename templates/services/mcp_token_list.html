@@ -107,7 +107,7 @@
         <h2 class="h5 card-title">Neuen Zugang anlegen</h2>
         <form method="post">
           {% csrf_token %}
-          {% include "services/_form_fields.html" with form=form %}
+          {% include "partials/form_fields.html" with form=form %}
           <button type="submit" class="btn btn-primary">Anlegen</button>
         </form>
       </div>

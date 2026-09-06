@@ -2,9 +2,12 @@
 
 from datetime import timedelta
 from decimal import Decimal
+from io import BytesIO
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
+from PIL import Image
 
 from catalog.models import AnimalSpecies, PlantSpecies
 from tanks.models import CareTask, Measurement, Parameter, Stocking, Tank
@@ -66,6 +69,17 @@ def create_plant(scientific_name="Cryptocoryne wendtii", **kwargs):
     }
     defaults.update(kwargs)
     return PlantSpecies.objects.create(scientific_name=scientific_name, **defaults)
+
+
+def image_upload(name="foto.png"):
+    """Winziges, echtes PNG als Upload.
+
+    Ein ``ImageField`` lässt Pillow prüfen, ob die Datei wirklich ein Bild ist;
+    ein paar zufällige Bytes reichen dafür nicht.
+    """
+    buffer = BytesIO()
+    Image.new("RGB", (2, 2), "white").save(buffer, format="PNG")
+    return SimpleUploadedFile(name, buffer.getvalue(), content_type="image/png")
 
 
 def stock(tank, species, quantity=12, days_ago=30):
