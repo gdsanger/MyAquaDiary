@@ -1,5 +1,10 @@
 """Becken und alles, was daran hängt: Messwerte, Ereignisse, Besatz,
-Bepflanzung, Termine, Geräte und Fotos."""
+Bepflanzung, Termine und Fotos.
+
+Die Geräte hängen ebenfalls am Becken, stehen aber in :mod:`services.models`:
+es gibt genau ein Gerätemodell, und das trägt neben Hersteller und Wartung auch
+die Anbindung (Eheim, Shelly). Über ``tank.devices`` ist es von hier aus
+erreichbar."""
 
 from datetime import timedelta
 from decimal import Decimal
@@ -336,6 +341,9 @@ class Event(models.Model):
         MAINTENANCE = "maintenance", "Wartung"
         TREATMENT = "treatment", "Behandlung"
         STOCKING = "stocking", "Besatzänderung"
+        # Alles, was an der Technik passiert — auch das, was die Anwendung
+        # selbst schaltet (siehe services.devices.record_event).
+        EQUIPMENT = "equipment", "Technik"
         INCIDENT = "incident", "Vorfall"
         OTHER = "other", "Sonstiges"
 
@@ -523,69 +531,6 @@ class TaskCompletion(models.Model):
 
     def __str__(self):
         return f"{self.task} · {self.completed_on}"
-
-
-class Device(models.Model):
-    """Technik am Becken: Filter, Heizer, Beleuchtung, Sensoren, Steckdosen."""
-
-    class Kind(models.TextChoices):
-        FILTER = "filter", "Filter"
-        HEATER = "heater", "Heizer"
-        LIGHT = "light", "Beleuchtung"
-        CO2 = "co2", "CO₂-Anlage"
-        PUMP = "pump", "Pumpe"
-        DOSER = "doser", "Dosierpumpe"
-        SENSOR = "sensor", "Sensor"
-        SOCKET = "socket", "Steckdose"
-        OTHER = "other", "Sonstiges"
-
-    tank = models.ForeignKey(Tank, related_name="devices", on_delete=models.CASCADE)
-    name = models.CharField("Name", max_length=120)
-    kind = models.CharField("Art", max_length=10, choices=Kind.choices, default=Kind.OTHER)
-    manufacturer = models.CharField("Hersteller", max_length=80, blank=True)
-    model_name = models.CharField("Modell", max_length=80, blank=True)
-    installed_on = models.DateField("In Betrieb seit", null=True, blank=True)
-    status = models.CharField(
-        "Status", max_length=10, choices=Status.choices, default=Status.OK
-    )
-    status_message = models.CharField("Statusmeldung", max_length=200, blank=True)
-    last_seen_at = models.DateTimeField("Zuletzt erreicht", null=True, blank=True)
-    maintenance_interval_days = models.PositiveSmallIntegerField(
-        "Wartungsintervall (Tage)", null=True, blank=True
-    )
-    last_maintenance_on = models.DateField("Letzte Wartung", null=True, blank=True)
-
-    class Meta:
-        ordering = ["kind", "name"]
-        verbose_name = "Gerät"
-        verbose_name_plural = "Geräte"
-
-    def __str__(self):
-        return self.name
-
-    @property
-    def maintenance_due_on(self):
-        if not self.maintenance_interval_days:
-            return None
-        reference = self.last_maintenance_on or self.installed_on
-        if reference is None:
-            return None
-        return reference + timedelta(days=self.maintenance_interval_days)
-
-    def maintenance_status(self, today=None):
-        due = self.maintenance_due_on
-        if due is None:
-            return Status.UNKNOWN
-        today = today or timezone.localdate()
-        if due < today:
-            return Status.CRITICAL
-        if due <= today + timedelta(days=UPCOMING_DAYS):
-            return Status.WARN
-        return Status.OK
-
-    @property
-    def maintenance_status_value(self):
-        return self.maintenance_status()
 
 
 class TankPhoto(models.Model):
