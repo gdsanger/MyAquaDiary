@@ -8,7 +8,10 @@ from .models import (
     MeasurementValue,
     Photo,
     Tank,
+    TankAnimal,
+    TankAnimalMovement,
     TankParameterTarget,
+    TankPlant,
 )
 
 
@@ -107,6 +110,72 @@ EventPhotoFormSet = inlineformset_factory(
     extra=1,
     can_delete=True,
 )
+
+
+class TankAnimalForm(forms.ModelForm):
+    class Meta:
+        model = TankAnimal
+        fields = [
+            "animal",
+            "label",
+            "status",
+            "quantity",
+            "quantity_male",
+            "quantity_female",
+            "added_on",
+            "origin",
+            "note",
+        ]
+        widgets = {
+            "added_on": forms.DateInput(attrs={"type": "date"}),
+            "note": forms.Textarea(attrs={"rows": 2}),
+        }
+
+
+class TankAnimalUpdateForm(TankAnimalForm):
+    """Ohne `quantity` — der Bestand wird ausschließlich über gebuchte
+    Bewegungen fortgeschrieben, nicht durch direktes Überschreiben."""
+
+    class Meta(TankAnimalForm.Meta):
+        fields = [field for field in TankAnimalForm.Meta.fields if field != "quantity"]
+
+
+class TankAnimalMovementForm(forms.ModelForm):
+    class Meta:
+        model = TankAnimalMovement
+        fields = ["direction", "reason", "quantity", "occurred_on", "target_tank", "note"]
+        widgets = {
+            "occurred_on": forms.DateInput(attrs={"type": "date"}),
+            "note": forms.Textarea(attrs={"rows": 2}),
+        }
+
+    def __init__(self, *args, owner=None, exclude_tank=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        queryset = Tank.objects.for_user(owner) if owner else Tank.objects.none()
+        if exclude_tank is not None:
+            queryset = queryset.exclude(pk=exclude_tank.pk)
+        self.fields["target_tank"].queryset = queryset
+
+
+class TankPlantForm(forms.ModelForm):
+    class Meta:
+        model = TankPlant
+        fields = [
+            "plant",
+            "status",
+            "quantity",
+            "placement",
+            "attached_to",
+            "added_on",
+            "removed_on",
+            "identification_certain",
+            "note",
+        ]
+        widgets = {
+            "added_on": forms.DateInput(attrs={"type": "date"}),
+            "removed_on": forms.DateInput(attrs={"type": "date"}),
+            "note": forms.Textarea(attrs={"rows": 2}),
+        }
 
 
 class MaintenanceScheduleForm(forms.ModelForm):

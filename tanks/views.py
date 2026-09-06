@@ -2,6 +2,7 @@ import csv
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.forms import inlineformset_factory
 from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
@@ -19,9 +20,13 @@ from .forms import (
     MeasurementForm,
     MeasurementPhotoFormSet,
     MeasurementValueForm,
+    TankAnimalForm,
+    TankAnimalMovementForm,
+    TankAnimalUpdateForm,
     TankForm,
     TankParameterTargetForm,
     TankPhotoFormSet,
+    TankPlantForm,
 )
 from .models import (
     Event,
@@ -30,7 +35,10 @@ from .models import (
     MeasurementValue,
     Parameter,
     Tank,
+    TankAnimal,
+    TankAnimalMovement,
     TankParameterTarget,
+    TankPlant,
 )
 
 
@@ -609,3 +617,201 @@ class ScheduleDeleteView(ScheduleQuerysetMixin, DeleteView):
 
     def get_success_url(self):
         return reverse("tanks:schedule-list", kwargs={"slug": self.tank.slug})
+
+
+class TankAnimalOwnerMixin(LoginRequiredMixin):
+    def dispatch(self, request, *args, **kwargs):
+        self.tank = get_object_or_404(Tank.objects.for_user(request.user), slug=kwargs["slug"])
+        return super().dispatch(request, *args, **kwargs)
+
+
+class TankAnimalQuerysetMixin(TankAnimalOwnerMixin):
+    def get_queryset(self):
+        return TankAnimal.objects.filter(tank=self.tank)
+
+
+class TankAnimalListView(TankAnimalQuerysetMixin, ListView):
+    model = TankAnimal
+    context_object_name = "tank_animals"
+    template_name = "tanks/tankanimal_list.html"
+
+    def get_queryset(self):
+        return super().get_queryset().select_related("animal")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["tank"] = self.tank
+        return context
+
+
+class TankAnimalFormMixin:
+    model = TankAnimal
+    template_name = "tanks/tankanimal_form.html"
+
+    def get_form_class(self):
+        return TankAnimalForm if self.object is None else TankAnimalUpdateForm
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["tank"] = self.tank
+        return context
+
+    def form_valid(self, form):
+        form.instance.tank = self.tank
+        messages.success(self.request, "Besatz gespeichert.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("tanks:animal-list", kwargs={"slug": self.tank.slug})
+
+
+class TankAnimalCreateView(TankAnimalOwnerMixin, TankAnimalFormMixin, CreateView):
+    pass
+
+
+class TankAnimalUpdateView(TankAnimalQuerysetMixin, TankAnimalFormMixin, UpdateView):
+    pass
+
+
+class TankAnimalDeleteView(TankAnimalQuerysetMixin, DeleteView):
+    model = TankAnimal
+    context_object_name = "tank_animal"
+    template_name = "tanks/tankanimal_confirm_delete.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["tank"] = self.tank
+        return context
+
+    def get_success_url(self):
+        return reverse("tanks:animal-list", kwargs={"slug": self.tank.slug})
+
+
+class TankAnimalMovementListView(LoginRequiredMixin, View):
+    """Historie der Zu- und Abgänge eines Besatz-Eintrags, mit Formular zum
+    Buchen einer neuen Bewegung auf derselben Seite."""
+
+    def get_tank_animal(self, request, slug, pk):
+        tank = get_object_or_404(Tank.objects.for_user(request.user), slug=slug)
+        return get_object_or_404(TankAnimal.objects.select_related("animal"), tank=tank, pk=pk)
+
+    def get(self, request, slug, pk):
+        tank_animal = self.get_tank_animal(request, slug, pk)
+        form = TankAnimalMovementForm(owner=request.user, exclude_tank=tank_animal.tank)
+        return self._render(request, tank_animal, form)
+
+    def post(self, request, slug, pk):
+        tank_animal = self.get_tank_animal(request, slug, pk)
+        form = TankAnimalMovementForm(
+            request.POST, owner=request.user, exclude_tank=tank_animal.tank
+        )
+        if form.is_valid():
+            movement = form.save(commit=False)
+            movement.tank_animal = tank_animal
+            try:
+                movement.full_clean()
+                movement.save()
+            except ValidationError as exc:
+                form.add_error(None, exc)
+                return self._render(request, tank_animal, form)
+            messages.success(request, "Bewegung gebucht.")
+            return HttpResponseRedirect(
+                reverse("tanks:animal-movements", kwargs={"slug": tank_animal.tank.slug, "pk": tank_animal.pk})
+            )
+        return self._render(request, tank_animal, form)
+
+    def _render(self, request, tank_animal, form):
+        return render(
+            request,
+            "tanks/tankanimalmovement_list.html",
+            {
+                "tank": tank_animal.tank,
+                "tank_animal": tank_animal,
+                "movements": tank_animal.movements.all(),
+                "form": form,
+            },
+        )
+
+
+class TankAnimalMovementDeleteView(LoginRequiredMixin, View):
+    """Storniert eine gebuchte Bewegung und macht ihre Wirkung auf den
+    Bestand rückgängig (siehe TankAnimalMovement.delete)."""
+
+    def post(self, request, slug, pk, movement_pk):
+        tank = get_object_or_404(Tank.objects.for_user(request.user), slug=slug)
+        tank_animal = get_object_or_404(TankAnimal, tank=tank, pk=pk)
+        movement = get_object_or_404(TankAnimalMovement, tank_animal=tank_animal, pk=movement_pk)
+        try:
+            movement.delete()
+            messages.success(request, "Bewegung storniert.")
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages))
+        return HttpResponseRedirect(
+            reverse("tanks:animal-movements", kwargs={"slug": slug, "pk": pk})
+        )
+
+
+class TankPlantOwnerMixin(LoginRequiredMixin):
+    def dispatch(self, request, *args, **kwargs):
+        self.tank = get_object_or_404(Tank.objects.for_user(request.user), slug=kwargs["slug"])
+        return super().dispatch(request, *args, **kwargs)
+
+
+class TankPlantQuerysetMixin(TankPlantOwnerMixin):
+    def get_queryset(self):
+        return TankPlant.objects.filter(tank=self.tank)
+
+
+class TankPlantListView(TankPlantQuerysetMixin, ListView):
+    model = TankPlant
+    context_object_name = "tank_plants"
+    template_name = "tanks/tankplant_list.html"
+
+    def get_queryset(self):
+        return super().get_queryset().select_related("plant")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["tank"] = self.tank
+        return context
+
+
+class TankPlantFormMixin:
+    model = TankPlant
+    form_class = TankPlantForm
+    template_name = "tanks/tankplant_form.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["tank"] = self.tank
+        return context
+
+    def form_valid(self, form):
+        form.instance.tank = self.tank
+        messages.success(self.request, "Bepflanzung gespeichert.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("tanks:plant-list", kwargs={"slug": self.tank.slug})
+
+
+class TankPlantCreateView(TankPlantOwnerMixin, TankPlantFormMixin, CreateView):
+    pass
+
+
+class TankPlantUpdateView(TankPlantQuerysetMixin, TankPlantFormMixin, UpdateView):
+    pass
+
+
+class TankPlantDeleteView(TankPlantQuerysetMixin, DeleteView):
+    model = TankPlant
+    context_object_name = "tank_plant"
+    template_name = "tanks/tankplant_confirm_delete.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["tank"] = self.tank
+        return context
+
+    def get_success_url(self):
+        return reverse("tanks:plant-list", kwargs={"slug": self.tank.slug})

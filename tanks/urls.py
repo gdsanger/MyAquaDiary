@@ -95,4 +95,54 @@ urlpatterns = [
         views.ScheduleDeleteView.as_view(),
         name="schedule-delete",
     ),
+    path(
+        "<slug:slug>/besatz/",
+        views.TankAnimalListView.as_view(),
+        name="animal-list",
+    ),
+    path(
+        "<slug:slug>/besatz/neu/",
+        views.TankAnimalCreateView.as_view(),
+        name="animal-create",
+    ),
+    path(
+        "<slug:slug>/besatz/<int:pk>/bearbeiten/",
+        views.TankAnimalUpdateView.as_view(),
+        name="animal-update",
+    ),
+    path(
+        "<slug:slug>/besatz/<int:pk>/loeschen/",
+        views.TankAnimalDeleteView.as_view(),
+        name="animal-delete",
+    ),
+    path(
+        "<slug:slug>/besatz/<int:pk>/bewegungen/",
+        views.TankAnimalMovementListView.as_view(),
+        name="animal-movements",
+    ),
+    path(
+        "<slug:slug>/besatz/<int:pk>/bewegungen/<int:movement_pk>/loeschen/",
+        views.TankAnimalMovementDeleteView.as_view(),
+        name="animal-movement-delete",
+    ),
+    path(
+        "<slug:slug>/bepflanzung/",
+        views.TankPlantListView.as_view(),
+        name="plant-list",
+    ),
+    path(
+        "<slug:slug>/bepflanzung/neu/",
+        views.TankPlantCreateView.as_view(),
+        name="plant-create",
+    ),
+    path(
+        "<slug:slug>/bepflanzung/<int:pk>/bearbeiten/",
+        views.TankPlantUpdateView.as_view(),
+        name="plant-update",
+    ),
+    path(
+        "<slug:slug>/bepflanzung/<int:pk>/loeschen/",
+        views.TankPlantDeleteView.as_view(),
+        name="plant-delete",
+    ),
 ]
