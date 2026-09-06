@@ -50,7 +50,8 @@ class DashboardWarningTests(TestCase):
 
     def test_dashboard_does_not_query_devices_over_the_network(self):
         # Der Status kommt aus dem letzten Messwert; ein stummes Gerät darf das
-        # Dashboard nicht aufhalten.
+        # Dashboard nicht aufhalten. Vier Abfragen: Session, Benutzer, Geräte
+        # mit Störung und die KI-Konfiguration für die Navigation.
         self.add_reading(1)
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(4):
             self.client.get(reverse("dashboard:index"))
