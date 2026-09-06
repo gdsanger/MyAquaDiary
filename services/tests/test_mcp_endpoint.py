@@ -6,12 +6,13 @@ weit gelesen, wie es etwas zu prüfen gibt, und danach geschlossen.
 
 import json
 
+from django.conf import settings
 from django.core.signals import request_finished
 from django.db import close_old_connections
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
-from services.mcp import protocol, sessions, views
+from services.mcp import protocol, sessions, views, wsgi
 from services.mcp.views import stream
 from services.models import MCPToken
 
@@ -154,6 +155,33 @@ class StreamTests(TestCase):
         chunks.close()
 
         self.assertIsNone(sessions.get(session.id))
+
+
+class EntrypointTests(TestCase):
+    """Der eigene Entrypoint: eigener URL-Baum, kürzere Middleware-Kette."""
+
+    def test_the_handler_serves_the_mcp_url_tree(self):
+        self.assertEqual(wsgi.MCP_URLCONF, "config.mcp_urls")
+
+    def test_the_debug_toolbar_is_left_out(self):
+        """Sie erwartet Adressen, die es im MCP-Baum nicht gibt — und ist dort
+        auch sonst fehl am Platz."""
+        configured = [
+            "django.middleware.common.CommonMiddleware",
+            "debug_toolbar.middleware.DebugToolbarMiddleware",
+        ]
+
+        self.assertEqual(
+            wsgi.usable_middleware(configured),
+            ["django.middleware.common.CommonMiddleware"],
+        )
+
+    def test_building_the_handler_leaves_the_settings_alone(self):
+        before = list(settings.MIDDLEWARE)
+
+        wsgi.MCPHandler()
+
+        self.assertEqual(list(settings.MIDDLEWARE), before)
 
 
 class SessionRegistryTests(TestCase):
