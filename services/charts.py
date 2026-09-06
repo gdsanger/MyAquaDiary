@@ -14,6 +14,8 @@ keine natürliche Obergrenze, dort wächst die Achse mit — und ist beschriftet
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+from django.utils.formats import number_format
+
 #: Zeichenfläche inklusive Rand für die Achsenbeschriftung.
 WIDTH = 680
 HEIGHT = 200
@@ -176,13 +178,13 @@ def _line_chart(readings, *, value_of, unit, description, y_max, y_ticks) -> Cha
         ChartPoint(
             x=x_for(reading),
             y=y_for(value_of(reading)),
-            value=_trim(value_of(reading)),
-            label=f"{reading.read_at:%d.%m. %H:%M} – {_trim(value_of(reading))} {unit}",
+            value=number_format(_trim(value_of(reading))),
+            label=f"{reading.read_at:%d.%m. %H:%M} – {_label(value_of(reading), unit)}",
         )
         for reading in usable
     ]
 
-    ticks = [(y_for(value), f"{_trim(value)} {unit}") for value in y_ticks]
+    ticks = [(y_for(value), _label(value, unit)) for value in y_ticks]
     x_labels = [(points[0].x, f"{usable[0].read_at:%d.%m. %H:%M}")]
     if len(points) > 1:
         x_labels.append((points[-1].x, f"{usable[-1].read_at:%d.%m. %H:%M}"))
@@ -213,13 +215,23 @@ def bar_chart(entries, *, unit: str = "kWh", description: str = "Vergleich") -> 
         bars.append(
             Bar(
                 label=label,
-                value_label=f"{_trim(value)} {unit}",
+                value_label=_label(value, unit),
                 x=plot_left,
                 y=index * (BAR_HEIGHT + BAR_GAP),
                 width=max(width, 1.0),
             )
         )
     return BarChart(bars=bars, description=description)
+
+
+def _label(value, unit: str) -> str:
+    """Beschriftung im SVG — mit deutschem Dezimalkomma.
+
+    Innerhalb von ``{% localize off %}`` (nötig für die Koordinaten) formatiert
+    das Template nichts mehr; die Zahlen für den Leser werden deshalb hier
+    lokalisiert, die Koordinaten bleiben mit Punkt stehen.
+    """
+    return f"{number_format(_trim(value))} {unit}".strip()
 
 
 def _trim(value):
