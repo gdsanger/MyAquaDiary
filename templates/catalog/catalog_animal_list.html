@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}Tierkatalog – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Tierkatalog</h1>
+  {% if user.is_staff or user.can_edit_catalog %}
+    <a href="{% url 'catalog:animal-create' %}" class="btn btn-primary btn-sm">Tierart anlegen</a>
+  {% endif %}
+</div>
+
+<form method="get" class="row g-2 mb-4">
+  <div class="col-12 col-md-4">
+    <input type="search" name="q" value="{{ query }}" class="form-control" placeholder="Suche nach Name…">
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="group" class="form-select">
+      <option value="">Alle Gruppen</option>
+      {% for value, label in group_choices %}
+        <option value="{{ value }}" {% if value == selected_group %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="zone" class="form-select">
+      <option value="">Alle Zonen</option>
+      {% for value, label in zone_choices %}
+        <option value="{{ value }}" {% if value == selected_zone %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="difficulty" class="form-select">
+      <option value="">Alle Schwierigkeiten</option>
+      {% for value, label in difficulty_choices %}
+        <option value="{{ value }}" {% if value == selected_difficulty %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <input type="number" min="0" name="max_liters" value="{{ max_liters }}" class="form-control" placeholder="Beckengröße (l)">
+  </div>
+  <div class="col-12">
+    <button type="submit" class="btn btn-outline-secondary btn-sm">Filtern</button>
+  </div>
+</form>
+
+{% if animals %}
+  <div class="row row-cols-1 row-cols-md-3 g-3">
+    {% for animal in animals %}
+      <div class="col">
+        <a href="{% url 'catalog:animal-detail' animal.slug %}" class="card h-100 text-decoration-none text-body">
+          {% if animal.primary_image %}
+            <img src="{{ animal.primary_image.image.url }}" class="card-img-top" alt="{{ animal }}">
+          {% endif %}
+          <div class="card-body">
+            <h2 class="h6 card-title mb-1">
+              {{ animal }}
+              {% if animal.is_line_bred_variant %}<span class="badge text-bg-info">Zuchtform</span>{% endif %}
+            </h2>
+            {% if animal.common_name %}
+              <p class="text-body-secondary small mb-1">{{ animal.common_name }}</p>
+            {% endif %}
+            <p class="small mb-0">
+              {{ animal.get_group_display }} · {{ animal.get_difficulty_display }}
+            </p>
+          </div>
+        </a>
+      </div>
+    {% endfor %}
+  </div>
+
+  {% if is_paginated %}
+    <nav class="mt-4">
+      <ul class="pagination">
+        {% if page_obj.has_previous %}
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}">Zurück</a></li>
+        {% endif %}
+        <li class="page-item disabled"><span class="page-link">Seite {{ page_obj.number }} von {{ page_obj.paginator.num_pages }}</span></li>
+        {% if page_obj.has_next %}
+          <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}">Weiter</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  {% endif %}
+{% else %}
+  <p class="text-body-secondary">Keine Tierarten gefunden.</p>
+{% endif %}
+{% endblock %}
