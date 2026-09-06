@@ -22,11 +22,16 @@
           <li class="nav-item">
             <a class="nav-link" href="{% url 'dashboard:index' %}">Dashboard</a>
           </li>
+          {% if user.is_authenticated %}
+            <li class="nav-item">
+              <a class="nav-link" href="{% url 'tanks:list' %}">Meine Becken</a>
+            </li>
+          {% endif %}
         </ul>
         <ul class="navbar-nav ms-auto">
           {% if user.is_authenticated %}
             <li class="nav-item d-flex align-items-center me-2">
-              <span class="navbar-text">{{ user }}</span>
+              <a class="nav-link" href="{% url 'profile' %}">{{ user.get_display_name }}</a>
             </li>
             <li class="nav-item">
               <form method="post" action="{% url 'logout' %}">
@@ -37,6 +42,9 @@
           {% else %}
             <li class="nav-item">
               <a class="nav-link" href="{% url 'login' %}">Login</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="{% url 'register' %}">Registrieren</a>
             </li>
           {% endif %}
         </ul>
