@@ -13,7 +13,6 @@ liegen in einem anderen Schritt des Epics. Die Beckenseiten füllen
 :class:`~services.ai.prompts.TankFacts` und Co., sobald es sie gibt.
 """
 
-import logging
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
@@ -26,8 +25,6 @@ from .client import AIResult, AIService
 from .exceptions import AIError
 from .images import prepare_image
 from .prompts import ReportPeriod, StockItem, TankFacts
-
-logger = logging.getLogger(__name__)
 
 #: Vorschlagsart -> (Bezeichnung im Prompt, Aktion, Steckbrief-Schema).
 KINDS = {

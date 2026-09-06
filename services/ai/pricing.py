@@ -42,7 +42,7 @@ CACHE_WRITE_FACTOR = Decimal("1.25")
 CACHE_READ_FACTOR = Decimal("0.10")
 
 MILLION = Decimal(1_000_000)
-CENT_PRECISION = Decimal("0.0001")
+USD_PRECISION = Decimal("0.0001")
 
 
 def supports_structured_output(model_name: str) -> bool:
@@ -64,4 +64,4 @@ def cost_usd(model_name, prompt_tokens, completion_tokens, cache_write=0, cache_
         + Decimal(cache_read or 0) * CACHE_READ_FACTOR
     )
     total = (billable_input * input_price + Decimal(completion_tokens or 0) * output_price) / MILLION
-    return total.quantize(CENT_PRECISION, rounding=ROUND_HALF_UP)
+    return total.quantize(USD_PRECISION, rounding=ROUND_HALF_UP)
