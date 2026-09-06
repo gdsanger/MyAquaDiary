@@ -1,0 +1,25 @@
+{% comment %}
+Zwischenschritt vor dem Löschen, Buchen oder Deaktivieren. Es gibt keinen
+Link, der beim Klick handelt: hier steht, was passiert, und erst die
+Schaltfläche schickt den POST ab.
+{% endcomment %}
+<div class="mad-modal" role="dialog" aria-modal="true" aria-labelledby="mad-modal-title">
+  <div class="mad-modal__dialog">
+    <form method="post" action="{{ modal_action }}"
+          hx-post="{{ modal_action }}" hx-target="#tab-area" hx-swap="outerHTML">
+      {% csrf_token %}
+      <div class="mad-modal__header">
+        <h2 class="mad-card__title" id="mad-modal-title">{{ modal_title }}</h2>
+      </div>
+      <div class="mad-modal__body">
+        {% if modal_subject %}<p class="mad-list__title">{{ modal_subject }}</p>{% endif %}
+        <p class="mad-muted mb-0">{{ modal_question }}</p>
+      </div>
+      <div class="mad-modal__footer">
+        <a class="btn btn-outline-secondary" href="{{ cancel_href }}"
+           hx-get="{{ cancel_url }}" hx-target="#tab-area" hx-swap="outerHTML">Abbrechen</a>
+        <button type="submit" class="btn btn-primary">{{ modal_submit|default:"Löschen" }}</button>
+      </div>
+    </form>
+  </div>
+</div>

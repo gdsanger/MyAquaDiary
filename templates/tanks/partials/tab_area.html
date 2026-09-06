@@ -2,6 +2,10 @@
 Reiterleiste plus Inhalt. Der Klick auf einen Reiter tauscht per HTMX nur
 diesen Block; das href zeigt auf dieselbe Ansicht als Vollseite, damit die
 Reiter ohne JavaScript und als Lesezeichen funktionieren.
+
+Formulare und Rückfragen liegen als Overlay im selben Block (`modal_template`):
+Sie verschwinden dadurch mit jedem Reiterwechsel und jedem Speichern von
+selbst, ohne dass irgendwo ein Schließen-Skript hängen müsste.
 {% endcomment %}
 <div id="tab-area">
   <div class="mad-tabs" role="tablist" aria-label="Bereiche des Beckens">
@@ -18,4 +22,5 @@ Reiter ohne JavaScript und als Lesezeichen funktionieren.
   <div id="tab-panel" role="tabpanel" aria-labelledby="tab-{{ active_tab }}">
     {% include tab_template %}
   </div>
+  {% if modal_template %}{% include modal_template %}{% endif %}
 </div>

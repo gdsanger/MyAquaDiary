@@ -1,5 +1,10 @@
 <section class="mad-card">
-  <div class="mad-card__header"><h2 class="mad-card__title">Ereignisse</h2></div>
+  <div class="mad-card__header">
+    <h2 class="mad-card__title">Ereignisse</h2>
+    <a class="btn btn-primary btn-sm" href="{% url 'tanks:event-create' tank.slug %}"
+       hx-get="{% url 'tanks:event-create' tank.slug %}"
+       hx-target="#tab-area" hx-swap="outerHTML">Ereignis erfassen</a>
+  </div>
   <ul class="mad-list">
     {% for event in events %}
       <li>
@@ -12,6 +17,9 @@
             {% endif %}
           </div>
           <span class="mad-status mad-status--info">{{ event.get_category_display }}</span>
+          {% url 'tanks:event-update' tank.slug event.pk as edit_url %}
+          {% url 'tanks:event-delete' tank.slug event.pk as delete_url %}
+          {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=delete_url %}
         </div>
       </li>
     {% empty %}

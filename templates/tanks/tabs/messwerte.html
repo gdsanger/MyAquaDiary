@@ -12,7 +12,12 @@
 <section class="mad-card">
   <div class="mad-card__header">
     <h2 class="mad-card__title">Messreihe</h2>
-    <span class="mad-muted">letzte {{ page_size }} Werte</span>
+    <div class="mad-actions">
+      <span class="mad-muted">letzte {{ page_size }} Werte</span>
+      <a class="btn btn-primary btn-sm" href="{% url 'tanks:measurement-create' tank.slug %}"
+         hx-get="{% url 'tanks:measurement-create' tank.slug %}"
+         hx-target="#tab-area" hx-swap="outerHTML">Messreihe erfassen</a>
+    </div>
   </div>
   <div class="mad-table-scroll">
     <table class="mad-table">
@@ -24,6 +29,7 @@
           <th scope="col" class="mad-table__num">Wert</th>
           <th scope="col">Zielbereich</th>
           <th scope="col">Status</th>
+          <th scope="col"><span class="visually-hidden">Aktionen</span></th>
         </tr>
       </thead>
       <tbody>
@@ -36,9 +42,14 @@
             </td>
             <td class="mad-muted">{{ measurement.target_label }}</td>
             <td><span class="mad-status mad-status--{{ measurement.status_code }}">{{ measurement.status_label }}</span></td>
+            <td>
+              {% url 'tanks:measurement-update' tank.slug measurement.pk as edit_url %}
+              {% url 'tanks:measurement-delete' tank.slug measurement.pk as delete_url %}
+              {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=delete_url %}
+            </td>
           </tr>
         {% empty %}
-          <tr><td colspan="5" class="mad-empty">Noch keine Messwerte erfasst.</td></tr>
+          <tr><td colspan="6" class="mad-empty">Noch keine Messwerte erfasst.</td></tr>
         {% endfor %}
       </tbody>
     </table>

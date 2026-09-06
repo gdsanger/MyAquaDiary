@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tank.name }} löschen – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="mad-page-header">
+  <div>
+    <h1 class="mad-page-title">Becken löschen</h1>
+    <p class="mad-page-subtitle">{{ tank.name }}</p>
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ tank.get_absolute_url }}">Abbrechen</a>
+</div>
+
+<div class="row">
+  <div class="col-12 col-lg-8">
+    <section class="mad-card">
+      <div class="mad-card__body">
+        {% if has_history %}
+          <p>
+            An diesem Becken hängen erfasste Daten — Messwerte, Ereignisse, Besatz,
+            Termine, Geräte oder Fotos. Gelöscht wird es deshalb nicht: es wird
+            aufgelöst und behält seine Geschichte.
+          </p>
+          <div class="mad-actions">
+            <a class="btn btn-primary" href="{% url 'tanks:dissolve' tank.slug %}">Becken auflösen</a>
+            <a class="btn btn-outline-secondary" href="{{ tank.get_absolute_url }}">Abbrechen</a>
+          </div>
+        {% else %}
+          <p>
+            An diesem Becken ist noch nichts erfasst. Es lässt sich deshalb ohne Verlust
+            löschen — gedacht für den Fehlgriff beim Anlegen.
+          </p>
+          <form method="post">
+            {% csrf_token %}
+            <div class="mad-actions">
+              <button type="submit" class="btn btn-primary">Endgültig löschen</button>
+              <a class="btn btn-outline-secondary" href="{{ tank.get_absolute_url }}">Abbrechen</a>
+            </div>
+          </form>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

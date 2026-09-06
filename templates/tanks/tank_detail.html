@@ -15,7 +15,16 @@
       {% if tank.is_dissolved %}· aufgelöst am {{ tank.dissolved_on|date:"d.m.Y" }}{% endif %}
     </p>
   </div>
-  <a href="{% url 'tanks:list' %}" class="btn btn-outline-secondary btn-sm">Alle Becken</a>
+  <div class="mad-actions">
+    <a href="{% url 'tanks:list' %}" class="btn btn-outline-secondary btn-sm">Alle Becken</a>
+    <a href="{% url 'tanks:update' tank.slug %}" class="btn btn-outline-secondary btn-sm">Bearbeiten</a>
+    {% if tank.is_dissolved %}
+      <a href="{% url 'tanks:dissolve' tank.slug %}" class="btn btn-outline-secondary btn-sm">Auflösung</a>
+    {% else %}
+      <a href="{% url 'tanks:dissolve' tank.slug %}" class="btn btn-outline-secondary btn-sm">Auflösen</a>
+    {% endif %}
+    <a href="{% url 'tanks:delete' tank.slug %}" class="btn btn-outline-secondary btn-sm">Löschen</a>
+  </div>
 </div>
 
 {% include "tanks/partials/tab_area.html" %}

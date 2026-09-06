@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% comment %}
+Stammdaten eines Beckens als eigene Seite: beim Anlegen gibt es noch keinen
+Reiterkontext, und beim Bearbeiten stehen Name, Volumen und Wassertyp im
+Seitenkopf außerhalb des Reiterbereichs.
+{% endcomment %}
+
+{% block title %}{{ title }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="mad-page-header">
+  <div>
+    <h1 class="mad-page-title">{{ title }}</h1>
+    {% if tank %}<p class="mad-page-subtitle">{{ tank.name }}</p>{% endif %}
+  </div>
+  <a class="btn btn-outline-secondary btn-sm"
+     href="{% if tank %}{{ tank.get_absolute_url }}{% else %}{% url 'tanks:list' %}{% endif %}">Abbrechen</a>
+</div>
+
+<div class="row">
+  <div class="col-12 col-lg-8">
+    <section class="mad-card">
+      <div class="mad-card__body">
+        <form method="post" enctype="multipart/form-data">
+          {% csrf_token %}
+          {% include "partials/form_fields.html" %}
+          <div class="mad-actions">
+            <button type="submit" class="btn btn-primary">Speichern</button>
+            <a class="btn btn-outline-secondary"
+               href="{% if tank %}{{ tank.get_absolute_url }}{% else %}{% url 'tanks:list' %}{% endif %}">Abbrechen</a>
+          </div>
+        </form>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

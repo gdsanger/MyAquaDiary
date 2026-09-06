@@ -1,0 +1,30 @@
+{% comment %}
+Formular als Overlay über dem Reiter.
+
+Das Overlay steckt innerhalb von #tab-area: jeder Reiterwechsel und jedes
+Speichern ersetzt diesen Bereich und räumt das Formular damit von selbst weg —
+ohne eine Zeile JavaScript. Ohne HTMX kommt dieselbe Ansicht als vollständige
+Seite zurück, das Formular sendet dann regulär per POST.
+{% endcomment %}
+<div class="mad-modal" role="dialog" aria-modal="true" aria-labelledby="mad-modal-title">
+  <div class="mad-modal__dialog">
+    <form method="post" action="{{ modal_action }}"
+          {% if modal_multipart %}enctype="multipart/form-data"{% endif %}
+          hx-post="{{ modal_action }}" hx-target="#tab-area" hx-swap="outerHTML"
+          {% if modal_multipart %}hx-encoding="multipart/form-data"{% endif %}>
+      {% csrf_token %}
+      <div class="mad-modal__header">
+        <h2 class="mad-card__title" id="mad-modal-title">{{ modal_title }}</h2>
+      </div>
+      <div class="mad-modal__body">
+        {% if modal_hint %}<p class="mad-muted">{{ modal_hint }}</p>{% endif %}
+        {% include "partials/form_fields.html" %}
+      </div>
+      <div class="mad-modal__footer">
+        <a class="btn btn-outline-secondary" href="{{ cancel_href }}"
+           hx-get="{{ cancel_url }}" hx-target="#tab-area" hx-swap="outerHTML">Abbrechen</a>
+        <button type="submit" class="btn btn-primary">{{ modal_submit|default:"Speichern" }}</button>
+      </div>
+    </form>
+  </div>
+</div>

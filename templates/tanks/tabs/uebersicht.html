@@ -53,6 +53,42 @@
   </div>
 
   <div class="col-12 col-lg-6">
+    {% comment %}
+    Zielbereiche werden direkt am Becken gepflegt: das Anlegeformular steht
+    unter der Liste und braucht kein Overlay — es ist eine Zeile.
+    {% endcomment %}
+    <section class="mad-card">
+      <div class="mad-card__header"><h2 class="mad-card__title">Zielbereiche</h2></div>
+      <ul class="mad-list">
+        {% for target in targets %}
+          <li>
+            <div class="mad-list__row">
+              <div class="mad-list__main">
+                <p class="mad-list__title">{{ target.parameter.name }}</p>
+                <p class="mad-list__meta">Ziel {{ target.range_label }}</p>
+              </div>
+              {% url 'tanks:target-update' tank.slug target.pk as edit_url %}
+              {% url 'tanks:target-delete' tank.slug target.pk as delete_url %}
+              {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=delete_url %}
+            </div>
+          </li>
+        {% empty %}
+          <li class="mad-empty">Kein eigener Zielbereich — es gelten die Standardwerte der Parameter.</li>
+        {% endfor %}
+      </ul>
+      <div class="mad-card__body">
+        <form method="post" action="{% url 'tanks:target-create' tank.slug %}" class="mad-inline-form"
+              hx-post="{% url 'tanks:target-create' tank.slug %}"
+              hx-target="#tab-area" hx-swap="outerHTML">
+          {% csrf_token %}
+          {% include "partials/form_fields.html" with form=target_form %}
+          <button type="submit" class="btn btn-outline-primary btn-sm">Zielbereich festlegen</button>
+        </form>
+      </div>
+    </section>
+  </div>
+
+  <div class="col-12 col-lg-6">
     <section class="mad-card">
       <div class="mad-card__header"><h2 class="mad-card__title">Offene Termine</h2></div>
       <ul class="mad-list">
