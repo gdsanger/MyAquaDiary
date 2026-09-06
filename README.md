@@ -33,6 +33,47 @@ docker compose exec web python manage.py createsuperuser
 | `dashboard` | KPIs, fällige Termine |
 | `services` | Anbindung Graph-API, Eheim, Shelly, KI, MCP; Verbrauchsauswertung |
 
+## Erfassen und Pflegen
+
+Alles, was ein Becken ausmacht, wird in der Oberfläche gepflegt — das
+Django-Admin ist dafür nicht nötig.
+
+Wer was darf, entscheidet grundsätzlich die **Eigentümerschaft**, nicht eine
+Django-Berechtigung: wer sein eigenes Becken pflegt, braucht kein globales
+`change_tank`. Sämtliche schreibenden Ansichten der App `tanks` hängen an
+`TankScopedMixin` (`tanks/views.py`), das das Becken über
+`Tank.objects.for_user()` holt und jedes abhängige Objekt darüber filtert. Ein
+fremder Slug oder eine fremde `pk` endet als **404**, nicht als 403 — über
+fremde Daten gibt es keine Auskunft, auch keine über ihre Existenz.
+
+Formulare und Rückfragen sind HTMX-Fragmente im Reiterbereich des Beckens:
+Sie laden als Overlay über dem Reiter, und nach dem Speichern kommt der
+aktualisierte Reiter zurück. Ohne JavaScript funktioniert derselbe Weg als
+vollständige Seite — jede Schaltfläche ist ein Link mit `href`, jedes Formular
+sendet regulär per POST.
+
+Wo Historie dranhängt, wird nicht gelöscht:
+
+| Datensatz | Statt Löschen |
+|---|---|
+| Becken mit erfassten Daten | Auflösen (`dissolved_on`), Historie bleibt lesbar |
+| Besatz | Abgang buchen (`removed_on`) |
+| Termin | Deaktivieren — die Quittierungen bleiben |
+
+Löschen bleibt der Fehleingabe vorbehalten und verlangt immer einen
+Zwischenschritt; es gibt keinen Link, der beim Klick löscht.
+
+### Katalogpflege
+
+Der Katalog ist die Ausnahme: er ist userübergreifend, ein Steckbrief gehört
+niemandem. Hier entscheidet deshalb ein echtes Recht —
+`catalog.can_edit_catalog` (Trägermodell `catalog.CatalogPermission`, ohne
+eigene Tabelle). Staff darf immer. Ohne das Recht erscheinen die
+Pflege-Schaltflächen nicht, und die zugehörigen Adressen antworten mit 403.
+
+Vergeben wird es im Admin unter *Benutzer → Berechtigungen*
+(„Darf den Katalog pflegen“) oder über eine Gruppe.
+
 ## Mailversand (Microsoft Graph)
 
 Ausgehende Mail läuft über die Microsoft Graph API, authentifiziert per
@@ -426,3 +467,9 @@ Farbe trägt Bedeutung und wird nicht doppelt belegt:
 
 Das Dashboard lädt jede Kachel als eigenes HTMX-Fragment
 (`/kacheln/…`); das Seitengerüst selbst fragt keine Daten ab.
+
+Erfassungsformulare liegen als Overlay (`.mad-modal`) innerhalb des
+Reiterbereichs `#tab-area`: Jeder Reiterwechsel und jedes Speichern ersetzt
+diesen Bereich — und räumt das Formular damit ohne eine Zeile JavaScript weg.
+Die Oberfläche ist bis 375 px Breite bedienbar; Kartenköpfe, Zeilenaktionen
+und das Overlay brechen dort um, statt zu scrollen.
