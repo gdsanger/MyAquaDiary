@@ -207,13 +207,19 @@ class Device(models.Model):
 
     def clean(self):
         self.mac_address = normalize_mac(self.mac_address) if self.mac_address else ""
-        if self.is_eheim:
-            if not self.mac_address:
-                raise ValidationError({"mac_address": "Eheim-Geräte brauchen eine MAC-Adresse."})
-            if len(self.mac_address) != 17:
-                raise ValidationError({"mac_address": "Keine gültige MAC-Adresse."})
-            if not self.host:
-                raise ValidationError({"host": "Ohne Adresse lässt sich das Gerät nicht erreichen."})
+        if not self.is_eheim:
+            return
+        # Beide Felder gemeinsam melden, sonst schickt das Formular den
+        # Benutzer zweimal hintereinander los.
+        errors = {}
+        if not self.mac_address:
+            errors["mac_address"] = "Eheim-Geräte brauchen eine MAC-Adresse."
+        elif len(self.mac_address) != 17:
+            errors["mac_address"] = "Keine gültige MAC-Adresse."
+        if not self.host:
+            errors["host"] = "Ohne Adresse lässt sich das Gerät nicht erreichen."
+        if errors:
+            raise ValidationError(errors)
 
     # -- Zugangsdaten --------------------------------------------------------
 
