@@ -12,6 +12,8 @@ from django.views import View
 from django.views.generic import CreateView, DeleteView, DetailView, ListView, UpdateView
 
 from .forms import (
+    EventForm,
+    EventPhotoFormSet,
     MeasurementForm,
     MeasurementPhotoFormSet,
     MeasurementValueForm,
@@ -19,7 +21,15 @@ from .forms import (
     TankParameterTargetForm,
     TankPhotoFormSet,
 )
-from .models import Measurement, MeasurementValue, Parameter, Tank, TankParameterTarget
+from .models import (
+    Event,
+    MaintenanceSchedule,
+    Measurement,
+    MeasurementValue,
+    Parameter,
+    Tank,
+    TankParameterTarget,
+)
 
 
 class TankOwnerQuerysetMixin(LoginRequiredMixin):
@@ -57,6 +67,27 @@ class TankDetailView(TankOwnerQuerysetMixin, DetailView):
             {"parameter": parameter, "target": targets_by_parameter_id.get(parameter.id)}
             for parameter in Parameter.objects.all()
         ]
+        return context
+
+
+class TankHistoryView(TankOwnerQuerysetMixin, DetailView):
+    """Chronologische Beckenhistorie aus Ereignissen und Messungen gemeinsam,
+    da beide zusammen erzählen, was am Becken passiert ist."""
+
+    model = Tank
+    context_object_name = "tank"
+    template_name = "tanks/tank_history.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        entries = [
+            {"kind": "event", "at": event.occurred_at, "object": event}
+            for event in self.object.events.all()
+        ] + [
+            {"kind": "measurement", "at": measurement.measured_at, "object": measurement}
+            for measurement in self.object.measurements.all()
+        ]
+        context["history"] = sorted(entries, key=lambda entry: entry["at"], reverse=True)
         return context
 
 
@@ -375,3 +406,141 @@ class MeasurementExportView(LoginRequiredMixin, View):
             row.append(str(co2) if co2 is not None else "")
             writer.writerow(row)
         return response
+
+
+class EventOwnerMixin(LoginRequiredMixin):
+    def dispatch(self, request, *args, **kwargs):
+        self.tank = get_object_or_404(Tank.objects.for_user(request.user), slug=kwargs["slug"])
+        return super().dispatch(request, *args, **kwargs)
+
+
+class EventQuerysetMixin(EventOwnerMixin):
+    def get_queryset(self):
+        return Event.objects.filter(tank=self.tank)
+
+
+class EventListView(EventQuerysetMixin, ListView):
+    model = Event
+    context_object_name = "events"
+    template_name = "tanks/event_list.html"
+
+    def get_queryset(self):
+        queryset = super().get_queryset().prefetch_related("photos")
+        category = self.request.GET.get("kategorie")
+        if category:
+            queryset = queryset.filter(category=category)
+        date_from = parse_date(self.request.GET.get("von") or "")
+        date_to = parse_date(self.request.GET.get("bis") or "")
+        if date_from:
+            queryset = queryset.filter(occurred_at__date__gte=date_from)
+        if date_to:
+            queryset = queryset.filter(occurred_at__date__lte=date_to)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["tank"] = self.tank
+        context["categories"] = Event.Category.choices
+        context["selected_category"] = self.request.GET.get("kategorie", "")
+        context["date_from"] = self.request.GET.get("von", "")
+        context["date_to"] = self.request.GET.get("bis", "")
+        return context
+
+
+class EventFormMixin:
+    model = Event
+    form_class = EventForm
+    template_name = "tanks/event_form.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["tank"] = self.tank
+        if self.request.method == "POST":
+            context["photo_formset"] = EventPhotoFormSet(
+                self.request.POST, self.request.FILES, instance=self.object
+            )
+        else:
+            context["photo_formset"] = EventPhotoFormSet(instance=self.object)
+        return context
+
+    def form_valid(self, form):
+        was_new = self.object is None
+        form.instance.tank = self.tank
+        forms_are_valid = False
+        with transaction.atomic():
+            self.object = form.save()
+
+            photo_formset = EventPhotoFormSet(
+                self.request.POST, self.request.FILES, instance=self.object
+            )
+            forms_are_valid = photo_formset.is_valid()
+            if forms_are_valid:
+                for photo in photo_formset.save(commit=False):
+                    photo.tank = self.tank
+                    photo.event = self.object
+                    photo.save()
+                for photo in photo_formset.deleted_objects:
+                    photo.delete()
+            else:
+                transaction.set_rollback(True)
+
+        if not forms_are_valid:
+            if was_new:
+                self.object = None
+            return self.render_to_response(self.get_context_data(form=form))
+
+        messages.success(self.request, "Ereignis gespeichert.")
+        return HttpResponseRedirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse("tanks:event-list", kwargs={"slug": self.tank.slug})
+
+
+class EventCreateView(EventOwnerMixin, EventFormMixin, CreateView):
+    """Ein Ereignis kann frei angelegt werden oder — über `?termin=<id>` —
+    aus einem fälligen Wartungstermin heraus, der dabei quittiert wird."""
+
+    def get_schedule(self):
+        schedule_id = self.request.POST.get("schedule") or self.request.GET.get("termin")
+        if not schedule_id:
+            return None
+        return get_object_or_404(MaintenanceSchedule, pk=schedule_id, tank=self.tank)
+
+    def get_initial(self):
+        initial = super().get_initial()
+        schedule = self.get_schedule()
+        if schedule:
+            initial["title"] = schedule.title
+            initial["category"] = schedule.category
+        return initial
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["schedule"] = self.get_schedule()
+        return context
+
+    def form_valid(self, form):
+        schedule = self.get_schedule()
+        form.instance.schedule = schedule
+        response = super().form_valid(form)
+        if schedule and self.object is not None:
+            schedule.mark_done(self.object.occurred_at)
+        return response
+
+
+class EventUpdateView(EventQuerysetMixin, EventFormMixin, UpdateView):
+    pass
+
+
+class EventDeleteView(EventQuerysetMixin, DeleteView):
+    model = Event
+    context_object_name = "event"
+    template_name = "tanks/event_confirm_delete.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["tank"] = self.tank
+        return context
+
+    def get_success_url(self):
+        return reverse("tanks:event-list", kwargs={"slug": self.tank.slug})

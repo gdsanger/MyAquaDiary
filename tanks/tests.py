@@ -3,11 +3,23 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
-from .models import Measurement, MeasurementValue, Parameter, Tank, TankParameterTarget, WaterType
+from .models import (
+    Event,
+    MaintenanceSchedule,
+    Measurement,
+    MeasurementValue,
+    Parameter,
+    Photo,
+    Tank,
+    TankParameterTarget,
+    WaterType,
+)
 
 User = get_user_model()
 
@@ -469,3 +481,216 @@ class MeasurementViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["values"], [7.1])
+
+
+def event_post_data(**overrides):
+    data = {
+        "occurred_at": "2024-03-01T10:00",
+        "category": Event.Category.WATER_CHANGE,
+        "title": "Wasserwechsel",
+        "description": "",
+        "water_changed_l": "",
+        "photos-TOTAL_FORMS": "0",
+        "photos-INITIAL_FORMS": "0",
+        "photos-MIN_NUM_FORMS": "0",
+        "photos-MAX_NUM_FORMS": "1000",
+    }
+    data.update(overrides)
+    return data
+
+
+class EventWaterChangePercentTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+
+    def test_percent_is_computed_from_volume_net(self):
+        tank = make_tank(self.user, volume_net_l=Decimal("100.0"))
+        event = Event.objects.create(
+            tank=tank, title="Wasserwechsel", water_changed_l=Decimal("25.0")
+        )
+        self.assertEqual(event.water_change_percent, Decimal("25.0"))
+
+    def test_percent_is_none_without_water_changed_l(self):
+        tank = make_tank(self.user, volume_net_l=Decimal("100.0"))
+        event = Event.objects.create(tank=tank, title="Beobachtung")
+        self.assertIsNone(event.water_change_percent)
+
+    def test_percent_is_none_without_tank_volume(self):
+        tank = make_tank(self.user)
+        event = Event.objects.create(
+            tank=tank, title="Wasserwechsel", water_changed_l=Decimal("25.0")
+        )
+        self.assertIsNone(event.water_change_percent)
+
+
+class EventViewTests(TestCase):
+    def setUp(self):
+        self.user_a = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.user_b = User.objects.create_user(
+            username="bob", email="bob@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user_a, volume_net_l=Decimal("100.0"))
+        self.client.force_login(self.user_a)
+
+    def test_create_event_stores_water_changed_l(self):
+        response = self.client.post(
+            reverse("tanks:event-create", kwargs={"slug": self.tank.slug}),
+            event_post_data(water_changed_l="20.0"),
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        event = Event.objects.get(tank=self.tank)
+        self.assertEqual(event.water_changed_l, Decimal("20.0"))
+        self.assertEqual(event.water_change_percent, Decimal("20.0"))
+
+    def test_create_event_with_photo_attaches_it_to_tank_gallery(self):
+        gif_bytes = (
+            b"GIF87a\x01\x00\x01\x00\x80\x01\x00\x00\x00\x00ccc,\x00\x00"
+            b"\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+        )
+        image = SimpleUploadedFile("test.gif", gif_bytes, content_type="image/gif")
+        data = event_post_data(
+            **{
+                "photos-TOTAL_FORMS": "1",
+                "photos-0-image": image,
+                "photos-0-caption": "Vorher",
+                "photos-0-position": "0",
+            }
+        )
+        response = self.client.post(
+            reverse("tanks:event-create", kwargs={"slug": self.tank.slug}), data, follow=True
+        )
+        self.assertEqual(response.status_code, 200)
+        event = Event.objects.get(tank=self.tank)
+        photo = Photo.objects.get(event=event)
+        self.assertEqual(photo.tank, self.tank)
+
+    def test_list_view_denies_access_to_other_users_tank(self):
+        self.client.force_login(self.user_b)
+        response = self.client.get(reverse("tanks:event-list", kwargs={"slug": self.tank.slug}))
+        self.assertEqual(response.status_code, 404)
+
+    def test_owner_can_delete_an_event(self):
+        event = Event.objects.create(tank=self.tank, title="Beobachtung")
+        response = self.client.post(
+            reverse("tanks:event-delete", kwargs={"slug": self.tank.slug, "pk": event.pk})
+        )
+        self.assertRedirects(response, reverse("tanks:event-list", kwargs={"slug": self.tank.slug}))
+        self.assertFalse(Event.objects.filter(pk=event.pk).exists())
+
+    def test_list_view_filters_by_category(self):
+        Event.objects.create(
+            tank=self.tank, title="Erster Wasserwechsel", category=Event.Category.WATER_CHANGE
+        )
+        Event.objects.create(
+            tank=self.tank, title="Schnecke entdeckt", category=Event.Category.OBSERVATION
+        )
+
+        response = self.client.get(
+            reverse("tanks:event-list", kwargs={"slug": self.tank.slug}), {"kategorie": "observation"}
+        )
+        self.assertContains(response, "Schnecke entdeckt")
+        self.assertNotContains(response, "Erster Wasserwechsel")
+
+    def test_list_view_filters_by_date_range(self):
+        Event.objects.create(
+            tank=self.tank,
+            title="Alt",
+            occurred_at=datetime.datetime(2024, 1, 1, 10, 0, tzinfo=datetime.timezone.utc),
+        )
+        Event.objects.create(
+            tank=self.tank,
+            title="Neu",
+            occurred_at=datetime.datetime(2024, 6, 1, 10, 0, tzinfo=datetime.timezone.utc),
+        )
+
+        response = self.client.get(
+            reverse("tanks:event-list", kwargs={"slug": self.tank.slug}),
+            {"von": "2024-05-01", "bis": "2024-12-31"},
+        )
+        self.assertContains(response, "Neu")
+        self.assertNotContains(response, "Alt")
+
+
+class EventFromScheduleTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+        self.client.force_login(self.user)
+        self.schedule = MaintenanceSchedule.objects.create(
+            tank=self.tank,
+            title="Filter reinigen",
+            category=Event.Category.MAINTENANCE,
+            interval_days=14,
+            next_due_at=datetime.datetime(2024, 3, 1, 9, 0, tzinfo=datetime.timezone.utc),
+        )
+
+    def test_create_form_prefills_title_and_category_from_schedule(self):
+        response = self.client.get(
+            reverse("tanks:event-create", kwargs={"slug": self.tank.slug}),
+            {"termin": self.schedule.pk},
+        )
+        self.assertContains(response, "Filter reinigen")
+
+    def test_completing_event_marks_schedule_done_and_reschedules(self):
+        response = self.client.post(
+            reverse("tanks:event-create", kwargs={"slug": self.tank.slug}),
+            event_post_data(
+                occurred_at="2024-03-05T12:00",
+                category=Event.Category.MAINTENANCE,
+                title="Filter reinigen",
+                schedule=str(self.schedule.pk),
+            ),
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        event = Event.objects.get(tank=self.tank)
+        self.assertEqual(event.schedule, self.schedule)
+
+        self.schedule.refresh_from_db()
+        self.assertEqual(self.schedule.last_done_at, event.occurred_at)
+        self.assertEqual(self.schedule.next_due_at, event.occurred_at + datetime.timedelta(days=14))
+
+    def test_is_due_reflects_next_due_at(self):
+        self.assertTrue(self.schedule.is_due)
+        self.schedule.mark_done(timezone.now())
+        self.assertFalse(self.schedule.is_due)
+
+
+class TankHistoryViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+        self.client.force_login(self.user)
+
+    def test_history_combines_events_and_measurements_in_chronological_order(self):
+        Event.objects.create(
+            tank=self.tank,
+            title="Wasserwechsel",
+            occurred_at=datetime.datetime(2024, 2, 1, 10, 0, tzinfo=datetime.timezone.utc),
+        )
+        Measurement.objects.create(
+            tank=self.tank,
+            measured_at=datetime.datetime(2024, 3, 1, 10, 0, tzinfo=datetime.timezone.utc),
+        )
+        Event.objects.create(
+            tank=self.tank,
+            title="Beobachtung",
+            occurred_at=datetime.datetime(2024, 1, 1, 10, 0, tzinfo=datetime.timezone.utc),
+        )
+
+        response = self.client.get(reverse("tanks:history", kwargs={"slug": self.tank.slug}))
+        self.assertEqual(response.status_code, 200)
+        titles_in_order = [entry["object"] for entry in response.context["history"]]
+        self.assertEqual(
+            [type(obj).__name__ for obj in titles_in_order],
+            ["Measurement", "Event", "Event"],
+        )

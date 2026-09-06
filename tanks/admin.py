@@ -1,6 +1,15 @@
 from django.contrib import admin
 
-from .models import Measurement, MeasurementValue, Parameter, Photo, Tank, TankParameterTarget
+from .models import (
+    Event,
+    MaintenanceSchedule,
+    Measurement,
+    MeasurementValue,
+    Parameter,
+    Photo,
+    Tank,
+    TankParameterTarget,
+)
 
 
 class PhotoInline(admin.TabularInline):
@@ -25,7 +34,7 @@ class TankAdmin(admin.ModelAdmin):
 
 @admin.register(Photo)
 class PhotoAdmin(admin.ModelAdmin):
-    list_display = ("tank", "measurement", "caption", "taken_on", "position")
+    list_display = ("tank", "measurement", "event", "caption", "taken_on", "position")
     list_filter = ("tank",)
 
 
@@ -51,3 +60,16 @@ class MeasurementAdmin(admin.ModelAdmin):
     list_display = ("tank", "measured_at", "source")
     list_filter = ("tank", "source")
     inlines = [MeasurementValueInline]
+
+
+@admin.register(Event)
+class EventAdmin(admin.ModelAdmin):
+    list_display = ("tank", "occurred_at", "category", "title", "schedule")
+    list_filter = ("tank", "category")
+    search_fields = ("title", "description")
+
+
+@admin.register(MaintenanceSchedule)
+class MaintenanceScheduleAdmin(admin.ModelAdmin):
+    list_display = ("tank", "title", "category", "interval_days", "next_due_at", "active")
+    list_filter = ("tank", "category", "active")

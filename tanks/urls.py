@@ -50,4 +50,29 @@ urlpatterns = [
         views.MeasurementChartDataView.as_view(),
         name="measurement-chart-data",
     ),
+    path(
+        "<slug:slug>/historie/",
+        views.TankHistoryView.as_view(),
+        name="history",
+    ),
+    path(
+        "<slug:slug>/ereignisse/",
+        views.EventListView.as_view(),
+        name="event-list",
+    ),
+    path(
+        "<slug:slug>/ereignisse/neu/",
+        views.EventCreateView.as_view(),
+        name="event-create",
+    ),
+    path(
+        "<slug:slug>/ereignisse/<int:pk>/bearbeiten/",
+        views.EventUpdateView.as_view(),
+        name="event-update",
+    ),
+    path(
+        "<slug:slug>/ereignisse/<int:pk>/loeschen/",
+        views.EventDeleteView.as_view(),
+        name="event-delete",
+    ),
 ]

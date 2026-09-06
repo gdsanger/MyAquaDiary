@@ -1,7 +1,7 @@
 from django import forms
 from django.forms import inlineformset_factory
 
-from .models import Measurement, MeasurementValue, Photo, Tank, TankParameterTarget
+from .models import Event, Measurement, MeasurementValue, Photo, Tank, TankParameterTarget
 
 
 class TankForm(forms.ModelForm):
@@ -73,6 +73,27 @@ class MeasurementValueForm(forms.ModelForm):
 
 MeasurementPhotoFormSet = inlineformset_factory(
     Measurement,
+    Photo,
+    fields=["image", "caption", "taken_on", "position"],
+    extra=1,
+    can_delete=True,
+)
+
+
+class EventForm(forms.ModelForm):
+    class Meta:
+        model = Event
+        fields = ["occurred_at", "category", "title", "description", "water_changed_l"]
+        widgets = {
+            "occurred_at": forms.DateTimeInput(
+                attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"
+            ),
+            "description": forms.Textarea(attrs={"rows": 3}),
+        }
+
+
+EventPhotoFormSet = inlineformset_factory(
+    Event,
     Photo,
     fields=["image", "caption", "taken_on", "position"],
     extra=1,
