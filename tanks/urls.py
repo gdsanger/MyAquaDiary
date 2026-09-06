@@ -11,6 +11,26 @@ urlpatterns = [
     path("<slug:slug>/bearbeiten/", views.TankUpdateView.as_view(), name="update"),
     path("<slug:slug>/loeschen/", views.TankDeleteView.as_view(), name="delete"),
     path(
+        "<slug:slug>/fotos/",
+        views.TankGalleryView.as_view(),
+        name="gallery",
+    ),
+    path(
+        "<slug:slug>/fotos/zeitachse/",
+        views.TankTimelineView.as_view(),
+        name="timeline",
+    ),
+    path(
+        "<slug:slug>/fotos/<int:pk>/loeschen/",
+        views.PhotoDeleteView.as_view(),
+        name="photo-delete",
+    ),
+    path(
+        "<slug:slug>/fotos/<int:pk>/titelbild/",
+        views.PhotoSetCoverView.as_view(),
+        name="photo-set-cover",
+    ),
+    path(
         "<slug:slug>/parameter/<int:parameter_id>/bearbeiten/",
         views.TankParameterTargetEditView.as_view(),
         name="target-edit",

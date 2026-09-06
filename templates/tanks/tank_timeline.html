@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Zeitachse – {{ tank.name }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h3 mb-1">Zeitachse – {{ tank.name }}</h1>
+    <a href="{% url 'tanks:gallery' tank.slug %}" class="small">zurück zur Galerie</a>
+  </div>
+</div>
+
+{% if photos %}
+  <div class="row row-cols-1 row-cols-md-3 g-3">
+    {% for photo in photos %}
+      <div class="col">
+        <figure class="mb-0">
+          <img src="{{ photo.image.url }}" class="img-fluid rounded" alt="{{ photo.caption|default:tank.name }}">
+          <figcaption class="small text-body-secondary">
+            {{ photo.taken_at|date:"d.m.Y" }}
+            {% if photo.caption %} – {{ photo.caption }}{% endif %}
+          </figcaption>
+        </figure>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <p class="text-body-secondary">Noch keine Übersichtsfotos markiert. In der Galerie lässt sich ein Foto beim Upload als Übersichtsfoto kennzeichnen.</p>
+{% endif %}
+{% endblock %}

@@ -37,8 +37,8 @@ class TankAdmin(admin.ModelAdmin):
 
 @admin.register(Photo)
 class PhotoAdmin(admin.ModelAdmin):
-    list_display = ("tank", "measurement", "event", "caption", "taken_on", "position")
-    list_filter = ("tank",)
+    list_display = ("tank", "measurement", "event", "caption", "taken_at", "is_full_tank_shot")
+    list_filter = ("tank", "is_full_tank_shot")
 
 
 @admin.register(Parameter)

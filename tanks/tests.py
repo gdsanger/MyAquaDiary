@@ -1,12 +1,19 @@
 import datetime
+import io
+import os
+import shutil
+import tempfile
 from decimal import Decimal
+
+from PIL import Image, ExifTags
+from PIL.TiffImagePlugin import IFDRational
 
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -25,6 +32,7 @@ from .models import (
     TankParameterTarget,
     TankPlant,
     WaterType,
+    read_exif_taken_at,
 )
 
 User = get_user_model()
@@ -62,6 +70,27 @@ def make_tank(owner, **kwargs):
     )
     defaults.update(kwargs)
     return Tank.objects.create(owner=owner, **defaults)
+
+
+def make_jpeg_bytes(taken_at=None, with_gps=False, size=(20, 20)):
+    """Baut ein JPEG mit echten EXIF-Daten für die Photo-Tests — DateTimeOriginal
+    und GPS-Koordinaten liegen in Sub-IFDs, die Pillow nur schreibt, wenn der
+    jeweilige Sub-IFD-Tag am obersten `Exif`-Objekt selbst gesetzt ist."""
+
+    image = Image.new("RGB", size, color="red")
+    exif = image.getexif()
+    if taken_at:
+        exif[ExifTags.IFD.Exif] = {36867: taken_at.strftime("%Y:%m:%d %H:%M:%S")}
+    if with_gps:
+        exif[ExifTags.IFD.GPSInfo] = {
+            1: "N",
+            2: (IFDRational(52, 1), IFDRational(30, 1), IFDRational(0, 1)),
+            3: "E",
+            4: (IFDRational(13, 1), IFDRational(24, 1), IFDRational(0, 1)),
+        }
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", exif=exif.tobytes())
+    return buffer.getvalue()
 
 
 class TankSlugTests(TestCase):
@@ -588,7 +617,6 @@ class EventViewTests(TestCase):
                 "photos-TOTAL_FORMS": "1",
                 "photos-0-image": image,
                 "photos-0-caption": "Vorher",
-                "photos-0-position": "0",
             }
         )
         response = self.client.post(
@@ -1216,3 +1244,230 @@ class TankPlantTests(TestCase):
         self.client.force_login(self.other_user)
         response = self.client.get(reverse("tanks:plant-list", kwargs={"slug": self.tank.slug}))
         self.assertEqual(response.status_code, 404)
+
+
+class TempMediaTestCase(TestCase):
+    """Basisklasse für Tests, die tatsächlich Dateien schreiben — mit eigenem
+    MEDIA_ROOT, damit weder das Repo-`mediafiles`-Verzeichnis vollläuft noch
+    Tests sich gegenseitig Dateien unterschieben."""
+
+    def setUp(self):
+        super().setUp()
+        media_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, media_dir, ignore_errors=True)
+        override = override_settings(MEDIA_ROOT=media_dir)
+        override.enable()
+        self.addCleanup(override.disable)
+
+
+class PhotoImageProcessingTests(TempMediaTestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+
+    def test_upload_generates_a_thumbnail(self):
+        image = SimpleUploadedFile("photo.jpg", make_jpeg_bytes(), content_type="image/jpeg")
+        photo = Photo.objects.create(tank=self.tank, image=image)
+        self.assertTrue(photo.thumbnail.name)
+        with Image.open(photo.thumbnail.path) as thumbnail:
+            self.assertLessEqual(thumbnail.width, 480)
+            self.assertLessEqual(thumbnail.height, 480)
+
+    def test_gps_data_is_removed_from_the_stored_image(self):
+        image = SimpleUploadedFile(
+            "photo.jpg", make_jpeg_bytes(with_gps=True), content_type="image/jpeg"
+        )
+        photo = Photo.objects.create(tank=self.tank, image=image)
+        with Image.open(photo.image.path) as stored_image:
+            self.assertNotIn(ExifTags.IFD.GPSInfo, stored_image.getexif())
+
+    def test_deleting_a_photo_removes_image_and_thumbnail_from_storage(self):
+        image = SimpleUploadedFile("photo.jpg", make_jpeg_bytes(), content_type="image/jpeg")
+        photo = Photo.objects.create(tank=self.tank, image=image)
+        image_path = photo.image.path
+        thumbnail_path = photo.thumbnail.path
+        self.assertTrue(os.path.exists(image_path))
+
+        photo.delete()
+
+        self.assertFalse(os.path.exists(image_path))
+        self.assertFalse(os.path.exists(thumbnail_path))
+
+    def test_deleting_the_tank_cascades_and_removes_the_photo_file(self):
+        image = SimpleUploadedFile("photo.jpg", make_jpeg_bytes(), content_type="image/jpeg")
+        photo = Photo.objects.create(tank=self.tank, image=image)
+        image_path = photo.image.path
+
+        self.tank.delete()
+
+        self.assertFalse(os.path.exists(image_path))
+
+
+class ReadExifTakenAtTests(TestCase):
+    def test_extracts_datetime_original(self):
+        taken_at = datetime.datetime(2024, 5, 1, 12, 30, 0)
+        image = SimpleUploadedFile(
+            "photo.jpg", make_jpeg_bytes(taken_at=taken_at), content_type="image/jpeg"
+        )
+        result = read_exif_taken_at(image)
+        self.assertIsNotNone(result)
+        self.assertEqual(
+            timezone.localtime(result).replace(tzinfo=None) if timezone.is_aware(result) else result,
+            taken_at,
+        )
+
+    def test_returns_none_without_exif_data(self):
+        image = SimpleUploadedFile("photo.jpg", make_jpeg_bytes(), content_type="image/jpeg")
+        self.assertIsNone(read_exif_taken_at(image))
+
+
+class PhotoConstraintTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+        self.measurement = Measurement.objects.create(tank=self.tank)
+        self.event = Event.objects.create(tank=self.tank, title="Wasserwechsel")
+
+    def test_photo_may_belong_to_measurement_only(self):
+        photo = Photo(tank=self.tank, measurement=self.measurement)
+        photo.full_clean(exclude=["image"])
+
+    def test_photo_may_belong_to_event_only(self):
+        photo = Photo(tank=self.tank, event=self.event)
+        photo.full_clean(exclude=["image"])
+
+    def test_photo_cannot_belong_to_measurement_and_event_at_once(self):
+        photo = Photo(tank=self.tank, measurement=self.measurement, event=self.event)
+        with self.assertRaises(ValidationError):
+            photo.full_clean(exclude=["image"])
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class TankGalleryViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.other_user = User.objects.create_user(
+            username="bob", email="bob@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+        self.client.force_login(self.user)
+
+    def test_upload_accepts_multiple_images_at_once(self):
+        images = [
+            SimpleUploadedFile(f"photo{i}.jpg", make_jpeg_bytes(), content_type="image/jpeg")
+            for i in range(2)
+        ]
+        response = self.client.post(
+            reverse("tanks:gallery", kwargs={"slug": self.tank.slug}),
+            {"images": images, "caption": "Becken von vorne", "is_full_tank_shot": "on"},
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Photo.objects.filter(tank=self.tank).count(), 2)
+        self.assertTrue(Photo.objects.filter(tank=self.tank, is_full_tank_shot=True).exists())
+
+    def test_upload_prefills_taken_at_from_exif(self):
+        taken_at = datetime.datetime(2023, 7, 4, 9, 15, 0)
+        image = SimpleUploadedFile(
+            "photo.jpg", make_jpeg_bytes(taken_at=taken_at), content_type="image/jpeg"
+        )
+        self.client.post(
+            reverse("tanks:gallery", kwargs={"slug": self.tank.slug}),
+            {"images": [image], "caption": "", "is_full_tank_shot": ""},
+            follow=True,
+        )
+        photo = Photo.objects.get(tank=self.tank)
+        localized = timezone.localtime(photo.taken_at) if timezone.is_aware(photo.taken_at) else photo.taken_at
+        self.assertEqual(localized.replace(tzinfo=None), taken_at)
+
+    def test_filters_by_assignment(self):
+        measurement = Measurement.objects.create(tank=self.tank)
+        Photo.objects.create(tank=self.tank, image=self._image())
+        Photo.objects.create(tank=self.tank, image=self._image(), measurement=measurement)
+
+        response = self.client.get(
+            reverse("tanks:gallery", kwargs={"slug": self.tank.slug}), {"zuordnung": "messung"}
+        )
+        self.assertEqual(len(response.context["photos"]), 1)
+
+    def test_filters_by_period(self):
+        Photo.objects.create(
+            tank=self.tank,
+            image=self._image(),
+            taken_at=timezone.make_aware(datetime.datetime(2024, 1, 1, 10, 0)),
+        )
+        Photo.objects.create(
+            tank=self.tank,
+            image=self._image(),
+            taken_at=timezone.make_aware(datetime.datetime(2024, 6, 1, 10, 0)),
+        )
+
+        response = self.client.get(
+            reverse("tanks:gallery", kwargs={"slug": self.tank.slug}),
+            {"von": "2024-05-01", "bis": "2024-12-31"},
+        )
+        self.assertEqual(len(response.context["photos"]), 1)
+
+    def test_setting_a_photo_as_cover_photo(self):
+        photo = Photo.objects.create(tank=self.tank, image=self._image())
+        response = self.client.post(
+            reverse("tanks:photo-set-cover", kwargs={"slug": self.tank.slug, "pk": photo.pk}),
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.tank.refresh_from_db()
+        self.assertEqual(self.tank.cover_photo_id, photo.pk)
+
+    def test_deleting_a_photo_via_the_gallery(self):
+        photo = Photo.objects.create(tank=self.tank, image=self._image())
+        response = self.client.post(
+            reverse("tanks:photo-delete", kwargs={"slug": self.tank.slug, "pk": photo.pk}),
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Photo.objects.filter(pk=photo.pk).exists())
+
+    def test_other_users_tank_is_not_accessible(self):
+        self.client.force_login(self.other_user)
+        response = self.client.get(reverse("tanks:gallery", kwargs={"slug": self.tank.slug}))
+        self.assertEqual(response.status_code, 404)
+
+    def _image(self):
+        return SimpleUploadedFile("photo.jpg", make_jpeg_bytes(), content_type="image/jpeg")
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class TankTimelineViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+        self.client.force_login(self.user)
+
+    def test_only_full_tank_shots_are_listed_in_chronological_order(self):
+        image = lambda: SimpleUploadedFile("photo.jpg", make_jpeg_bytes(), content_type="image/jpeg")
+        Photo.objects.create(tank=self.tank, image=image(), is_full_tank_shot=False)
+        older = Photo.objects.create(
+            tank=self.tank,
+            image=image(),
+            is_full_tank_shot=True,
+            taken_at=timezone.make_aware(datetime.datetime(2024, 1, 1)),
+        )
+        newer = Photo.objects.create(
+            tank=self.tank,
+            image=image(),
+            is_full_tank_shot=True,
+            taken_at=timezone.make_aware(datetime.datetime(2024, 6, 1)),
+        )
+
+        response = self.client.get(reverse("tanks:timeline", kwargs={"slug": self.tank.slug}))
+
+        self.assertEqual(list(response.context["photos"]), [older, newer])

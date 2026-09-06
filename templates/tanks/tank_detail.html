@@ -15,6 +15,8 @@
   </div>
   <div class="text-nowrap">
     <a href="{% url 'tanks:history' tank.slug %}" class="btn btn-outline-primary btn-sm">Historie</a>
+    <a href="{% url 'tanks:gallery' tank.slug %}" class="btn btn-outline-primary btn-sm">Galerie</a>
+    <a href="{% url 'tanks:timeline' tank.slug %}" class="btn btn-outline-primary btn-sm">Zeitachse</a>
     <a href="{% url 'tanks:measurement-list' tank.slug %}" class="btn btn-outline-primary btn-sm">Messungen</a>
     <a href="{% url 'tanks:event-list' tank.slug %}" class="btn btn-outline-primary btn-sm">Ereignisse</a>
     <a href="{% url 'tanks:schedule-list' tank.slug %}" class="btn btn-outline-primary btn-sm">Termine</a>
@@ -30,7 +32,7 @@
     {% for photo in tank.photos.all %}
       <div class="col">
         <figure class="mb-0">
-          <img src="{{ photo.image.url }}" class="img-fluid rounded {% if photo.pk == tank.cover_photo_id %}border border-primary{% endif %}" alt="{{ photo.caption|default:tank.name }}">
+          <img src="{{ photo.thumbnail.url|default:photo.image.url }}" class="img-fluid rounded {% if photo.pk == tank.cover_photo_id %}border border-primary{% endif %}" alt="{{ photo.caption|default:tank.name }}">
           {% if photo.caption %}
             <figcaption class="small text-body-secondary">{{ photo.caption }}</figcaption>
           {% endif %}
