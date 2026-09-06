@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}KI-Vorschläge – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+  <h1 class="h3 mb-0">KI-Vorschläge</h1>
+  <a class="btn btn-primary" href="{% url 'services:ai_identify' %}">Art bestimmen</a>
+</div>
+
+{% include "services/_ai_budget.html" %}
+
+<h2 class="h5">Offene Entwürfe</h2>
+{% if drafts %}
+  <div class="list-group mb-4">
+    {% for suggestion in drafts %}
+      <a class="list-group-item list-group-item-action"
+         href="{% url 'services:ai_suggestion_detail' suggestion.pk %}">
+        <div class="d-flex justify-content-between align-items-start gap-2">
+          <div>
+            <strong>{{ suggestion.label }}</strong>
+            <div class="small text-body-secondary">
+              {{ suggestion.get_kind_display }} · {{ suggestion.created_at|date:"d.m.Y H:i" }}
+              {% if suggestion.has_profile %} · Steckbrief entworfen{% endif %}
+            </div>
+          </div>
+          {% if suggestion.confidence_percent is not None %}
+            <span class="badge text-bg-light">{{ suggestion.confidence_percent }} %</span>
+          {% endif %}
+        </div>
+      </a>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="card mb-4">
+    <div class="card-body">
+      <p class="mb-0 text-body-secondary">
+        Keine offenen Entwürfe. Über
+        <a href="{% url 'services:ai_identify' %}">Art bestimmen</a> entsteht der erste.
+      </p>
+    </div>
+  </div>
+{% endif %}
+
+{% if decided %}
+  <h2 class="h5">Entschieden</h2>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th scope="col">Art</th>
+          <th scope="col">Status</th>
+          <th scope="col">Entschieden</th>
+          <th scope="col">Katalog</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for suggestion in decided %}
+          <tr>
+            <td><a href="{% url 'services:ai_suggestion_detail' suggestion.pk %}">{{ suggestion.label }}</a></td>
+            <td>
+              <span class="badge {% if suggestion.verified %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+                {{ suggestion.get_status_display }}
+              </span>
+            </td>
+            <td>{{ suggestion.decided_at|date:"d.m.Y H:i"|default:"–" }}</td>
+            <td class="small text-body-secondary">{{ suggestion.catalog_ref|default:"–" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}

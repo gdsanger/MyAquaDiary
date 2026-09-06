@@ -23,6 +23,29 @@
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="navbarMain">
+        <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+          <li class="nav-item">
+            <a class="nav-link" href="{% url 'dashboard:index' %}">Dashboard</a>
+          </li>
+          {% if user.is_authenticated %}
+            <li class="nav-item">
+              <a class="nav-link" href="{% url 'services:device_list' %}">Geräte</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="{% url 'services:energy_overview' %}">Stromverbrauch</a>
+            </li>
+            {# Ohne hinterlegten API-Key gibt es die KI-Seiten nicht — dann
+               führt auch kein Menüpunkt dorthin. #}
+            {% if ai_enabled %}
+              <li class="nav-item">
+                <a class="nav-link" href="{% url 'services:ai_identify' %}">KI</a>
+              </li>
+            {% endif %}
+            <li class="nav-item">
+              <a class="nav-link" href="{% url 'services:mcp_token_list' %}">MCP</a>
+            </li>
+          {% endif %}
+        </ul>
         {% if user.is_authenticated %}
           <ul class="navbar-nav me-auto mb-2 mb-lg-0">
             <li class="nav-item">

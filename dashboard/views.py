@@ -36,11 +36,21 @@ def tasks_tile_context(user, completed_task=None):
         "completed_task": completed_task,
     }
 
+from services.devices import warnings_for
+
 
 class IndexView(LoginRequiredMixin, NavSectionMixin, TemplateView):
     """Gerüst des Dashboards — nur Platzhalter, die Inhalte kommen per HTMX."""
 
     template_name = "dashboard/index.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        # Die Störungen kommen aus dem zuletzt erfassten Messwert und damit
+        # ohne Netzzugriff — das Dashboard bleibt schnell, auch wenn gerade
+        # ein Gerät nicht antwortet.
+        context["warnings"] = warnings_for(self.request.user)
+        return context
     nav_section = "dashboard"
 
 

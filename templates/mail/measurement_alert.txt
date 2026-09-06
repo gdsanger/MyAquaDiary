@@ -1,0 +1,16 @@
+{% extends "mail/base.txt" %}
+{% block content %}Grenzwertwarnung
+
+Hallo {{ recipient_name }},
+
+im Becken {{ tank_name }} liegt ein Messwert außerhalb des eingestellten
+Zielbereichs.
+
+Parameter:   {{ parameter }}
+Messwert:    {{ value }}{% if unit %} {{ unit }}{% endif %}
+Zielbereich: {{ target_min|default:"–" }} - {{ target_max|default:"–" }}{% if unit %} {{ unit }}{% endif %}
+Gemessen am: {{ measured_at|date:"d.m.Y H:i"|default:"–" }}
+{% if detail_url %}
+Becken öffnen: {{ detail_url }}
+{% endif %}
+Diese Warnung lässt sich je Becken abschalten.{% endblock %}

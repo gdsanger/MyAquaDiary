@@ -1,0 +1,28 @@
+{% load l10n %}
+{% comment %}
+Waagerechtes Balkendiagramm als Inline-SVG — Vergleich zwischen Becken und
+Verbrauchshistorie nutzen dasselbe Bild. Geometrie in services/charts.py.
+Die Zahlen stehen zusätzlich in der Tabelle daneben; das Diagramm ist die
+Zugabe, nicht die einzige Quelle.
+
+`localize off` wie beim Linienbild: Koordinaten mit Komma wären kaputtes SVG.
+{% endcomment %}
+{% localize off %}
+{% if chart.has_data %}
+  <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" width="100%" height="{{ chart.height }}"
+       role="img" aria-label="{{ chart.description }}" class="d-block">
+    {% for bar in chart.bars %}
+      <text x="{{ chart.label_width }}" y="{{ bar.text_y }}" dx="-8" text-anchor="end"
+            font-size="12" fill="var(--mad-text)">{{ bar.label }}</text>
+      <rect x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.width }}" height="{{ bar.height }}"
+            rx="3" fill="var(--mad-primary)">
+        <title>{{ bar.label }}: {{ bar.value_label }}</title>
+      </rect>
+      <text x="{{ bar.value_x }}" y="{{ bar.text_y }}" text-anchor="start"
+            font-size="12" fill="var(--mad-muted)">{{ bar.value_label }}</text>
+    {% endfor %}
+  </svg>
+{% else %}
+  <p class="text-body-secondary mb-0">Noch kein Verbrauch erfasst.</p>
+{% endif %}
+{% endlocalize %}

@@ -8,6 +8,13 @@ sich per HTMX selbst nach. Eine langsame Kachel haelt die Seite nicht auf.
 {% endcomment %}
 
 {% block content %}
+<h1 class="h3 mb-3">Willkommen, {{ user }}</h1>
+
+{% include "dashboard/_device_warnings.html" %}
+
+<p class="text-body-secondary">
+  Hier entstehen die KPIs und fälligen Termine deiner Becken.
+</p>
 <div class="mad-page-header">
   <div>
     <h1 class="mad-page-title">Dashboard</h1>

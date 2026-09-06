@@ -32,6 +32,27 @@ services:
       db:
         condition: service_healthy
 
+  # MCP-Endpunkt für externe KI-Clients — eigener Dienst, gleiches Abbild und
+  # dieselbe Datenbank. Die Migrationen laufen im Web-Dienst, hier nicht.
+  mcp:
+    build:
+      context: .
+      args:
+        REQUIREMENTS_FILE: requirements/development.txt
+    command: python manage.py run_mcp_server 0.0.0.0:8001
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+    volumes:
+      - .:/app
+      - media_data:/app/mediafiles
+    ports:
+      - "8001:8001"
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   media_data:

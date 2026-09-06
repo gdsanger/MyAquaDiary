@@ -1,0 +1,412 @@
+"""Formulare der Services-Administration und der Geräteverwaltung."""
+
+from datetime import datetime, time
+
+from django import forms
+from django.utils import timezone
+
+from .eheim import DEFAULT_PASSWORD, DEFAULT_USERNAME
+from .models import AIConfig, AISuggestion, Device, MailConfig, MCPToken
+from .shelly import GEN2_USERNAME
+
+
+class MailConfigForm(forms.ModelForm):
+    """Pflege der Graph-Zugangsdaten.
+
+    Das Client-Secret wird nie in das Formular zurückgeschrieben. Bleibt das
+    Feld leer, behält der gespeicherte Wert seine Gültigkeit.
+    """
+
+    client_secret = forms.CharField(
+        label="Client-Secret",
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Wird verschlüsselt gespeichert und nie angezeigt. Leer lassen, "
+        "um das gespeicherte Secret beizubehalten.",
+    )
+
+    class Meta:
+        model = MailConfig
+        fields = [
+            "is_active",
+            "tenant_id",
+            "client_id",
+            "client_secret",
+            "sender_address",
+            "sender_name",
+            "reply_to",
+        ]
+
+    def clean_client_secret(self):
+        value = self.cleaned_data.get("client_secret", "")
+        if not value and self.instance.pk:
+            return self.instance.client_secret
+        return value
+
+
+class TestMailForm(forms.Form):
+    """Empfänger für die Testmail aus dem Admin."""
+
+    recipient = forms.EmailField(label="Empfänger", widget=forms.EmailInput(attrs={"size": 40}))
+
+
+class AIConfigForm(forms.ModelForm):
+    """Pflege des Claude-Zugangs.
+
+    Der API-Key wird nie in das Formular zurückgeschrieben. Bleibt das Feld
+    leer, behält der gespeicherte Key seine Gültigkeit.
+    """
+
+    api_key = forms.CharField(
+        label="API-Key",
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Wird verschlüsselt gespeichert und nie angezeigt. Leer lassen, "
+        "um den gespeicherten Key beizubehalten.",
+    )
+
+    class Meta:
+        model = AIConfig
+        fields = [
+            "is_enabled",
+            "api_key",
+            "model_name",
+            "monthly_token_budget",
+            "per_user_daily_limit",
+        ]
+
+    def clean_api_key(self):
+        value = self.cleaned_data.get("api_key", "")
+        if not value and self.instance.pk:
+            return self.instance.api_key
+        return value
+
+
+class BootstrapMixin:
+    """Setzt die Bootstrap-Klassen auf allen Widgets.
+
+    Die Anwendung nutzt Bootstrap 5.3 ohne crispy-forms; die Klassen einmal
+    hier zu setzen ist weniger Wiederholung als in jedem Template.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            widget = field.widget
+            if isinstance(widget, forms.CheckboxInput):
+                widget.attrs.setdefault("class", "form-check-input")
+            elif isinstance(widget, forms.Select):
+                widget.attrs.setdefault("class", "form-select")
+            else:
+                widget.attrs.setdefault("class", "form-control")
+
+
+DEFAULT_PASSWORD_HINT = (
+    "Werksseitig lautet der Zugang api / admin. Ein unverändertes Standardpasswort im "
+    "LAN ist kein guter Zustand — nach dem Anlegen bitte über „Zugangsdaten ändern“ "
+    "ein eigenes Passwort setzen."
+)
+
+
+class DeviceDiscoveryForm(BootstrapMixin, forms.Form):
+    """Zugang zu einem Eheim-Gerät, über das das Mesh durchsucht wird."""
+
+    host = forms.CharField(
+        label="Adresse",
+        max_length=200,
+        help_text="IP oder Hostname eines Eheim-Geräts im LAN. Es antwortet für das ganze Mesh.",
+    )
+    username = forms.CharField(label="Benutzer", max_length=100, initial=DEFAULT_USERNAME)
+    password = forms.CharField(
+        label="Passwort",
+        max_length=200,
+        initial=DEFAULT_PASSWORD,
+        widget=forms.PasswordInput(render_value=True),
+        help_text=DEFAULT_PASSWORD_HINT,
+    )
+
+
+class DeviceForm(BootstrapMixin, forms.ModelForm):
+    """Anlegen eines Geräts — meist vorbelegt aus der Mesh-Suche.
+
+    Die Zugangsdaten werden als JSON verschlüsselt im Feld ``credentials``
+    abgelegt; das Passwort wird nie in das Formular zurückgeschrieben.
+    """
+
+    username = forms.CharField(label="Benutzer", max_length=100, initial=DEFAULT_USERNAME)
+    password = forms.CharField(
+        label="Passwort",
+        max_length=200,
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Leer lassen, um ein gespeichertes Passwort beizubehalten.",
+    )
+
+    class Meta:
+        model = Device
+        fields = ["name", "kind", "tank_label", "mac_address", "host", "is_active"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk:
+            self.fields["username"].initial = self.instance.api_user
+
+    def clean_password(self):
+        password = self.cleaned_data.get("password", "")
+        if not password and self.instance.pk:
+            return self.instance.api_password
+        return password
+
+    def save(self, commit=True):
+        device = super().save(commit=False)
+        device.set_credentials(self.cleaned_data["username"], self.cleaned_data.get("password", ""))
+        if commit:
+            device.save()
+        return device
+
+
+class DevicePasswordForm(BootstrapMixin, forms.Form):
+    """Neues Gerätepasswort (``POST /changeauth``)."""
+
+    password = forms.CharField(
+        label="Neues Passwort",
+        min_length=4,
+        max_length=200,
+        widget=forms.PasswordInput(render_value=False),
+    )
+    password_repeat = forms.CharField(
+        label="Wiederholung",
+        max_length=200,
+        widget=forms.PasswordInput(render_value=False),
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("password") and cleaned["password"] != cleaned.get("password_repeat"):
+            raise forms.ValidationError("Die beiden Passwörter stimmen nicht überein.")
+        if cleaned.get("password") == DEFAULT_PASSWORD:
+            raise forms.ValidationError("Das Werkspasswort ist als neues Passwort nicht zulässig.")
+        return cleaned
+
+
+class SpeedField(forms.IntegerField):
+    """Drehzahl in Prozent — die API kennt nur 0–100."""
+
+    def __init__(self, label, **kwargs):
+        kwargs.setdefault("min_value", 0)
+        kwargs.setdefault("max_value", 100)
+        super().__init__(label=label, **kwargs)
+
+
+class ManualModeForm(BootstrapMixin, forms.Form):
+    """Manueller Modus (Pumpenmodus 16)."""
+
+    speed_percent = SpeedField("Drehzahl (%)", initial=70)
+
+
+class BioModeForm(BootstrapMixin, forms.Form):
+    """Bio-Modus (Pumpenmodus 4) mit Tag- und Nachtphase.
+
+    Die Uhrzeiten werden hier als Uhrzeiten eingegeben; die Umrechnung in
+    Minuten seit Mitternacht macht die Service-Schicht.
+    """
+
+    day_speed = SpeedField("Drehzahl Tag (%)", initial=80)
+    night_speed = SpeedField("Drehzahl Nacht (%)", initial=40)
+    day_start = forms.TimeField(label="Tag ab", initial="11:00", widget=forms.TimeInput(
+        attrs={"type": "time"}, format="%H:%M"))
+    night_start = forms.TimeField(label="Nacht ab", initial="23:00", widget=forms.TimeInput(
+        attrs={"type": "time"}, format="%H:%M"))
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("day_start") and cleaned.get("day_start") == cleaned.get("night_start"):
+            raise forms.ValidationError("Tag- und Nachtphase dürfen nicht zur selben Zeit beginnen.")
+        return cleaned
+
+
+class PulseModeForm(BootstrapMixin, forms.Form):
+    """Pulse-Modus (Pumpenmodus 8)."""
+
+    high_speed = SpeedField("Drehzahl hoch (%)", initial=80)
+    high_seconds = forms.IntegerField(label="Dauer hoch (s)", min_value=1, max_value=3600, initial=30)
+    low_speed = SpeedField("Drehzahl niedrig (%)", initial=40)
+    low_seconds = forms.IntegerField(label="Dauer niedrig (s)", min_value=1, max_value=3600, initial=30)
+
+
+class ShellyDeviceForm(BootstrapMixin, forms.ModelForm):
+    """Anlegen einer Shelly-Steckdose über ihre Adresse.
+
+    Es gibt keine Mesh-Suche wie bei Eheim: eine Shelly-Steckdose ist im LAN
+    für sich allein erreichbar. Angegeben wird deshalb die Adresse; Generation,
+    Modell und Softwarestand liest die Anwendung selbst über ``/shelly``.
+
+    Zugangsdaten sind optional — im Auslieferungszustand ist die lokale API
+    offen; erst ein am Gerät gesetzter Login macht sie nötig.
+    """
+
+    username = forms.CharField(
+        label="Benutzer",
+        max_length=100,
+        required=False,
+        initial=GEN2_USERNAME,
+        help_text="Nur nötig, wenn am Gerät ein Login gesetzt ist. Gen2 kennt nur „admin“.",
+    )
+    password = forms.CharField(
+        label="Passwort",
+        max_length=200,
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Leer lassen, wenn am Gerät kein Login gesetzt ist.",
+    )
+
+    class Meta:
+        model = Device
+        fields = ["name", "host", "tank_label", "is_active"]
+        help_texts = {"host": "IP oder Hostname der Steckdose im lokalen Netz."}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.instance.kind = Device.Kind.SHELLY_PLUG
+        # Am Modell ist die Adresse optional (Eheim-Geräte im Mesh brauchen
+        # keine eigene); für eine Steckdose ist sie der ganze Zugang.
+        self.fields["host"].required = True
+        if self.instance.pk:
+            self.fields["username"].initial = self.instance.api_user
+
+    def clean_password(self):
+        password = self.cleaned_data.get("password", "")
+        if not password and self.instance.pk:
+            return self.instance.api_password
+        return password
+
+    def save(self, commit=True):
+        device = super().save(commit=False)
+        device.kind = Device.Kind.SHELLY_PLUG
+        device.set_credentials(
+            self.cleaned_data.get("username") or GEN2_USERNAME,
+            self.cleaned_data.get("password", ""),
+        )
+        if commit:
+            device.save()
+        return device
+
+
+#: Aktion -> (Formularklasse, Anzeigetext). Aktionen ohne Parameter (ein/aus)
+#: haben kein Formular.
+EHEIM_CONTROLS = {
+    "on": (None, "Filter einschalten"),
+    "off": (None, "Filter ausschalten"),
+    "manual": (ManualModeForm, "Manueller Modus"),
+    "bio": (BioModeForm, "Bio-Modus"),
+    "pulse": (PulseModeForm, "Pulse-Modus"),
+}
+
+#: Eine Steckdose kann genau zwei Dinge — und mehr soll sie hier auch nicht
+#: können. Zeitpläne und Automatik kann der Shelly selbst besser.
+SHELLY_CONTROLS = {
+    "on": (None, "Steckdose einschalten"),
+    "off": (None, "Steckdose ausschalten"),
+}
+
+
+def controls_for(device) -> dict:
+    """Schaltbare Aktionen einer Geräteart — leer heißt: keine Steuerung."""
+    if device.is_shelly:
+        return SHELLY_CONTROLS
+    if device.kind == Device.Kind.EHEIM_CLASSICVARIO:
+        return EHEIM_CONTROLS
+    return {}
+
+
+class IdentifyForm(BootstrapMixin, forms.Form):
+    """Foto für eine Bestimmung.
+
+    Das Bild wird nicht gespeichert: es geht verkleinert an Claude und ist
+    danach wieder weg. Was bleibt, ist der Vorschlag — und den bestätigt der
+    Benutzer selbst.
+    """
+
+    kind = forms.ChoiceField(label="Was ist zu sehen?", choices=AISuggestion.Kind.choices)
+    photo = forms.ImageField(
+        label="Foto",
+        help_text="Wird vor dem Versand verkleinert. Je schärfer und näher, desto besser.",
+    )
+    notes = forms.CharField(
+        label="Beobachtung (optional)",
+        max_length=500,
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2}),
+        help_text="Größe, Verhalten, Fundort — alles, was das Bild nicht zeigt.",
+    )
+
+
+class CandidateForm(forms.Form):
+    """Der übernommene Kandidat einer Bestimmung.
+
+    Die Bestimmung selbst wird nicht zwischengespeichert; der ausgewählte
+    Kandidat kommt aus den versteckten Feldern der Ergebnisliste zurück.
+    """
+
+    kind = forms.ChoiceField(choices=AISuggestion.Kind.choices)
+    scientific_name = forms.CharField(max_length=160, required=False)
+    common_name = forms.CharField(max_length=160, required=False)
+    confidence = forms.FloatField(min_value=0, max_value=1, required=False)
+    reasoning = forms.CharField(max_length=2000, required=False)
+
+    def clean(self):
+        cleaned = super().clean()
+        if not (cleaned.get("scientific_name") or cleaned.get("common_name")):
+            raise forms.ValidationError("Ohne Namen lässt sich kein Vorschlag ablegen.")
+        return cleaned
+
+
+class MCPTokenForm(BootstrapMixin, forms.Form):
+    """Ein neuer Zugang zum MCP-Endpunkt.
+
+    Kein ModelForm: der Token entsteht nicht aus Formularfeldern, sondern in
+    :meth:`services.models.MCPToken.issue` — dort, wo auch der Klartext
+    entsteht, den es genau einmal zu sehen gibt.
+
+    Schreibrecht ist bewusst nicht vorbelegt. Ein Zugang, der nur auswerten
+    soll, braucht keines, und ein Haken, den man setzen muss, wird bewusster
+    gesetzt als einer, den man wegnehmen müsste.
+    """
+
+    name = forms.CharField(
+        label="Name",
+        max_length=120,
+        help_text="Wofür der Zugang gedacht ist, z. B. „Claude Desktop, Arbeitsrechner“.",
+    )
+    allow_write = forms.BooleanField(
+        label="Darf schreiben",
+        required=False,
+        help_text="Ohne Haken kann der Zugang Messreihen, Ereignisse und Besatz "
+        "nur lesen — nichts anlegen.",
+    )
+    expires_at = forms.DateField(
+        label="Gültig bis",
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text="Leer lassen für einen unbefristeten Zugang.",
+    )
+
+    def clean_expires_at(self):
+        """Das Ablaufdatum gilt bis zum Ende des gewählten Tages."""
+        value = self.cleaned_data.get("expires_at")
+        if value is None:
+            return None
+        if value < timezone.localdate():
+            raise forms.ValidationError("Das Ablaufdatum liegt in der Vergangenheit.")
+        return timezone.make_aware(
+            datetime.combine(value, time.max), timezone.get_current_timezone()
+        )
+
+    def issue(self, user):
+        """Legt den Token an und gibt ihn mit seinem Klartext zurück."""
+        return MCPToken.issue(
+            user,
+            self.cleaned_data["name"],
+            allow_write=self.cleaned_data["allow_write"],
+            expires_at=self.cleaned_data["expires_at"],
+        )

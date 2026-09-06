@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+
+{% block title %}{{ device.name }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<nav aria-label="Brotkrumen" class="mb-2">
+  <a href="{% url 'services:device_list' %}" class="small">← Geräte</a>
+</nav>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+  <div>
+    <h1 class="h3 mb-1">{{ device.name }}</h1>
+    <p class="text-body-secondary mb-0">
+      {{ device.get_kind_display }}{% if device.generation_label %} {{ device.generation_label }}{% endif %}
+      · {{ device.host }}{% if device.mac_address %} · {{ device.mac_address }}{% endif %}
+      {% if device.firmware %} · Software {{ device.firmware }}{% endif %}
+      {% if device.tank_label %} · {{ device.tank_label }}{% endif %}
+    </p>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="{% url 'services:device_edit' device.pk %}">Bearbeiten</a>
+    {% if device.is_eheim %}
+      <a class="btn btn-outline-secondary" href="{% url 'services:device_credentials' device.pk %}">Zugangsdaten ändern</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if firmware_hint %}
+  <div class="alert alert-warning" role="alert">{{ firmware_hint }}</div>
+{% endif %}
+{% if device.uses_default_password %}
+  <div class="alert alert-warning" role="alert">
+    Das Gerät nutzt noch das Werkspasswort (api / admin). Ein unverändertes Standardpasswort im
+    LAN ist kein guter Zustand —
+    <a href="{% url 'services:device_credentials' device.pk %}">jetzt ändern</a>.
+  </div>
+{% endif %}
+
+<div class="row g-3">
+  <div class="col-12 col-lg-5">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h5 card-title">Status</h2>
+        {% if device.is_active %}
+          <div hx-get="{% url 'services:device_status' device.pk %}" hx-trigger="load" hx-swap="outerHTML">
+            <p class="text-body-secondary mb-0">Status wird geladen …</p>
+          </div>
+        {% else %}
+          <p class="text-body-secondary mb-0">Das Gerät ist deaktiviert und wird nicht abgefragt.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-7">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h5 card-title">
+          {% if device.is_shelly %}Leistung im Verlauf{% else %}Drehzahl im Verlauf{% endif %}
+        </h2>
+        {% include "services/_line_chart.html" %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if device.is_shelly %}
+  <div class="card mt-3">
+    <div class="card-body">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <h2 class="h5 card-title mb-0">Stromverbrauch</h2>
+        <div class="btn-group" role="group" aria-label="Zeitraum wählen">
+          {% for value, label in periods %}
+            <a class="btn btn-sm {% if value == period %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+               href="?zeitraum={{ value }}">{{ label }}</a>
+          {% endfor %}
+        </div>
+      </div>
+      {% include "services/_bar_chart.html" with chart=energy_chart %}
+      {% if buckets %}
+        <div class="table-responsive mt-3">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Zeitraum</th>
+                <th scope="col" class="text-end">Verbrauch</th>
+                <th scope="col" class="text-end">Kosten</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for bucket in buckets %}
+                <tr>
+                  <td>{{ bucket.label }}</td>
+                  <td class="text-end">{{ bucket.kwh }} kWh</td>
+                  <td class="text-end">{{ bucket.cost }} €</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+      <p class="small text-body-secondary mt-2 mb-0">
+        Der Verbrauch ist die Differenz der Zählerstände;
+        <a href="{% url 'services:energy_overview' %}">im Vergleich mit den anderen Becken</a>
+        wird daraus die Antwort auf die Frage, was welches Becken kostet.
+      </p>
+    </div>
+  </div>
+{% endif %}
+
+{% if controls %}
+  <div class="card mt-3">
+    <div class="card-body">
+      <h2 class="h5 card-title">Steuerung</h2>
+      <p class="text-body-secondary">
+        Jede Änderung wird vor dem Senden zur Bestätigung angezeigt und anschließend protokolliert.
+      </p>
+      <div class="d-flex flex-wrap gap-2">
+        {% for action, label in controls %}
+          <a class="btn btn-outline-primary"
+             href="{% url 'services:device_control' device.pk action %}">{{ label }}</a>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+<div class="row g-3 mt-0">
+  <div class="col-12 col-lg-7">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h5 card-title">Letzte Messwerte</h2>
+        {% if readings %}
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead>
+                <tr>
+                  <th scope="col">Zeitpunkt</th>
+                  {% if device.is_shelly %}
+                    <th scope="col">Leistung</th>
+                    <th scope="col">Zählerstand</th>
+                  {% else %}
+                    <th scope="col">Drehzahl</th>
+                    <th scope="col">Modus</th>
+                  {% endif %}
+                  <th scope="col">Zustand</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for reading in readings %}
+                  <tr>
+                    <td>{{ reading.read_at|date:"d.m.Y H:i" }}</td>
+                    {% if device.is_shelly %}
+                      <td>{% if reading.power_w is not None %}{{ reading.power_w }} W{% else %}–{% endif %}</td>
+                      <td>{% if reading.energy_total_wh is not None %}{{ reading.energy_total_kwh }} kWh{% else %}–{% endif %}</td>
+                    {% else %}
+                      <td>{% if reading.rpm_percent is not None %}{{ reading.rpm_percent }} %{% else %}–{% endif %}</td>
+                      <td>{{ reading.mode_label|default:"–" }}</td>
+                    {% endif %}
+                    <td>
+                      {% if reading.has_error %}
+                        <span class="text-danger">{{ reading.error_text }}</span>
+                      {% elif reading.is_on %}{% if device.is_shelly %}an{% else %}läuft{% endif %}
+                      {% elif reading.is_on is None %}–{% else %}aus{% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="text-body-secondary mb-0">Noch keine Messwerte erfasst.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-5">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h5 card-title">Protokoll</h2>
+        {% if events %}
+          <ul class="list-unstyled mb-0">
+            {% for event in events %}
+              <li class="border-bottom py-2">
+                <div class="small text-body-secondary">
+                  {{ event.occurred_at|date:"d.m.Y H:i" }}{% if event.user %} · {{ event.user }}{% endif %}
+                </div>
+                <div{% if not event.succeeded %} class="text-danger"{% endif %}>{{ event.title }}</div>
+                {% if event.description %}
+                  <div class="small text-body-secondary">{{ event.description }}</div>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="text-body-secondary mb-0">Noch keine Änderung am Gerät protokolliert.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

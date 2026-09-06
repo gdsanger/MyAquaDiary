@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}{{ label }} bestätigen – {{ device.name }}{% endblock %}
+
+{% block content %}
+<div class="row">
+  <div class="col-12 col-md-8 col-lg-6">
+    <div class="card">
+      <div class="card-body">
+        <h1 class="h4 card-title">Änderung bestätigen</h1>
+        <p>An <strong>{{ device.name }}</strong> wird gesendet:</p>
+        <p class="alert alert-info" role="alert">{{ summary }}</p>
+        <p class="text-body-secondary small">
+          Die Änderung wirkt sofort am Gerät und wird protokolliert.
+        </p>
+        <form method="post" action="{% url 'services:device_control' device.pk action %}">
+          {% csrf_token %}
+          {% for key, value in posted %}
+            <input type="hidden" name="{{ key }}" value="{{ value }}">
+          {% endfor %}
+          <input type="hidden" name="confirm" value="1">
+          <button type="submit" class="btn btn-primary">Jetzt senden</button>
+          <a class="btn btn-outline-secondary" href="{% url 'services:device_detail' device.pk %}">Abbrechen</a>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
