@@ -31,7 +31,7 @@ docker compose exec web python manage.py createsuperuser
 | `catalog` | Pflanzen- und Tier-Katalog (userübergreifend) |
 | `tanks` | Becken, Messreihen, Ereignisse, Termine, Besatz, Bepflanzung, Fotos |
 | `dashboard` | KPIs, fällige Termine |
-| `services` | Anbindung Graph-API, Eheim, Shelly, KI; Verbrauchsauswertung |
+| `services` | Anbindung Graph-API, Eheim, Shelly, KI, MCP; Verbrauchsauswertung |
 
 ## Mailversand (Microsoft Graph)
 
@@ -282,3 +282,124 @@ Das Modell steht in der Konfiguration (Default `claude-opus-5`) und lässt sich
 im Admin umstellen, ohne dass eine Migration nötig wird. Modelle ohne
 Structured Outputs werden erkannt; deren Antworten werden nachsichtig geparst,
 statt die Anfrage mit einem Fehler zu quittieren.
+
+## MCP-Server (Zugang für KI-Clients)
+
+Eigener Endpunkt, über den externe MCP-Clients — Claude Desktop, Claude Code,
+andere MCP-fähige Anwendungen — das Tagebuch **lesen und beschreiben** können.
+Er teilt sich Modelle und Service-Schicht mit der Web-App: kein paralleler
+Datenzugriff, keine zweite Geschäftslogik, nur eine weitere Oberfläche auf
+dieselbe Anwendung.
+
+Der Server läuft als **eigener Dienst** neben der Web-App — in
+`docker compose` als Dienst `mcp` auf Port 8001, sonst:
+
+```bash
+# Entwicklung
+python manage.py run_mcp_server 0.0.0.0:8001
+
+# Betrieb
+gunicorn config.wsgi_mcp:application \
+    --bind 0.0.0.0:8001 --worker-class gthread --threads 16 --timeout 0
+```
+
+Ein SSE-Strom belegt seinen Worker, solange der Client verbunden ist — daher
+Threads statt zusätzlicher Prozesse und kein Worker-Timeout. **Ein Prozess ist
+Absicht:** die offenen Sitzungen liegen im Arbeitsspeicher.
+
+Der Entrypoint kennt nur `config/mcp_urls.py`. Admin, Login und
+Beckenverwaltung sind über diesen Port nicht erreichbar, auch nicht
+versehentlich.
+
+### Zugänge
+
+Tokens legt jeder Benutzer selbst unter *MCP* an: Name, wahlweise Schreibrecht
+und ein Ablaufdatum. Der Klartext wird **genau einmal** angezeigt — gespeichert
+ist nur sein SHA-256-Hash. Widerrufen wirkt sofort, auch mitten in einer
+laufenden Sitzung; der Token bleibt danach als Eintrag stehen, damit das
+Protokoll ihn weiter benennen kann.
+
+Beispielkonfiguration für Claude Desktop
+(`claude_desktop_config.json`) — der Token steht im `Authorization`-Kopf, nicht
+in der Adresse:
+
+```json
+{
+  "mcpServers": {
+    "myaquadiary": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote",
+        "https://tagebuch.example.com/mcp/sse/",
+        "--header", "Authorization: Bearer mad_dein-token"
+      ]
+    }
+  }
+}
+```
+
+Dieselbe Angabe steht mit der richtigen Adresse auf der Seite *MCP*, sobald ein
+Token angelegt ist; welche Adresse dort erscheint, steht in `MCP_PUBLIC_URL`
+(Default `http://localhost:8001`) — der MCP-Dienst hört auf einem eigenen Port
+und damit nicht unter `SITE_URL`.
+
+### Werkzeuge
+
+| Lesend | Zweck |
+|---|---|
+| `list_tanks` | Becken des Nutzers mit Stammdaten |
+| `get_tank` | Detail inkl. Technik, Zielbereichen, Besatz, Bepflanzung |
+| `list_measurements` | Messreihen, Zeitraum- und Parameterfilter |
+| `get_measurement` | Einzelne Messreihe inkl. berechnetem CO2 und Zielabgleich |
+| `list_events` | Ereignisse, Kategorie- und Zeitraumfilter |
+| `list_due_schedules` | Fällige und anstehende Termine |
+| `search_catalog` | Pflanzen- und Tierkatalog durchsuchen |
+| `get_catalog_entry` | Steckbrief |
+
+| Schreibend | Zweck |
+|---|---|
+| `create_measurement` | Messreihe anlegen |
+| `create_event` | Ereignis anlegen |
+| `complete_schedule` | Termin quittieren (erzeugt Ereignis, rechnet fort) |
+| `add_tank_animal` / `add_tank_plant` | Besatz und Bepflanzung ergänzen |
+| `record_animal_movement` | Zu- oder Abgang buchen |
+
+Ein Token ohne Schreibrecht bekommt die schreibenden Werkzeuge gar nicht erst
+zu sehen — geprüft wird trotzdem beim Aufruf.
+
+### Was es bewusst nicht gibt
+
+- **Geräte.** Weder lesend noch schaltend. Eheim-Filter und Shelly-Steckdosen
+  regeln sich autark; ihre Werte gehören in die Oberfläche und in die
+  serverseitige Auswertung, nicht in ein externes Modell.
+- **Löschen.** Kein `delete_*`. Was falsch angelegt wurde, wird in der
+  Oberfläche korrigiert — ein irrtümlich ausgelöster Löschbefehl aus einem
+  Chatfenster ist nicht zurückzuholen.
+- **Katalogpflege.** Einträge, die alle Benutzer sehen, entstehen nicht über
+  eine Einzelnutzer-Schnittstelle.
+- **Benutzer-, Token- und Konfigurationsverwaltung.** Nichts, was Rechte oder
+  Zugänge verändert.
+
+### Eingrenzung, Kennzeichnung, Protokoll
+
+Der Token bestimmt den Benutzer, der Benutzer bestimmt die Daten. Jede Abfrage
+beginnt bei `Tank.objects.for_user(token.user)`, alles Weitere hängt daran
+(`services/mcp/data.py`). Eine fremde `tank_id` ist für den Client nicht von
+einer erfundenen zu unterscheiden — die Fehlermeldung ist dieselbe.
+
+Was über MCP entsteht, trägt `source="mcp"` am Datensatz, sofern das Modell
+eine Herkunft führt. Zusätzlich hält `MCPAccessLog` jeden **schreibenden**
+Aufruf fest — Zeitpunkt, Token, Werkzeug, Parameter, angelegter Datensatz —
+auch den abgewiesenen. Lesende Aufrufe stehen dort nicht: sie verändern nichts,
+und ein Protokoll jeder Abfrage wäre eine Bewegungsdatenbank über den eigenen
+Benutzer.
+
+Je Token gilt ein Ratelimit von `MCP_RATE_LIMIT_PER_MINUTE` Aufrufen je Minute
+(Default 60, `0` schaltet es ab). Gezählt wird im Cache; der Standard-Cache ist
+prozesslokal, was zum Ein-Prozess-Betrieb passt. Wer den Dienst auf mehrere
+Worker verteilt, hinterlegt einen gemeinsamen Cache.
+
+Becken und Katalog werden — wie in `services/ai/catalog.py` — über
+`apps.get_model` aufgelöst statt importiert. Solange die Modelle im Epic
+fehlen, antwortet jedes Werkzeug mit einer verständlichen Meldung, statt den
+Server beim Start scheitern zu lassen.

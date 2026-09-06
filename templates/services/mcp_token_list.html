@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}MCP-Zugänge – MyAquaDiary{% endblock %}
+
+{% block content %}
+<h1 class="h3 mb-3">MCP-Zugänge</h1>
+
+<p class="text-body-secondary">
+  Über den MCP-Endpunkt können KI-Clients wie Claude Desktop dein Tagebuch lesen
+  und — wenn du es erlaubst — beschreiben. Jeder Zugang gilt nur für deine
+  eigenen Becken. Geräte, Löschen und die Katalogpflege sind über diese
+  Schnittstelle grundsätzlich nicht erreichbar.
+</p>
+
+{# Der Klartext steht genau in dieser Antwort und wird nirgends gespeichert.
+   Deshalb der Hinweis: ein zweites Mal gibt es ihn nicht. #}
+{% if issued_key %}
+  <div class="card border-success mb-4">
+    <div class="card-body">
+      <h2 class="h5 card-title">Der Token — nur jetzt sichtbar</h2>
+      <p class="card-text">
+        Kopiere ihn in die Konfiguration deines Clients. Nach dem Verlassen
+        dieser Seite lässt er sich nicht wieder anzeigen; ist er verloren,
+        widerrufst du ihn und legst einen neuen an.
+      </p>
+      <pre class="bg-body-tertiary border rounded p-3 mb-3"><code>{{ issued_key }}</code></pre>
+      <h3 class="h6">Beispiel für Claude Desktop</h3>
+      <pre class="bg-body-tertiary border rounded p-3 mb-0 small"><code>{
+  "mcpServers": {
+    "myaquadiary": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote",
+        "{{ sse_url }}",
+        "--header", "Authorization: Bearer {{ issued_key }}"
+      ]
+    }
+  }
+}</code></pre>
+    </div>
+  </div>
+{% endif %}
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    <h2 class="h5">Deine Zugänge</h2>
+    {% if tokens %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">Token</th>
+              <th scope="col">Zugriff</th>
+              <th scope="col">Status</th>
+              <th scope="col">Zuletzt benutzt</th>
+              <th scope="col"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for token in tokens %}
+              <tr>
+                <td>
+                  {{ token.name }}
+                  <div class="small text-body-secondary">
+                    angelegt {{ token.created_at|date:"d.m.Y" }}
+                    {% if token.expires_at %} · gültig bis {{ token.expires_at|date:"d.m.Y" }}{% endif %}
+                  </div>
+                </td>
+                <td><code>{{ token.hint }}…</code></td>
+                <td>
+                  <span class="badge {% if token.allow_write %}text-bg-warning{% else %}text-bg-light{% endif %}">
+                    {{ token.access_label }}
+                  </span>
+                </td>
+                <td>
+                  <span class="badge {% if token.is_usable %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+                    {{ token.status_label }}
+                  </span>
+                </td>
+                <td>{{ token.last_used_at|date:"d.m.Y H:i"|default:"–" }}</td>
+                <td class="text-end">
+                  {% if not token.is_revoked %}
+                    <form method="post" action="{% url 'services:mcp_token_revoke' token.pk %}">
+                      {% csrf_token %}
+                      <button type="submit" class="btn btn-outline-danger btn-sm">Widerrufen</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="card">
+        <div class="card-body">
+          <p class="mb-0 text-body-secondary">Noch kein Zugang angelegt.</p>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-body">
+        <h2 class="h5 card-title">Neuen Zugang anlegen</h2>
+        <form method="post">
+          {% csrf_token %}
+          {% include "services/_form_fields.html" with form=form %}
+          <button type="submit" class="btn btn-primary">Anlegen</button>
+        </form>
+      </div>
+    </div>
+    <div class="card mt-3">
+      <div class="card-body">
+        <h2 class="h6 card-title">Endpunkt</h2>
+        <p class="card-text small mb-0">
+          <code>{{ sse_url }}</code><br>
+          Anmeldung über den Kopf <code>Authorization: Bearer &lt;Token&gt;</code>.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -28,4 +28,6 @@ urlpatterns = [
         views.ai_suggestion_decide,
         name="ai_suggestion_decide",
     ),
+    path("mcp/zugaenge/", views.mcp_token_list, name="mcp_token_list"),
+    path("mcp/zugaenge/<int:pk>/widerrufen/", views.mcp_token_revoke, name="mcp_token_revoke"),
 ]

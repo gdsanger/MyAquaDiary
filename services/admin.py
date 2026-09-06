@@ -21,6 +21,8 @@ from .models import (
     DeviceReading,
     MailConfig,
     MailLog,
+    MCPAccessLog,
+    MCPToken,
 )
 
 
@@ -329,3 +331,63 @@ class AISuggestionAdmin(admin.ModelAdmin):
     @admin.display(description="Vorschlag")
     def label(self, obj):
         return obj.label
+
+
+@admin.register(MCPToken)
+class MCPTokenAdmin(admin.ModelAdmin):
+    """Einblick und Notbremse.
+
+    Angelegt werden Tokens in der Anwendung, nicht hier: nur dort wird der
+    Klartext einmalig ausgegeben, und ein Token gehört dem Benutzer, der ihn
+    benutzt. Was der Admin kann, ist widerrufen — der einzige Eingriff, den
+    ein Betreiber im Zweifel wirklich braucht.
+    """
+
+    list_display = ["name", "user", "hint", "access_label", "status_label",
+                    "created_at", "last_used_at", "expires_at"]
+    list_filter = ["allow_write", "created_at"]
+    search_fields = ["name", "user__username", "user__email"]
+    readonly_fields = ["user", "name", "hint", "allow_write", "created_at",
+                       "last_used_at", "expires_at", "revoked_at"]
+    actions = ["revoke_tokens"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Zugriff")
+    def access_label(self, obj):
+        return obj.access_label
+
+    @admin.display(description="Status")
+    def status_label(self, obj):
+        return obj.status_label
+
+    @admin.action(description="Ausgewählte Tokens widerrufen")
+    def revoke_tokens(self, request, queryset):
+        revoked = 0
+        for token in queryset:
+            if not token.is_revoked:
+                token.revoke()
+                revoked += 1
+        self.message_user(request, f"{revoked} Token widerrufen.", messages.SUCCESS)
+
+
+@admin.register(MCPAccessLog)
+class MCPAccessLogAdmin(admin.ModelAdmin):
+    """Reines Leseprotokoll — Einträge entstehen nur durch Aufrufe."""
+
+    list_display = ["created_at", "tool", "user", "token_name", "object_ref", "succeeded"]
+    list_filter = ["succeeded", "tool", "created_at"]
+    search_fields = ["token_name", "user__username", "object_ref"]
+    date_hierarchy = "created_at"
+    readonly_fields = ["created_at", "token", "user", "token_name", "tool", "arguments",
+                       "object_ref", "succeeded", "error_message"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
