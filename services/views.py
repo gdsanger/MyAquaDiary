@@ -616,7 +616,9 @@ def mcp_token_list(request):
             "form": form,
             "tokens": request.user.mcp_tokens.all(),
             "issued_key": issued_key,
-            "sse_url": f"{settings.SITE_URL.rstrip('/')}/mcp/sse/",
+            # Nicht SITE_URL: der MCP-Server ist ein eigener Dienst hinter einer
+            # eigenen Adresse.
+            "sse_url": f"{settings.MCP_PUBLIC_URL.rstrip('/')}/mcp/sse/",
         },
     )
 

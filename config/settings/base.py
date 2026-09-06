@@ -154,6 +154,12 @@ AI_TIMEOUT = env.int("AI_TIMEOUT", default=120)
 # Basis-URL für absolute Links in Mails (Mails haben keinen Request-Kontext).
 SITE_URL = env("SITE_URL", default="http://localhost:8000")
 
+# Öffentliche Adresse des MCP-Endpunkts. Steht getrennt neben SITE_URL, weil
+# der MCP-Server ein eigener Dienst auf einem eigenen Port ist — und die
+# Beispielkonfiguration auf der Token-Seite die Adresse nennen muss, die der
+# Client wirklich erreicht.
+MCP_PUBLIC_URL = env("MCP_PUBLIC_URL", default="http://localhost:8001")
+
 # Aufrufe je MCP-Token und Minute. Schützt vor einem fehlkonfigurierten Client,
 # der in einer Schleife schreibt. 0 schaltet die Prüfung ab.
 MCP_RATE_LIMIT_PER_MINUTE = env.int("MCP_RATE_LIMIT_PER_MINUTE", default=60)

@@ -8,7 +8,7 @@ widerrufen lässt.
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -123,10 +123,12 @@ class MCPTokenPageTests(TestCase):
         self.assertNotContains(again, key)
 
     def test_the_page_shows_an_example_configuration(self):
-        response = self.client.post(self.url, {"name": "Claude Desktop"})
+        """Mit der Adresse des MCP-Dienstes, nicht der der Web-App."""
+        with override_settings(MCP_PUBLIC_URL="https://tagebuch.example.com:8001"):
+            response = self.client.post(self.url, {"name": "Claude Desktop"})
 
         self.assertContains(response, "mcp-remote")
-        self.assertContains(response, "/mcp/sse/")
+        self.assertContains(response, "https://tagebuch.example.com:8001/mcp/sse/")
 
     def test_write_access_is_only_granted_when_asked_for(self):
         self.client.post(self.url, {"name": "Nur lesen"})

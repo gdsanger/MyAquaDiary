@@ -339,7 +339,9 @@ in der Adresse:
 ```
 
 Dieselbe Angabe steht mit der richtigen Adresse auf der Seite *MCP*, sobald ein
-Token angelegt ist.
+Token angelegt ist; welche Adresse dort erscheint, steht in `MCP_PUBLIC_URL`
+(Default `http://localhost:8001`) — der MCP-Dienst hört auf einem eigenen Port
+und damit nicht unter `SITE_URL`.
 
 ### Werkzeuge
 
