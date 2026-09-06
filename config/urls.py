@@ -27,6 +27,7 @@ urlpatterns = [
     ),
     path("", include("core.urls")),
     path("tanks/", include("tanks.urls")),
+    path("katalog/", include("catalog.urls")),
     path("", include("dashboard.urls")),
 ]
 

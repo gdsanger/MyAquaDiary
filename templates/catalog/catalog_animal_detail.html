@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}{{ animal }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h3 mb-1">
+      {{ animal }}
+      {% if animal.is_line_bred_variant %}<span class="badge text-bg-info">Zuchtform</span>{% endif %}
+    </h1>
+    {% if animal.common_name %}
+      <p class="text-body-secondary mb-0">{{ animal.common_name }}</p>
+    {% endif %}
+  </div>
+  {% if can_edit %}
+    <a href="{% url 'catalog:animal-update' animal.slug %}" class="btn btn-outline-secondary btn-sm">Bearbeiten</a>
+  {% endif %}
+</div>
+
+{% if not animal.verified %}
+  <div class="alert alert-warning">Dieser Eintrag ist noch nicht geprüft.</div>
+{% endif %}
+
+{% if animal.warning %}
+  <div class="alert alert-danger">{{ animal.warning }}</div>
+{% endif %}
+
+{% if animal.images.all %}
+  <div class="row row-cols-2 row-cols-md-4 g-2 mb-4">
+    {% for image in animal.images.all %}
+      <div class="col">
+        <figure class="mb-0">
+          <img src="{{ image.image.url }}" class="img-fluid rounded {% if image.is_primary %}border border-primary{% endif %}" alt="{{ image.caption|default:animal }}">
+          {% if image.caption or image.sex %}
+            <figcaption class="small text-body-secondary">
+              {{ image.caption }}{% if image.sex %} ({{ image.get_sex_display }}){% endif %}
+            </figcaption>
+          {% endif %}
+        </figure>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<h2 class="h5">Steckbrief</h2>
+<dl class="row">
+  <dt class="col-sm-3">Gruppe</dt><dd class="col-sm-9">{{ animal.get_group_display }}</dd>
+  <dt class="col-sm-3">Familie</dt><dd class="col-sm-9">{{ animal.family|default:"–" }}</dd>
+  <dt class="col-sm-3">Herkunft</dt><dd class="col-sm-9">{{ animal.origin|default:"–" }}</dd>
+  <dt class="col-sm-3">Schwierigkeit</dt><dd class="col-sm-9">{{ animal.get_difficulty_display }}</dd>
+  {% if animal.zone %}
+    <dt class="col-sm-3">Zone</dt><dd class="col-sm-9">{{ animal.get_zone_display }}</dd>
+  {% endif %}
+  {% if animal.social_behavior %}
+    <dt class="col-sm-3">Sozialverhalten</dt><dd class="col-sm-9">{{ animal.get_social_behavior_display }}</dd>
+  {% endif %}
+  {% if animal.min_group_size %}
+    <dt class="col-sm-3">Mindestgruppengröße</dt><dd class="col-sm-9">{{ animal.min_group_size }}</dd>
+  {% endif %}
+  {% if animal.size_max_cm %}
+    <dt class="col-sm-3">Größe (max.)</dt><dd class="col-sm-9">{{ animal.size_max_cm }} cm</dd>
+  {% endif %}
+  {% if animal.min_tank_liters %}
+    <dt class="col-sm-3">Mindestbeckengröße</dt><dd class="col-sm-9">{{ animal.min_tank_liters }} l</dd>
+  {% endif %}
+  {% if animal.min_tank_length_cm %}
+    <dt class="col-sm-3">Mindestbeckenlänge</dt><dd class="col-sm-9">{{ animal.min_tank_length_cm }} cm</dd>
+  {% endif %}
+  {% if animal.lifespan_years %}
+    <dt class="col-sm-3">Lebenserwartung</dt><dd class="col-sm-9">{{ animal.lifespan_years }} Jahre</dd>
+  {% endif %}
+  {% if animal.temp_min_c or animal.temp_max_c %}
+    <dt class="col-sm-3">Temperatur</dt><dd class="col-sm-9">{{ animal.temp_min_c|default:"?" }}–{{ animal.temp_max_c|default:"?" }} °C</dd>
+  {% endif %}
+  {% if animal.ph_min or animal.ph_max %}
+    <dt class="col-sm-3">pH-Wert</dt><dd class="col-sm-9">{{ animal.ph_min|default:"?" }}–{{ animal.ph_max|default:"?" }}</dd>
+  {% endif %}
+  {% if animal.kh_min or animal.kh_max %}
+    <dt class="col-sm-3">KH</dt><dd class="col-sm-9">{{ animal.kh_min|default:"?" }}–{{ animal.kh_max|default:"?" }} °dKH</dd>
+  {% endif %}
+  {% if animal.gh_min or animal.gh_max %}
+    <dt class="col-sm-3">GH</dt><dd class="col-sm-9">{{ animal.gh_min|default:"?" }}–{{ animal.gh_max|default:"?" }} °dGH</dd>
+  {% endif %}
+  {% if animal.diet %}
+    <dt class="col-sm-3">Ernährung</dt><dd class="col-sm-9">{{ animal.get_diet_display }}</dd>
+  {% endif %}
+  {% if animal.breeding_type %}
+    <dt class="col-sm-3">Fortpflanzung</dt><dd class="col-sm-9">{{ animal.get_breeding_type_display }}</dd>
+  {% endif %}
+</dl>
+
+{% if animal.breeding_notes %}
+  <h2 class="h5">Zuchthinweise</h2>
+  <p>{{ animal.breeding_notes|linebreaksbr }}</p>
+{% endif %}
+
+{% if animal.description %}
+  <h2 class="h5">Beschreibung</h2>
+  <p>{{ animal.description|linebreaksbr }}</p>
+{% endif %}
+
+{% if animal.care_notes %}
+  <h2 class="h5">Pflegehinweise</h2>
+  <p>{{ animal.care_notes|linebreaksbr }}</p>
+{% endif %}
+
+{% if animal.compatibility_notes %}
+  <h2 class="h5">Verträglichkeit</h2>
+  <p>{{ animal.compatibility_notes|linebreaksbr }}</p>
+{% endif %}
+
+{% if animal.source_url %}
+  <p><a href="{{ animal.source_url }}" rel="noopener" target="_blank">Quelle</a></p>
+{% endif %}
+{% endblock %}
