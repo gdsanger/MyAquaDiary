@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}Stromverbrauch – MyAquaDiary{% endblock %}
+
+{% block content %}
+<nav aria-label="Brotkrumen" class="mb-2">
+  <a href="{% url 'services:device_list' %}" class="small">← Geräte</a>
+</nav>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+  <h1 class="h3 mb-0">Stromverbrauch</h1>
+  <div class="btn-group" role="group" aria-label="Zeitraum wählen">
+    {% for value, label in periods %}
+      <a class="btn btn-sm {% if value == period %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+         href="?zeitraum={{ value }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+</div>
+
+{% if not has_meters %}
+  <div class="card">
+    <div class="card-body">
+      <p class="mb-2">Noch keine Steckdose angebunden.</p>
+      <p class="text-body-secondary mb-0">
+        Der Verbrauch wird aus den Zählerständen der
+        <a href="{% url 'services:shelly_add' %}">Shelly-Steckdosen</a> gerechnet.
+      </p>
+    </div>
+  </div>
+{% else %}
+  <div class="card mb-3">
+    <div class="card-body">
+      <h2 class="h5 card-title">Vergleich der Becken – {{ period_label|lower }} bis heute</h2>
+      {% include "services/_bar_chart.html" %}
+      <div class="table-responsive mt-3">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th scope="col">Becken</th>
+              <th scope="col" class="text-end">Verbrauch</th>
+              <th scope="col" class="text-end">Kosten</th>
+              <th scope="col">Steckdosen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for usage in tanks %}
+              <tr>
+                <td>{{ usage.label }}</td>
+                <td class="text-end">{{ usage.kwh }} kWh</td>
+                <td class="text-end">{{ usage.cost }} €</td>
+                <td class="small text-body-secondary">{{ usage.device_names }}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="4" class="text-body-secondary">Noch kein Verbrauch erfasst.</td></tr>
+            {% endfor %}
+          </tbody>
+          {% if tanks %}
+            <tfoot>
+              <tr class="fw-semibold">
+                <td>Summe</td>
+                <td class="text-end">{{ total_kwh }} kWh</td>
+                <td class="text-end">{{ total_cost }} €</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          {% endif %}
+        </table>
+      </div>
+      <p class="small text-body-secondary mt-2 mb-0">
+        Gerechnet mit {{ price_per_kwh }} € je kWh (ENERGY_PRICE_PER_KWH). Gespeichert werden
+        Kilowattstunden; der Betrag ist eine Umrechnung für die Anzeige.
+      </p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-body">
+      <h2 class="h5 card-title">Je Steckdose</h2>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th scope="col">Steckdose</th>
+              <th scope="col">Becken</th>
+              <th scope="col" class="text-end">Verbrauch</th>
+              <th scope="col" class="text-end">Kosten</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for usage in devices %}
+              <tr>
+                {% with device=usage.devices.0 %}
+                  <td><a href="{% url 'services:device_detail' device.pk %}">{{ usage.label }}</a></td>
+                  <td>{{ device.tank_name }}</td>
+                {% endwith %}
+                <td class="text-end">{{ usage.kwh }} kWh</td>
+                <td class="text-end">{{ usage.cost }} €</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="4" class="text-body-secondary">Noch kein Verbrauch erfasst.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

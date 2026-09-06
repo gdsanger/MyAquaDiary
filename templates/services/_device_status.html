@@ -18,17 +18,35 @@ auf einer Beckendetailseite einbinden — nötig ist nur `device`.
         <strong>Störung:</strong> {{ reading.error_text }}
       </div>
     {% endif %}
+    {% for alert in status.alerts %}
+      <div class="alert alert-danger mb-2" role="alert"><strong>Störung:</strong> {{ alert }}</div>
+    {% endfor %}
     <dl class="row mb-2">
       <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Zustand</dt>
       <dd class="col-6 col-sm-7">
         {% if reading.is_on is None %}
           <span class="text-body-secondary">unbekannt</span>
         {% elif reading.is_on %}
-          <span class="badge text-bg-success">läuft</span>
+          <span class="badge text-bg-success">{% if device.is_shelly %}an{% else %}läuft{% endif %}</span>
         {% else %}
           <span class="badge text-bg-secondary">aus</span>
         {% endif %}
       </dd>
+
+      {% if reading.power_w is not None %}
+        <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Leistung</dt>
+        <dd class="col-6 col-sm-7">{{ reading.power_w }} W</dd>
+      {% endif %}
+
+      {% if reading.energy_total_wh is not None %}
+        <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Zählerstand</dt>
+        <dd class="col-6 col-sm-7">{{ reading.energy_total_kwh }} kWh</dd>
+      {% endif %}
+
+      {% if reading.temperature_c is not None %}
+        <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Gerätetemperatur</dt>
+        <dd class="col-6 col-sm-7">{{ reading.temperature_c }} °C</dd>
+      {% endif %}
 
       {% if reading.rpm_percent is not None %}
         <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Drehzahl</dt>

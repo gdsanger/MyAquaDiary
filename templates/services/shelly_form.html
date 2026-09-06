@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Steckdose anbinden – MyAquaDiary{% endblock %}
+
+{% block content %}
+<nav aria-label="Brotkrumen" class="mb-2">
+  <a href="{% url 'services:device_list' %}" class="small">← Geräte</a>
+</nav>
+<h1 class="h3 mb-3">Shelly-Steckdose anbinden</h1>
+
+<div class="row">
+  <div class="col-12 col-md-8 col-lg-6">
+    <div class="card">
+      <div class="card-body">
+        <p class="text-body-secondary">
+          Gesprochen wird ausschließlich mit dem Gerät im lokalen Netz — ohne Shelly-Konto und
+          ohne Cloud. Generation (Gen1 oder Gen2+), Modell und Softwarestand liest MyAquaDiary
+          selbst; angelegt wird die Steckdose erst, wenn sie geantwortet hat.
+        </p>
+        <form method="post">
+          {% csrf_token %}
+          {% include "services/_form_fields.html" %}
+          <button type="submit" class="btn btn-primary">Anbinden</button>
+          <a class="btn btn-outline-secondary" href="{% url 'services:device_list' %}">Abbrechen</a>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

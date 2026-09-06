@@ -11,13 +11,17 @@
   <div>
     <h1 class="h3 mb-1">{{ device.name }}</h1>
     <p class="text-body-secondary mb-0">
-      {{ device.get_kind_display }} · {{ device.host }} · {{ device.mac_address }}
+      {{ device.get_kind_display }}{% if device.generation_label %} {{ device.generation_label }}{% endif %}
+      · {{ device.host }}{% if device.mac_address %} · {{ device.mac_address }}{% endif %}
       {% if device.firmware %} · Software {{ device.firmware }}{% endif %}
+      {% if device.tank_label %} · {{ device.tank_label }}{% endif %}
     </p>
   </div>
   <div class="d-flex gap-2">
     <a class="btn btn-outline-secondary" href="{% url 'services:device_edit' device.pk %}">Bearbeiten</a>
-    <a class="btn btn-outline-secondary" href="{% url 'services:device_credentials' device.pk %}">Zugangsdaten ändern</a>
+    {% if device.is_eheim %}
+      <a class="btn btn-outline-secondary" href="{% url 'services:device_credentials' device.pk %}">Zugangsdaten ändern</a>
+    {% endif %}
   </div>
 </div>
 
@@ -51,12 +55,58 @@
   <div class="col-12 col-lg-7">
     <div class="card h-100">
       <div class="card-body">
-        <h2 class="h5 card-title">Drehzahl im Verlauf</h2>
-        {% include "services/_rpm_chart.html" %}
+        <h2 class="h5 card-title">
+          {% if device.is_shelly %}Leistung im Verlauf{% else %}Drehzahl im Verlauf{% endif %}
+        </h2>
+        {% include "services/_line_chart.html" %}
       </div>
     </div>
   </div>
 </div>
+
+{% if device.is_shelly %}
+  <div class="card mt-3">
+    <div class="card-body">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <h2 class="h5 card-title mb-0">Stromverbrauch</h2>
+        <div class="btn-group" role="group" aria-label="Zeitraum wählen">
+          {% for value, label in periods %}
+            <a class="btn btn-sm {% if value == period %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+               href="?zeitraum={{ value }}">{{ label }}</a>
+          {% endfor %}
+        </div>
+      </div>
+      {% include "services/_bar_chart.html" with chart=energy_chart %}
+      {% if buckets %}
+        <div class="table-responsive mt-3">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th scope="col">Zeitraum</th>
+                <th scope="col" class="text-end">Verbrauch</th>
+                <th scope="col" class="text-end">Kosten</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for bucket in buckets %}
+                <tr>
+                  <td>{{ bucket.label }}</td>
+                  <td class="text-end">{{ bucket.kwh }} kWh</td>
+                  <td class="text-end">{{ bucket.cost }} €</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+      <p class="small text-body-secondary mt-2 mb-0">
+        Der Verbrauch ist die Differenz der Zählerstände;
+        <a href="{% url 'services:energy_overview' %}">im Vergleich mit den anderen Becken</a>
+        wird daraus die Antwort auf die Frage, was welches Becken kostet.
+      </p>
+    </div>
+  </div>
+{% endif %}
 
 {% if controls %}
   <div class="card mt-3">
@@ -86,8 +136,13 @@
               <thead>
                 <tr>
                   <th scope="col">Zeitpunkt</th>
-                  <th scope="col">Drehzahl</th>
-                  <th scope="col">Modus</th>
+                  {% if device.is_shelly %}
+                    <th scope="col">Leistung</th>
+                    <th scope="col">Zählerstand</th>
+                  {% else %}
+                    <th scope="col">Drehzahl</th>
+                    <th scope="col">Modus</th>
+                  {% endif %}
                   <th scope="col">Zustand</th>
                 </tr>
               </thead>
@@ -95,12 +150,18 @@
                 {% for reading in readings %}
                   <tr>
                     <td>{{ reading.read_at|date:"d.m.Y H:i" }}</td>
-                    <td>{% if reading.rpm_percent is not None %}{{ reading.rpm_percent }} %{% else %}–{% endif %}</td>
-                    <td>{{ reading.mode_label|default:"–" }}</td>
+                    {% if device.is_shelly %}
+                      <td>{% if reading.power_w is not None %}{{ reading.power_w }} W{% else %}–{% endif %}</td>
+                      <td>{% if reading.energy_total_wh is not None %}{{ reading.energy_total_kwh }} kWh{% else %}–{% endif %}</td>
+                    {% else %}
+                      <td>{% if reading.rpm_percent is not None %}{{ reading.rpm_percent }} %{% else %}–{% endif %}</td>
+                      <td>{{ reading.mode_label|default:"–" }}</td>
+                    {% endif %}
                     <td>
                       {% if reading.has_error %}
                         <span class="text-danger">{{ reading.error_text }}</span>
-                      {% elif reading.is_on %}läuft{% elif reading.is_on is None %}–{% else %}aus{% endif %}
+                      {% elif reading.is_on %}{% if device.is_shelly %}an{% else %}läuft{% endif %}
+                      {% elif reading.is_on is None %}–{% else %}aus{% endif %}
                     </td>
                   </tr>
                 {% endfor %}
