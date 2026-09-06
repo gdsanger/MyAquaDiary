@@ -24,6 +24,10 @@ from .exceptions import DataModelUnavailable, MCPError, RateLimited, ToolError
 from .protocol import PROTOCOL_VERSION, SERVER_NAME, handle_message
 from .runner import Context, call_tool
 
+# Import mit Nebenwirkung: die Werkzeuge tragen sich beim Import in die
+# Registry ein. Ohne diese Zeile kennt der Server keine Tools.
+from . import read as _read  # noqa: F401  isort:skip
+
 __all__ = [
     "Context",
     "DataModelUnavailable",
