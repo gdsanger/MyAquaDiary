@@ -3,16 +3,43 @@
 {% block title %}Meine Becken – MyAquaDiary{% endblock %}
 
 {% block content %}
-<h1 class="h3 mb-3">Meine Becken</h1>
-{% if tanks %}
-  <ul class="list-group">
-    {% for tank in tanks %}
-      <li class="list-group-item">
-        <a href="{% url 'tanks:detail' tank.pk %}">{{ tank.name }}</a>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Meine Becken</h1>
+  <a href="{% url 'tanks:create' %}" class="btn btn-primary btn-sm">Becken anlegen</a>
+</div>
+
+<h2 class="h5">Aktive Becken</h2>
+{% if active_tanks %}
+  <div class="row row-cols-1 row-cols-md-3 g-3 mb-4">
+    {% for tank in active_tanks %}
+      <div class="col">
+        <a href="{% url 'tanks:detail' tank.slug %}" class="card h-100 text-decoration-none text-body">
+          {% if tank.cover_photo %}
+            <img src="{{ tank.cover_photo.image.url }}" class="card-img-top" alt="{{ tank.name }}">
+          {% endif %}
+          <div class="card-body">
+            <h3 class="h6 card-title mb-1">{{ tank.name }}</h3>
+            <p class="small text-body-secondary mb-0">
+              {{ tank.get_water_type_display }}{% if tank.volume_net_l %} · {{ tank.volume_net_l }} l{% endif %}
+            </p>
+          </div>
+        </a>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <p class="text-body-secondary">Du hast noch kein aktives Becken angelegt.</p>
+{% endif %}
+
+{% if dissolved_tanks %}
+  <h2 class="h5">Aufgelöste Becken</h2>
+  <ul class="list-group mb-4">
+    {% for tank in dissolved_tanks %}
+      <li class="list-group-item d-flex justify-content-between align-items-center">
+        <a href="{% url 'tanks:detail' tank.slug %}">{{ tank.name }}</a>
+        <span class="text-body-secondary small">aufgelöst am {{ tank.shut_down_on }}</span>
       </li>
     {% endfor %}
   </ul>
-{% else %}
-  <p class="text-body-secondary">Du hast noch kein Becken angelegt.</p>
 {% endif %}
 {% endblock %}
