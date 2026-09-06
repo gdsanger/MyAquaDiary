@@ -25,8 +25,9 @@ from .protocol import PROTOCOL_VERSION, SERVER_NAME, handle_message
 from .runner import Context, call_tool
 
 # Import mit Nebenwirkung: die Werkzeuge tragen sich beim Import in die
-# Registry ein. Ohne diese Zeile kennt der Server keine Tools.
+# Registry ein. Ohne diese beiden Zeilen kennt der Server keine Tools.
 from . import read as _read  # noqa: F401  isort:skip
+from . import write as _write  # noqa: F401  isort:skip
 
 __all__ = [
     "Context",
