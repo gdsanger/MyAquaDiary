@@ -1,0 +1,4 @@
+{% block content %}{% endblock %}
+--
+{% block footer %}Diese Nachricht wurde automatisch von {{ site_name }} verschickt.{% if site_url %}
+{{ site_url }}{% endif %}{% endblock %}

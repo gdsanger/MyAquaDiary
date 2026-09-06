@@ -1,0 +1,39 @@
+{% extends "mail/base.html" %}
+{% comment %}
+Kontext:
+  recipient_name, tank_name, parameter, value, unit,
+  target_min, target_max, measured_at, detail_url (optional)
+{% endcomment %}
+
+{% block title %}Grenzwertwarnung{% endblock %}
+{% block preheader %}{{ parameter }} liegt in {{ tank_name }} außerhalb des Zielbereichs.{% endblock %}
+
+{% block content %}
+  <h1 style="margin:0 0 16px 0; font-size:20px; line-height:26px; color:#1b2b2e;">Grenzwertwarnung</h1>
+  <p style="margin:0 0 16px 0;">Hallo {{ recipient_name }},</p>
+  <p style="margin:0 0 16px 0;">
+    im Becken <strong>{{ tank_name }}</strong> liegt ein Messwert außerhalb des eingestellten Zielbereichs.
+  </p>
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px 0; border-collapse:collapse;">
+    <tr>
+      <td width="40%" style="padding:8px 12px; background-color:#f5fafb; border:1px solid #dceaee; font-size:14px; color:#5b7278;">Parameter</td>
+      <td style="padding:8px 12px; border:1px solid #dceaee; font-size:14px;">{{ parameter }}</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px; background-color:#f5fafb; border:1px solid #dceaee; font-size:14px; color:#5b7278;">Messwert</td>
+      <td style="padding:8px 12px; border:1px solid #dceaee; font-size:14px; color:#d2483b; font-weight:bold;">{{ value }}{% if unit %} {{ unit }}{% endif %}</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px; background-color:#f5fafb; border:1px solid #dceaee; font-size:14px; color:#5b7278;">Zielbereich</td>
+      <td style="padding:8px 12px; border:1px solid #dceaee; font-size:14px;">{{ target_min|default:"–" }} – {{ target_max|default:"–" }}{% if unit %} {{ unit }}{% endif %}</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px; background-color:#f5fafb; border:1px solid #dceaee; font-size:14px; color:#5b7278;">Gemessen am</td>
+      <td style="padding:8px 12px; border:1px solid #dceaee; font-size:14px;">{{ measured_at|date:"d.m.Y H:i"|default:"–" }}</td>
+    </tr>
+  </table>
+  {% if detail_url %}{% include "mail/_button.html" with url=detail_url label="Becken öffnen" %}{% endif %}
+  <p style="margin:0; font-size:13px; color:#5b7278;">
+    Diese Warnung lässt sich je Becken abschalten.
+  </p>
+{% endblock %}
