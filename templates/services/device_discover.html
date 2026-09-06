@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Geräte suchen – MyAquaDiary{% endblock %}
+
+{% block content %}
+<nav aria-label="Brotkrumen" class="mb-2">
+  <a href="{% url 'services:device_list' %}" class="small">← Geräte</a>
+</nav>
+<h1 class="h3 mb-3">Geräte suchen</h1>
+
+<form method="post">
+  {% csrf_token %}
+  <div class="card mb-3">
+    <div class="card-body">
+      <p class="text-body-secondary">
+        Ein erreichbares EHEIM-Digital-Gerät genügt: Es beantwortet die Abfrage
+        <code>/mesh-liste</code> für alle Geräte im Mesh. Voraussetzung ist Gerätesoftware
+        2.0.1 oder neuer — ältere Geräte haben die REST-API nicht.
+      </p>
+      {% include "services/_form_fields.html" %}
+      <button type="submit" name="action" value="search" class="btn btn-primary">Suchen</button>
+    </div>
+  </div>
+
+  {% if error %}
+    <div class="alert alert-warning" role="alert">{{ error }}</div>
+  {% endif %}
+
+  {% if found %}
+    <div class="card">
+      <div class="card-body">
+        <h2 class="h5 card-title">Gefundene Geräte</h2>
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th scope="col" class="text-center">Anlegen</th>
+                <th scope="col">MAC</th>
+                <th scope="col">Name</th>
+                <th scope="col">Art</th>
+                <th scope="col">Software</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in found %}
+                <tr>
+                  <td class="text-center">
+                    <input class="form-check-input" type="checkbox" name="macs" value="{{ item.mac }}"
+                           id="mac-{{ forloop.counter }}" aria-label="{{ item.label }} anlegen">
+                  </td>
+                  <td><label for="mac-{{ forloop.counter }}" class="font-monospace">{{ item.mac }}</label></td>
+                  <td>
+                    <input class="form-control form-control-sm" type="text"
+                           name="name_{{ item.mac }}" value="{{ item.name|default:item.mac }}"
+                           aria-label="Name für {{ item.label }}">
+                  </td>
+                  <td>
+                    <select class="form-select form-select-sm" name="kind_{{ item.mac }}"
+                            aria-label="Art von {{ item.label }}">
+                      {% for value, label in kinds %}
+                        <option value="{{ value }}" {% if value == item.kind %}selected{% endif %}>{{ label }}</option>
+                      {% endfor %}
+                    </select>
+                  </td>
+                  <td>
+                    <input type="hidden" name="firmware_{{ item.mac }}" value="{{ item.firmware }}">
+                    {% if not item.firmware %}
+                      <span class="text-body-secondary">unbekannt</span>
+                    {% elif item.firmware_supported %}
+                      {{ item.firmware }}
+                    {% else %}
+                      <span class="text-danger">{{ item.firmware }} – zu alt</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <button type="submit" name="action" value="create" class="btn btn-primary">
+          Ausgewählte anlegen
+        </button>
+      </div>
+    </div>
+  {% endif %}
+</form>
+{% endblock %}

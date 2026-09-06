@@ -7,9 +7,9 @@ from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils.html import format_html
 
-from .forms import MailConfigForm, TestMailForm
+from .forms import DeviceForm, MailConfigForm, TestMailForm
 from .graph import GraphMailService, render_mail
-from .models import MailConfig, MailLog
+from .models import Device, DeviceEvent, DeviceReading, MailConfig, MailLog
 
 
 @admin.register(MailConfig)
@@ -123,6 +123,79 @@ class MailLogAdmin(admin.ModelAdmin):
     search_fields = ["recipients", "subject"]
     date_hierarchy = "created_at"
     readonly_fields = ["created_at", "recipients", "subject", "template", "status", "error"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Device)
+class DeviceAdmin(admin.ModelAdmin):
+    """Geräteverwaltung für den Betrieb — die Pflege durch Benutzer läuft über
+    die Geräteseiten, nicht über den Admin."""
+
+    form = DeviceForm
+    list_display = ["name", "owner", "kind", "host", "mac_address", "firmware", "is_active", "last_seen"]
+    list_filter = ["kind", "is_active"]
+    search_fields = ["name", "mac_address", "host"]
+    readonly_fields = ["last_seen", "created_at", "password_status"]
+    fieldsets = [
+        (None, {"fields": ["owner", "name", "kind", "is_active"]}),
+        ("Netz", {"fields": ["host", "mac_address", "firmware"]}),
+        (
+            "Zugang",
+            {
+                "fields": ["username", "password", "password_status"],
+                "description": "Werksseitig api / admin. Das Passwort liegt verschlüsselt in der "
+                "Datenbank und wird nie angezeigt.",
+            },
+        ),
+        ("Verwaltung", {"fields": ["last_seen", "created_at"]}),
+    ]
+
+    @admin.display(description="Passwort")
+    def password_status(self, obj):
+        if obj is None or not obj.pk:
+            return "—"
+        if obj.uses_default_password:
+            return format_html('<span style="color:#d2483b;">unverändertes Werkspasswort</span>')
+        return format_html('<span style="color:#4caf7d;">eigenes Passwort gesetzt</span>')
+
+    def get_form(self, request, obj=None, **kwargs):
+        # Der Besitzer gehört zum Modell, nicht zum Benutzerformular der App.
+        kwargs["fields"] = ["owner", "name", "kind", "is_active", "host", "mac_address",
+                            "firmware", "username", "password"]
+        return super().get_form(request, obj, **kwargs)
+
+
+@admin.register(DeviceReading)
+class DeviceReadingAdmin(admin.ModelAdmin):
+    """Reines Leseprotokoll — Messwerte entstehen nur durch Abfragen."""
+
+    list_display = ["read_at", "device", "is_on", "rpm_percent", "pump_mode", "error_code"]
+    list_filter = ["device", "error_code"]
+    date_hierarchy = "read_at"
+    readonly_fields = ["device", "read_at", "payload", "rpm_percent", "pump_mode", "error_code",
+                       "service_due_in", "is_on"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(DeviceEvent)
+class DeviceEventAdmin(admin.ModelAdmin):
+    """Protokoll der schreibenden Aktionen."""
+
+    list_display = ["occurred_at", "device", "title", "user", "succeeded"]
+    list_filter = ["succeeded", "action", "device"]
+    search_fields = ["title", "description"]
+    date_hierarchy = "occurred_at"
+    readonly_fields = ["device", "user", "occurred_at", "action", "title", "description", "succeeded"]
 
     def has_add_permission(self, request):
         return False

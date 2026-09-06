@@ -120,6 +120,11 @@ GRAPH_MAIL = {
     "REPLY_TO": env("GRAPH_REPLY_TO", default=""),
 }
 
+# Timeout für Requests an EHEIM-Digital-Geräte im LAN. Bewusst kurz: der
+# Gerätestatus wird per HTMX nachgeladen, und ein stummes Gerät darf die
+# Anzeige nicht aufhalten.
+EHEIM_TIMEOUT = env.int("EHEIM_TIMEOUT", default=5)
+
 # Basis-URL für absolute Links in Mails (Mails haben keinen Request-Kontext).
 SITE_URL = env("SITE_URL", default="http://localhost:8000")
 

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Geräte – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+  <h1 class="h3 mb-0">Geräte</h1>
+  <a class="btn btn-primary" href="{% url 'services:device_discover' %}">Geräte suchen</a>
+</div>
+
+{% include "dashboard/_device_warnings.html" %}
+
+{% if devices %}
+  <div class="row row-cols-1 row-cols-md-2 g-3">
+    {% for device in devices %}
+      <div class="col">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start gap-2">
+              <div>
+                <h2 class="h5 card-title mb-1">
+                  <a href="{% url 'services:device_detail' device.pk %}">{{ device.name }}</a>
+                </h2>
+                <p class="small text-body-secondary mb-2">
+                  {{ device.get_kind_display }} · {{ device.host|default:"ohne Adresse" }}
+                </p>
+              </div>
+              {% if not device.is_active %}<span class="badge text-bg-secondary">inaktiv</span>{% endif %}
+            </div>
+
+            {% if device.uses_default_password %}
+              <div class="alert alert-warning py-2 small" role="alert">
+                Das Gerät nutzt noch das Werkspasswort.
+                <a href="{% url 'services:device_credentials' device.pk %}">Jetzt ändern</a>
+              </div>
+            {% endif %}
+
+            {% if device.is_active and device.is_eheim %}
+              {# Status nachladen statt beim Seitenaufbau holen: ein stummes
+                 Gerät kostet damit nur diesen Platzhalter. #}
+              <div hx-get="{% url 'services:device_status' device.pk %}"
+                   hx-trigger="load" hx-swap="outerHTML">
+                <p class="text-body-secondary mb-0">Status wird geladen …</p>
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="card">
+    <div class="card-body">
+      <p class="mb-2">Noch keine Geräte angebunden.</p>
+      <p class="text-body-secondary mb-0">
+        Über <a href="{% url 'services:device_discover' %}">Geräte suchen</a> lassen sich alle
+        EHEIM-Digital-Geräte im Mesh finden. Voraussetzung ist Gerätesoftware 2.0.1 oder neuer.
+      </p>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

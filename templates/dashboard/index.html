@@ -4,6 +4,9 @@
 
 {% block content %}
 <h1 class="h3 mb-3">Willkommen, {{ user }}</h1>
+
+{% include "dashboard/_device_warnings.html" %}
+
 <p class="text-body-secondary">
   Hier entstehen die KPIs und fälligen Termine deiner Becken.
 </p>
