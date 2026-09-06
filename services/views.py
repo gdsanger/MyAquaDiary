@@ -444,14 +444,15 @@ def ai_identify(request):
     found = None
 
     if request.method == "POST" and form.is_valid():
+        # Auch der Fehlerfall gehört in die Ergebnisspalte und nicht in eine
+        # Meldung über der Seite: dort steht er neben dem Formular, mit dem
+        # man es gleich noch einmal versuchen kann.
         found = ai.identify(
             form.cleaned_data["photo"],
             form.cleaned_data["kind"],
             user=request.user,
             notes=form.cleaned_data.get("notes", ""),
         )
-        if not found:
-            messages.error(request, found.error)
 
     return render(
         request,
@@ -573,9 +574,8 @@ def ai_suggestion_decide(request, pk, decision):
 def _profile_rows(suggestion: AISuggestion):
     """Steckbrief-Entwurf als beschriftete Zeilen für die Anzeige.
 
-    Die Beschriftungen kommen aus dem Schema, damit Anzeige und Prompt nicht
-    auseinanderlaufen; unbekannte Schlüssel werden trotzdem angezeigt — lieber
-    ein technischer Feldname als eine verschluckte Angabe.
+    Ein Schlüssel ohne Beschriftung wird trotzdem angezeigt — lieber ein
+    technischer Feldname als eine verschluckte Angabe.
     """
     labels = PROFILE_LABELS.get(suggestion.kind, {})
     return [
