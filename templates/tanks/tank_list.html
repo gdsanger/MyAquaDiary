@@ -15,7 +15,7 @@
       <div class="col">
         <a href="{% url 'tanks:detail' tank.slug %}" class="card h-100 text-decoration-none text-body">
           {% if tank.cover_photo %}
-            <img src="{{ tank.cover_photo.image.url }}" class="card-img-top" alt="{{ tank.name }}">
+            <img src="{{ tank.cover_photo.thumbnail.url|default:tank.cover_photo.image.url }}" class="card-img-top" alt="{{ tank.name }}">
           {% endif %}
           <div class="card-body">
             <h3 class="h6 card-title mb-1">{{ tank.name }}</h3>

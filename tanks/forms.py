@@ -15,6 +15,11 @@ from .models import (
 )
 
 
+_PHOTO_FORMSET_WIDGETS = {
+    "taken_at": forms.DateTimeInput(attrs={"type": "datetime-local"}, format="%Y-%m-%dT%H:%M"),
+}
+
+
 class TankForm(forms.ModelForm):
     class Meta:
         model = Tank
@@ -35,7 +40,8 @@ class TankForm(forms.ModelForm):
 TankPhotoFormSet = inlineformset_factory(
     Tank,
     Photo,
-    fields=["image", "caption", "taken_on", "position"],
+    fields=["image", "caption", "taken_at", "is_full_tank_shot"],
+    widgets=_PHOTO_FORMSET_WIDGETS,
     extra=1,
     can_delete=True,
 )
@@ -85,7 +91,8 @@ class MeasurementValueForm(forms.ModelForm):
 MeasurementPhotoFormSet = inlineformset_factory(
     Measurement,
     Photo,
-    fields=["image", "caption", "taken_on", "position"],
+    fields=["image", "caption", "taken_at", "is_full_tank_shot"],
+    widgets=_PHOTO_FORMSET_WIDGETS,
     extra=1,
     can_delete=True,
 )
@@ -106,10 +113,36 @@ class EventForm(forms.ModelForm):
 EventPhotoFormSet = inlineformset_factory(
     Event,
     Photo,
-    fields=["image", "caption", "taken_on", "position"],
+    fields=["image", "caption", "taken_at", "is_full_tank_shot"],
+    widgets=_PHOTO_FORMSET_WIDGETS,
     extra=1,
     can_delete=True,
 )
+
+
+class MultiFileInput(forms.ClearableFileInput):
+    allow_multiple_selected = True
+
+
+class MultiFileField(forms.FileField):
+    """`FileField` erlaubt Django 5.0 zwar am Widget mehrere Dateien
+    auszuwählen, `clean()` erwartet aber noch eine einzelne Datei — siehe
+    https://docs.djangoproject.com/en/5.0/topics/http/file-uploads/#uploading-multiple-files.
+    Iteriert deshalb selbst über die Liste aus `request.FILES.getlist()`."""
+
+    widget = MultiFileInput
+
+    def clean(self, data, initial=None):
+        single_file_clean = super().clean
+        if isinstance(data, (list, tuple)):
+            return [single_file_clean(item, initial) for item in data]
+        return [single_file_clean(data, initial)]
+
+
+class PhotoUploadForm(forms.Form):
+    images = MultiFileField(label="Bilder")
+    caption = forms.CharField(label="Bildunterschrift (für alle)", max_length=200, required=False)
+    is_full_tank_shot = forms.BooleanField(label="Übersichtsfoto (für die Zeitachse)", required=False)
 
 
 class TankAnimalForm(forms.ModelForm):

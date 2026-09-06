@@ -1,15 +1,87 @@
 import calendar
-from datetime import timedelta
+import io
+from datetime import datetime, timedelta
 from decimal import Decimal
+
+from PIL import Image
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.text import slugify
 
 from catalog.models import CatalogAnimal, CatalogPlant
+
+# EXIF-IFD-Pointer und Tags, siehe Pillow-Doku zu Exif.get_ifd(). Kein
+# piexif nötig, Pillow kann Sub-IFDs seit 6.0 selbst lesen/schreiben.
+_EXIF_SUBIFD_TAG = 0x8769
+_EXIF_GPSINFO_TAG = 0x8825
+_EXIF_DATETIME_ORIGINAL_TAG = 36867
+_THUMBNAIL_SIZE = (480, 480)
+
+
+def read_exif_taken_at(image_file):
+    """Liest den EXIF-Aufnahmezeitpunkt (DateTimeOriginal) eines hochgeladenen
+    Fotos aus, als Vorbelegung für `Photo.taken_at` beim Sammel-Upload. Rein
+    lesend und best-effort: ein Bild ohne oder mit kaputten EXIF-Daten liefert
+    einfach `None`, statt den Upload scheitern zu lassen."""
+
+    try:
+        image_file.seek(0)
+        with Image.open(image_file) as image:
+            raw_datetime = image.getexif().get_ifd(_EXIF_SUBIFD_TAG).get(
+                _EXIF_DATETIME_ORIGINAL_TAG
+            )
+    except Exception:
+        return None
+    finally:
+        image_file.seek(0)
+    if not raw_datetime:
+        return None
+    try:
+        naive = datetime.strptime(raw_datetime, "%Y:%m:%d %H:%M:%S")
+    except ValueError:
+        return None
+    return timezone.make_aware(naive) if timezone.is_naive(naive) else naive
+
+
+def _strip_gps_and_build_thumbnail(image_file):
+    """Entfernt EXIF-GPS-Daten aus dem Originalbild und erzeugt daraus ein
+    Thumbnail — beides einmalig beim Upload (siehe Photo.save), nicht bei
+    jeder Anzeige einer 200-Bilder-Beckengalerie. Best-effort: schlägt das
+    Verarbeiten fehl (z. B. unbekanntes Format), wird `(None, None)`
+    zurückgegeben und das Originalbild unverändert gespeichert."""
+
+    try:
+        image_file.seek(0)
+        with Image.open(image_file) as image:
+            image.load()
+            exif = image.getexif()
+            if _EXIF_GPSINFO_TAG in exif:
+                del exif[_EXIF_GPSINFO_TAG]
+            image_format = image.format or "JPEG"
+            save_kwargs = {"format": image_format}
+            if exif:
+                save_kwargs["exif"] = exif.tobytes()
+
+            if image_format == "JPEG" and image.mode not in ("RGB", "L"):
+                image = image.convert("RGB")
+
+            cleaned_bytes = io.BytesIO()
+            image.save(cleaned_bytes, **save_kwargs)
+
+            thumbnail = image.copy()
+            thumbnail.thumbnail(_THUMBNAIL_SIZE)
+            thumbnail_bytes = io.BytesIO()
+            thumbnail.save(thumbnail_bytes, format=image_format)
+    except Exception:
+        return None, None
+    return ContentFile(cleaned_bytes.getvalue()), ContentFile(thumbnail_bytes.getvalue())
 
 
 class WaterType(models.TextChoices):
@@ -112,12 +184,19 @@ class Tank(models.Model):
 
 
 class Photo(models.Model):
-    """Gemeinsames Foto-Modell für Becken- und Messungsbelege. `tank` bleibt
-    Pflichtfeld, wird bei einem Messungsfoto aber automatisch aus der
-    Messung übernommen — so landet ein Belegfoto zugleich in der
-    Becken-Galerie, ohne dass die Anlage doppelt gepflegt werden muss."""
+    """Gemeinsames Foto-Modell für Becken, Messung und Ereignis — eine Tabelle
+    statt drei, damit sich die Beckengalerie mit einer einzigen Abfrage bauen
+    lässt. `tank` bleibt Pflichtfeld, wird bei einem Messungs- oder
+    Ereignisfoto aber automatisch aus der Zuordnung übernommen, so landet ein
+    Belegfoto zugleich in der Becken-Galerie, ohne dass die Anlage doppelt
+    gepflegt werden muss."""
 
     tank = models.ForeignKey(Tank, on_delete=models.CASCADE, related_name="photos")
+    image = models.ImageField(upload_to="tanks/%Y/%m/")
+    thumbnail = models.ImageField(upload_to="tanks/%Y/%m/thumbs/", blank=True)
+    taken_at = models.DateTimeField(default=timezone.now, blank=True)
+    caption = models.CharField(max_length=200, blank=True)
+
     measurement = models.ForeignKey(
         "Measurement",
         null=True,
@@ -132,13 +211,20 @@ class Photo(models.Model):
         on_delete=models.CASCADE,
         related_name="photos",
     )
-    image = models.ImageField(upload_to="tanks/%Y/%m/")
-    caption = models.CharField(max_length=200, blank=True)
-    taken_on = models.DateField(null=True, blank=True)
-    position = models.PositiveSmallIntegerField(default=0)
+
+    is_full_tank_shot = models.BooleanField("Übersichtsfoto", default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["position", "id"]
+        ordering = ["-taken_at", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                check=~(
+                    models.Q(measurement__isnull=False) & models.Q(event__isnull=False)
+                ),
+                name="photo_not_both_measurement_and_event",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.tank} – {self.caption or self.image.name}"
@@ -148,7 +234,27 @@ class Photo(models.Model):
             self.tank_id = self.measurement.tank_id
         if self.event_id and not self.tank_id:
             self.tank_id = self.event.tank_id
+
+        if self.image and not self.image._committed:
+            original_name = self.image.name
+            cleaned_image, thumbnail_image = _strip_gps_and_build_thumbnail(self.image)
+            if cleaned_image is not None:
+                self.image.save(original_name, cleaned_image, save=False)
+                self.thumbnail.save(original_name, thumbnail_image, save=False)
+
         super().save(*args, **kwargs)
+
+
+@receiver(post_delete, sender=Photo)
+def _delete_photo_files_from_storage(sender, instance, **kwargs):
+    """Räumt Bild- und Thumbnail-Datei im Storage mit auf. Läuft auch bei
+    kaskadierendem Löschen über Tank/Measurement/Event, da Djangos Collector
+    für jede betroffene Zeile dieses Signal feuert, nicht nur bei
+    `Photo.delete()` direkt."""
+
+    for field_file in (instance.image, instance.thumbnail):
+        if field_file:
+            field_file.storage.delete(field_file.name)
 
 
 class Parameter(models.Model):

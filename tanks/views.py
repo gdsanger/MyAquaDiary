@@ -20,6 +20,7 @@ from .forms import (
     MeasurementForm,
     MeasurementPhotoFormSet,
     MeasurementValueForm,
+    PhotoUploadForm,
     TankAnimalForm,
     TankAnimalMovementForm,
     TankAnimalUpdateForm,
@@ -34,11 +35,13 @@ from .models import (
     Measurement,
     MeasurementValue,
     Parameter,
+    Photo,
     Tank,
     TankAnimal,
     TankAnimalMovement,
     TankParameterTarget,
     TankPlant,
+    read_exif_taken_at,
 )
 
 
@@ -147,6 +150,104 @@ class TankDeleteView(TankOwnerQuerysetMixin, DeleteView):
     context_object_name = "tank"
     template_name = "tanks/tank_confirm_delete.html"
     success_url = reverse_lazy("tanks:list")
+
+
+class TankGalleryView(TankOwnerQuerysetMixin, DetailView):
+    """Die Beckengalerie über alle drei Foto-Herkünfte hinweg (Becken direkt,
+    Messung, Ereignis) — möglich, weil `Photo.tank` immer gesetzt ist, siehe
+    Modul-Docstring von `Photo`. Der Upload verarbeitet mehrere Dateien auf
+    einmal, ohne Zuordnung zu Messung/Ereignis."""
+
+    model = Tank
+    context_object_name = "tank"
+    template_name = "tanks/tank_gallery.html"
+
+    def get_queryset(self):
+        return super().get_queryset().prefetch_related("photos")
+
+    def get(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        return self.render_to_response(self.get_context_data(form=PhotoUploadForm()))
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        form = PhotoUploadForm(request.POST, request.FILES)
+        if form.is_valid():
+            for image in form.cleaned_data["images"]:
+                photo = Photo(
+                    tank=self.object,
+                    image=image,
+                    caption=form.cleaned_data["caption"],
+                    is_full_tank_shot=form.cleaned_data["is_full_tank_shot"],
+                )
+                exif_taken_at = read_exif_taken_at(image)
+                if exif_taken_at:
+                    photo.taken_at = exif_taken_at
+                photo.save()
+            messages.success(request, "Fotos hochgeladen.")
+            return HttpResponseRedirect(reverse("tanks:gallery", kwargs={"slug": self.object.slug}))
+        return self.render_to_response(self.get_context_data(form=form))
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        photos = self.object.photos.select_related("measurement", "event")
+
+        assignment = self.request.GET.get("zuordnung", "")
+        if assignment == "becken":
+            photos = photos.filter(measurement__isnull=True, event__isnull=True)
+        elif assignment == "messung":
+            photos = photos.filter(measurement__isnull=False)
+        elif assignment == "ereignis":
+            photos = photos.filter(event__isnull=False)
+
+        date_from = parse_date(self.request.GET.get("von") or "")
+        date_to = parse_date(self.request.GET.get("bis") or "")
+        if date_from:
+            photos = photos.filter(taken_at__date__gte=date_from)
+        if date_to:
+            photos = photos.filter(taken_at__date__lte=date_to)
+
+        context["photos"] = photos
+        context["selected_assignment"] = assignment
+        context["date_from"] = self.request.GET.get("von", "")
+        context["date_to"] = self.request.GET.get("bis", "")
+        return context
+
+
+class TankTimelineView(TankOwnerQuerysetMixin, DetailView):
+    """Entwicklungs-Zeitachse des Beckens — nur Übersichtsfotos, sonst würden
+    Detailaufnahmen (Pflanze, Fisch, Technik) den Vorher/Nachher-Vergleich
+    stören, siehe Modul-Docstring von `Photo.is_full_tank_shot`."""
+
+    model = Tank
+    context_object_name = "tank"
+    template_name = "tanks/tank_timeline.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["photos"] = self.object.photos.filter(is_full_tank_shot=True).order_by(
+            "taken_at"
+        )
+        return context
+
+
+class PhotoDeleteView(LoginRequiredMixin, View):
+    def post(self, request, slug, pk):
+        tank = get_object_or_404(Tank.objects.for_user(request.user), slug=slug)
+        photo = get_object_or_404(Photo, tank=tank, pk=pk)
+        photo.delete()
+        messages.success(request, "Foto gelöscht.")
+        return HttpResponseRedirect(reverse("tanks:gallery", kwargs={"slug": slug}))
+
+
+class PhotoSetCoverView(LoginRequiredMixin, View):
+    def post(self, request, slug, pk):
+        tank = get_object_or_404(Tank.objects.for_user(request.user), slug=slug)
+        photo = get_object_or_404(Photo, tank=tank, pk=pk)
+        tank.cover_photo = photo
+        tank.save(update_fields=["cover_photo"])
+        messages.success(request, "Titelbild gesetzt.")
+        return HttpResponseRedirect(reverse("tanks:gallery", kwargs={"slug": slug}))
 
 
 class TankParameterTargetEditView(LoginRequiredMixin, View):
