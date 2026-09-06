@@ -1,0 +1,47 @@
+{% comment %}
+Suche und Filter. Ohne JavaScript ist es ein normales GET-Formular auf die
+Listenseite; mit HTMX wird nur das Raster ersetzt.
+{% endcomment %}
+<form class="mad-filterbar" method="get" action="{{ list_url }}" role="search"
+      hx-get="{{ grid_url }}" hx-target="#katalog-raster" hx-swap="outerHTML"
+      hx-trigger="submit, change, keyup changed delay:300ms from:input[type=search]">
+  <div class="mad-filterbar__field">
+    <label class="form-label" for="filter-q">Suche</label>
+    <input class="form-control" type="search" id="filter-q" name="q" value="{{ filters.q }}"
+           placeholder="Name oder wissenschaftlicher Name" autocomplete="off">
+  </div>
+
+  <div class="mad-filterbar__field">
+    <label class="form-label" for="filter-wassertyp">Wassertyp</label>
+    <select class="form-select" id="filter-wassertyp" name="wassertyp">
+      <option value="">Alle</option>
+      {% for value, label in water_types %}
+        <option value="{{ value }}"{% if filters.water_type == value %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="mad-filterbar__field">
+    <label class="form-label" for="filter-anspruch">Anspruch</label>
+    <select class="form-select" id="filter-anspruch" name="anspruch">
+      <option value="">Alle</option>
+      {% for value, label in difficulties %}
+        <option value="{{ value }}"{% if filters.difficulty == value %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="mad-filterbar__field">
+    <label class="form-label" for="filter-extra">{{ extra_filter_label }}</label>
+    <select class="form-select" id="filter-extra" name="filter">
+      <option value="">Alle</option>
+      {% for value, label in extra_filter_choices %}
+        <option value="{{ value }}"{% if filters.extra == value %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div>
+    <button class="btn btn-primary" type="submit">Filtern</button>
+  </div>
+</form>
