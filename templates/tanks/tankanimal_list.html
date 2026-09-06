@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Besatz – {{ tank.name }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h3 mb-1">Besatz – {{ tank.name }}</h1>
+    <a href="{% url 'tanks:detail' tank.slug %}" class="small">zurück zum Becken</a>
+  </div>
+  <div class="text-nowrap">
+    <a href="{% url 'tanks:animal-create' tank.slug %}" class="btn btn-primary btn-sm">Tier übernehmen</a>
+  </div>
+</div>
+
+{% if tank_animals %}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>Art</th>
+          <th>Bezeichnung</th>
+          <th>Status</th>
+          <th>Anzahl</th>
+          <th>Zugang</th>
+          <th>Hinweise</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for tank_animal in tank_animals %}
+          <tr>
+            <td><a href="{% url 'catalog:animal-detail' tank_animal.animal.slug %}">{{ tank_animal.animal }}</a></td>
+            <td>{{ tank_animal.label|default:"–" }}</td>
+            <td>{{ tank_animal.get_status_display }}</td>
+            <td>
+              {{ tank_animal.quantity }}
+              {% if tank_animal.quantity_male or tank_animal.quantity_female %}
+                <span class="text-body-secondary small">({{ tank_animal.quantity_male|default:0 }}♂ / {{ tank_animal.quantity_female|default:0 }}♀)</span>
+              {% endif %}
+            </td>
+            <td>{{ tank_animal.added_on|default:"–" }}</td>
+            <td>
+              {% if tank_animal.is_below_min_group_size %}
+                <span class="badge text-bg-warning" title="Mindestgruppengröße: {{ tank_animal.animal.min_group_size }}">Unter Mindestgruppengröße</span>
+              {% endif %}
+              {% for warning in tank_animal.parameter_warnings %}
+                <span class="badge text-bg-danger" title="Toleranz {{ warning.minimum|default:'–' }}–{{ warning.maximum|default:'–' }}">
+                  {{ warning.parameter.name }} außerhalb Toleranz ({{ warning.value }})
+                </span>
+              {% endfor %}
+              {% if not tank_animal.stock_matches_movements %}
+                <span class="badge text-bg-secondary" title="Bestand und Bewegungssumme weichen voneinander ab">Inkonsistenter Bestand</span>
+              {% endif %}
+            </td>
+            <td class="text-nowrap">
+              <a href="{% url 'tanks:animal-movements' tank.slug tank_animal.pk %}" class="btn btn-outline-primary btn-sm">Bewegungen</a>
+              <a href="{% url 'tanks:animal-update' tank.slug tank_animal.pk %}" class="btn btn-outline-secondary btn-sm">Bearbeiten</a>
+              <a href="{% url 'tanks:animal-delete' tank.slug tank_animal.pk %}" class="btn btn-outline-danger btn-sm">Löschen</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="text-body-secondary">Noch kein Tier erfasst.</p>
+{% endif %}
+{% endblock %}

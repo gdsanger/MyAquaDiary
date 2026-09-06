@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Bewegungen – {{ tank_animal.label|default:tank_animal.animal }} – {{ tank.name }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <h1 class="h3 mb-1">Bewegungen – {{ tank_animal.label|default:tank_animal.animal }}</h1>
+  <a href="{% url 'tanks:animal-list' tank.slug %}" class="small">zurück zum Besatz</a>
+</div>
+
+<p>Aktueller Bestand: <strong>{{ tank_animal.quantity }}</strong></p>
+
+<h2 class="h5">Bewegung buchen</h2>
+{% if form.non_field_errors %}
+  <div class="text-danger small mb-2">{{ form.non_field_errors|striptags }}</div>
+{% endif %}
+<form method="post" class="row g-3 mb-4">
+  {% csrf_token %}
+  {% for field in form %}
+    <div class="col-md-4">
+      <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+      {{ field }}
+      {% if field.errors %}<div class="text-danger small">{{ field.errors|striptags }}</div>{% endif %}
+    </div>
+  {% endfor %}
+  <div class="col-12">
+    <button type="submit" class="btn btn-primary">Buchen</button>
+  </div>
+</form>
+
+<h2 class="h5">Historie</h2>
+{% if movements %}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>Datum</th>
+          <th>Richtung</th>
+          <th>Grund</th>
+          <th>Anzahl</th>
+          <th>Zielbecken</th>
+          <th>Notiz</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for movement in movements %}
+          <tr>
+            <td>{{ movement.occurred_on }}</td>
+            <td>{{ movement.get_direction_display }}</td>
+            <td>{{ movement.get_reason_display }}</td>
+            <td>{{ movement.quantity }}</td>
+            <td>{{ movement.target_tank|default:"–" }}</td>
+            <td>{{ movement.note }}</td>
+            <td class="text-nowrap">
+              <form method="post" action="{% url 'tanks:animal-movement-delete' tank.slug tank_animal.pk movement.pk %}" class="d-inline">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-danger btn-sm">Stornieren</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="text-body-secondary">Noch keine Bewegung gebucht.</p>
+{% endif %}
+{% endblock %}

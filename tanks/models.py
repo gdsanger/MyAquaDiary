@@ -4,9 +4,12 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.core.validators import MinValueValidator
+from django.db import models, transaction
 from django.utils import timezone
 from django.utils.text import slugify
+
+from catalog.models import CatalogAnimal, CatalogPlant
 
 
 class WaterType(models.TextChoices):
@@ -437,3 +440,239 @@ class MaintenanceSchedule(models.Model):
         self.last_done_on = done_on
         self.next_due_on = self.compute_next_due_on(done_on)
         self.save(update_fields=["last_done_on", "next_due_on"])
+
+
+class StockStatus(models.TextChoices):
+    """Gemeinsame Stati für Besatz (TankAnimal) und Bepflanzung (TankPlant)."""
+
+    PLANNED = "planned", "Geplant"
+    PRESENT = "present", "Vorhanden"
+    TEMPORARY = "temporary", "Temporär"
+    GONE = "gone", "Abgegeben / eingegangen"
+
+
+# (Parameter-Key, Toleranz-Attribut min, Toleranz-Attribut max) — dieselben
+# Kürzel wie in seed_parameters.py. CatalogPlant kennt kein gh_min/gh_max,
+# getattr liefert dafür None und der Check wird übersprungen.
+_TOLERANCE_CHECKS = [
+    ("temp", "temp_min_c", "temp_max_c"),
+    ("ph", "ph_min", "ph_max"),
+    ("kh", "kh_min", "kh_max"),
+    ("gh", "gh_min", "gh_max"),
+]
+
+
+def _tolerance_warnings(tank, catalog_entry):
+    """Vergleicht die zuletzt erfasste Messung des Beckens mit der Toleranz
+    der Art/Pflanze. Ohne Messung oder ohne hinterlegte Toleranz gibt es
+    nichts zu warnen — beides ist der Normalfall bei neu angelegten Becken."""
+
+    measurement = tank.measurements.first()
+    if measurement is None:
+        return []
+    warnings = []
+    for parameter_key, min_attr, max_attr in _TOLERANCE_CHECKS:
+        tolerance_min = getattr(catalog_entry, min_attr, None)
+        tolerance_max = getattr(catalog_entry, max_attr, None)
+        if tolerance_min is None and tolerance_max is None:
+            continue
+        measured = measurement.value_for(parameter_key)
+        if measured is None or measured.value is None:
+            continue
+        if (tolerance_min is not None and measured.value < tolerance_min) or (
+            tolerance_max is not None and measured.value > tolerance_max
+        ):
+            warnings.append(
+                {
+                    "parameter": measured.parameter,
+                    "value": measured.value,
+                    "minimum": tolerance_min,
+                    "maximum": tolerance_max,
+                }
+            )
+    return warnings
+
+
+class TankAnimal(models.Model):
+    """Was tatsächlich im Becken schwimmt/lebt — der Katalogeintrag liefert
+    den Steckbrief, hier steht Anzahl und Status. `quantity` ist der
+    fortgeschriebene Bestand, siehe `TankAnimalMovement` für die Historie
+    dahinter."""
+
+    Status = StockStatus
+
+    tank = models.ForeignKey(Tank, on_delete=models.CASCADE, related_name="animals")
+    animal = models.ForeignKey(
+        CatalogAnimal, on_delete=models.PROTECT, related_name="tank_stock"
+    )
+    label = models.CharField(max_length=120, blank=True)
+    status = models.CharField(max_length=10, choices=StockStatus.choices, default=StockStatus.PRESENT)
+
+    quantity = models.PositiveIntegerField(default=1)
+    quantity_male = models.PositiveSmallIntegerField(null=True, blank=True)
+    quantity_female = models.PositiveSmallIntegerField(null=True, blank=True)
+
+    added_on = models.DateField(null=True, blank=True)
+    origin = models.CharField(max_length=160, blank=True)
+    note = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["animal__scientific_name", "animal__variety"]
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(quantity__gte=0), name="tankanimal_quantity_gte_0"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.tank} – {self.label or self.animal}"
+
+    def save(self, *args, **kwargs):
+        is_new = self._state.adding
+        super().save(*args, **kwargs)
+        if is_new and self.quantity:
+            # Die Ersterfassung ist selbst ein Zugang — so bleibt `quantity`
+            # durchgehend die Summe gebuchter Bewegungen, ohne dass die erste
+            # Bewegung von Hand nachgetragen werden muss.
+            TankAnimalMovement(
+                tank_animal=self,
+                direction=TankAnimalMovement.Direction.IN,
+                reason=TankAnimalMovement.Reason.PURCHASE,
+                quantity=self.quantity,
+                occurred_on=self.added_on or timezone.localdate(),
+                note="Ersterfassung",
+            ).save(apply_to_stock=False)
+
+    @property
+    def is_below_min_group_size(self):
+        min_group_size = self.animal.min_group_size
+        if not min_group_size or self.status != StockStatus.PRESENT:
+            return False
+        return self.quantity < min_group_size
+
+    @property
+    def parameter_warnings(self):
+        return _tolerance_warnings(self.tank, self.animal)
+
+    @property
+    def stock_matches_movements(self):
+        """Konsistenz-Check: Summe der Bewegungen muss dem fortgeschriebenen
+        Bestand entsprechen. Weicht das ab, ist irgendwo eine Bewegung ohne
+        Fortschreibung erfasst worden (z. B. durch einen Datenimport)."""
+
+        net = 0
+        for movement in self.movements.all():
+            net += movement.quantity if movement.direction == TankAnimalMovement.Direction.IN else -movement.quantity
+        return net == self.quantity
+
+
+class TankAnimalMovement(models.Model):
+    """Zu- und Abgänge — die Historie hinter TankAnimal.quantity. Bewegungen
+    sind ein Buchungsjournal: einmal gebucht, wird nicht mehr verändert,
+    nur storniert (gelöscht, was die Buchung zurücknimmt)."""
+
+    class Direction(models.TextChoices):
+        IN = "in", "Zugang"
+        OUT = "out", "Abgang"
+
+    class Reason(models.TextChoices):
+        PURCHASE = "purchase", "Zukauf"
+        BREEDING = "breeding", "Eigene Nachzucht"
+        TRANSFER_IN = "transfer_in", "Umsetzung aus anderem Becken"
+        TRANSFER_OUT = "transfer_out", "Umsetzung in anderes Becken"
+        SOLD = "sold", "Verkauft / abgegeben"
+        DIED = "died", "Eingegangen"
+        PREDATION = "predation", "Gefressen"
+        JUMPED = "jumped", "Gesprungen"
+        UNKNOWN = "unknown", "Unbekannt / verschwunden"
+
+    tank_animal = models.ForeignKey(TankAnimal, on_delete=models.CASCADE, related_name="movements")
+    direction = models.CharField(max_length=3, choices=Direction.choices)
+    reason = models.CharField(max_length=20, choices=Reason.choices)
+    quantity = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    occurred_on = models.DateField()
+    # Nur die Verknüpfung, siehe Modul-Docstring: die Gegenbuchung im
+    # Zielbecken erfolgt in v1 manuell, nicht automatisch.
+    target_tank = models.ForeignKey(
+        Tank, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    note = models.TextField(blank=True)
+    event = models.ForeignKey(
+        Event, null=True, blank=True, on_delete=models.SET_NULL, related_name="animal_movements"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-occurred_on", "-id"]
+
+    def __str__(self):
+        return f"{self.tank_animal} – {self.get_direction_display()} ({self.quantity})"
+
+    def clean(self):
+        super().clean()
+        if self.direction == self.Direction.OUT and self.reason == self.Reason.TRANSFER_OUT and not self.target_tank_id:
+            raise ValidationError(
+                {"target_tank": "Bei Umsetzung in ein anderes Becken ist das Zielbecken erforderlich."}
+            )
+
+    def save(self, *args, apply_to_stock=True, **kwargs):
+        is_new = self._state.adding
+        if is_new and apply_to_stock:
+            with transaction.atomic():
+                self._apply_to_stock()
+                super().save(*args, **kwargs)
+        else:
+            super().save(*args, **kwargs)
+
+    def _apply_to_stock(self):
+        tank_animal = TankAnimal.objects.get(pk=self.tank_animal_id)
+        delta = self.quantity if self.direction == self.Direction.IN else -self.quantity
+        new_quantity = tank_animal.quantity + delta
+        if new_quantity < 0:
+            raise ValidationError({"quantity": "Der Bestand kann nicht unter null fallen."})
+        tank_animal.quantity = new_quantity
+        tank_animal.save(update_fields=["quantity"])
+
+    def delete(self, *args, **kwargs):
+        with transaction.atomic():
+            tank_animal = TankAnimal.objects.get(pk=self.tank_animal_id)
+            delta = -self.quantity if self.direction == self.Direction.IN else self.quantity
+            new_quantity = tank_animal.quantity + delta
+            if new_quantity < 0:
+                raise ValidationError(
+                    "Diese Bewegung kann nicht storniert werden, der Bestand würde unter null fallen."
+                )
+            tank_animal.quantity = new_quantity
+            tank_animal.save(update_fields=["quantity"])
+            super().delete(*args, **kwargs)
+
+
+class TankPlant(models.Model):
+    """Was tatsächlich im Becken wächst. Anders als bei Tieren gibt es keine
+    Bewegungshistorie — eine Stängelpflanze wird gestutzt und vermehrt sich,
+    das exakt zu zählen hat keinen Nutzen (siehe Modul-Docstring)."""
+
+    Status = StockStatus
+
+    tank = models.ForeignKey(Tank, on_delete=models.CASCADE, related_name="plants")
+    plant = models.ForeignKey(
+        CatalogPlant, on_delete=models.PROTECT, related_name="tank_stock"
+    )
+    status = models.CharField(max_length=10, choices=StockStatus.choices, default=StockStatus.PRESENT)
+    quantity = models.PositiveIntegerField(null=True, blank=True)
+    placement = models.CharField(max_length=120, blank=True)
+    attached_to = models.CharField(max_length=120, blank=True)
+    added_on = models.DateField(null=True, blank=True)
+    removed_on = models.DateField(null=True, blank=True)
+    identification_certain = models.BooleanField(default=True)
+    note = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["plant__scientific_name", "plant__cultivar"]
+
+    def __str__(self):
+        return f"{self.tank} – {self.plant}"
+
+    @property
+    def parameter_warnings(self):
+        return _tolerance_warnings(self.tank, self.plant)

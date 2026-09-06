@@ -10,6 +10,8 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from catalog.models import AnimalGroup, CatalogAnimal, CatalogPlant, Difficulty, GrowthForm, Placement
+
 from .models import (
     Event,
     MaintenanceSchedule,
@@ -18,11 +20,38 @@ from .models import (
     Parameter,
     Photo,
     Tank,
+    TankAnimal,
+    TankAnimalMovement,
     TankParameterTarget,
+    TankPlant,
     WaterType,
 )
 
 User = get_user_model()
+
+
+def make_catalog_animal(**kwargs):
+    defaults = dict(
+        scientific_name="Mikrogeophagus ramirezi",
+        group=AnimalGroup.FISCH,
+        difficulty=Difficulty.MEDIUM,
+    )
+    defaults.update(kwargs)
+    return CatalogAnimal.objects.create(**defaults)
+
+
+def make_catalog_plant(**kwargs):
+    defaults = dict(
+        scientific_name="Microsorum pteropus",
+        growth_form=GrowthForm.EPIPHYTE,
+        placement=Placement.MIDGROUND,
+        difficulty=Difficulty.EASY,
+        growth_rate="slow",
+        light_demand="low",
+        co2_demand="low",
+    )
+    defaults.update(kwargs)
+    return CatalogPlant.objects.create(**defaults)
 
 
 def make_tank(owner, **kwargs):
@@ -928,3 +957,262 @@ class TankHistoryViewTests(TestCase):
             [type(obj).__name__ for obj in titles_in_order],
             ["Measurement", "Event", "Event"],
         )
+
+
+class TankAnimalStockTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+        self.animal = make_catalog_animal(min_group_size=6)
+
+    def test_creating_stock_books_an_initial_movement(self):
+        tank_animal = TankAnimal.objects.create(
+            tank=self.tank,
+            animal=self.animal,
+            quantity=8,
+            added_on=datetime.date(2024, 5, 1),
+        )
+        self.assertEqual(tank_animal.movements.count(), 1)
+        movement = tank_animal.movements.first()
+        self.assertEqual(movement.direction, TankAnimalMovement.Direction.IN)
+        self.assertEqual(movement.quantity, 8)
+        self.assertTrue(tank_animal.stock_matches_movements)
+
+    def test_booking_an_in_movement_increases_quantity(self):
+        tank_animal = TankAnimal.objects.create(tank=self.tank, animal=self.animal, quantity=6)
+        TankAnimalMovement.objects.create(
+            tank_animal=tank_animal,
+            direction=TankAnimalMovement.Direction.IN,
+            reason=TankAnimalMovement.Reason.BREEDING,
+            quantity=3,
+            occurred_on=datetime.date(2024, 6, 1),
+        )
+        tank_animal.refresh_from_db()
+        self.assertEqual(tank_animal.quantity, 9)
+        self.assertTrue(tank_animal.stock_matches_movements)
+
+    def test_booking_an_out_movement_decreases_quantity(self):
+        tank_animal = TankAnimal.objects.create(tank=self.tank, animal=self.animal, quantity=6)
+        TankAnimalMovement.objects.create(
+            tank_animal=tank_animal,
+            direction=TankAnimalMovement.Direction.OUT,
+            reason=TankAnimalMovement.Reason.DIED,
+            quantity=2,
+            occurred_on=datetime.date(2024, 6, 1),
+        )
+        tank_animal.refresh_from_db()
+        self.assertEqual(tank_animal.quantity, 4)
+
+    def test_stock_cannot_fall_below_zero(self):
+        tank_animal = TankAnimal.objects.create(tank=self.tank, animal=self.animal, quantity=2)
+        with self.assertRaises(ValidationError):
+            TankAnimalMovement.objects.create(
+                tank_animal=tank_animal,
+                direction=TankAnimalMovement.Direction.OUT,
+                reason=TankAnimalMovement.Reason.SOLD,
+                quantity=5,
+                occurred_on=datetime.date(2024, 6, 1),
+            )
+        tank_animal.refresh_from_db()
+        self.assertEqual(tank_animal.quantity, 2)
+
+    def test_deleting_a_movement_reverses_its_effect_on_stock(self):
+        tank_animal = TankAnimal.objects.create(tank=self.tank, animal=self.animal, quantity=6)
+        movement = TankAnimalMovement.objects.create(
+            tank_animal=tank_animal,
+            direction=TankAnimalMovement.Direction.OUT,
+            reason=TankAnimalMovement.Reason.SOLD,
+            quantity=2,
+            occurred_on=datetime.date(2024, 6, 1),
+        )
+        tank_animal.refresh_from_db()
+        self.assertEqual(tank_animal.quantity, 4)
+
+        movement.delete()
+        tank_animal.refresh_from_db()
+        self.assertEqual(tank_animal.quantity, 6)
+
+    def test_transfer_out_requires_target_tank(self):
+        tank_animal = TankAnimal.objects.create(tank=self.tank, animal=self.animal, quantity=6)
+        movement = TankAnimalMovement(
+            tank_animal=tank_animal,
+            direction=TankAnimalMovement.Direction.OUT,
+            reason=TankAnimalMovement.Reason.TRANSFER_OUT,
+            quantity=2,
+            occurred_on=datetime.date(2024, 6, 1),
+        )
+        with self.assertRaises(ValidationError):
+            movement.full_clean()
+
+    def test_is_below_min_group_size_warns_when_present_and_understocked(self):
+        tank_animal = TankAnimal.objects.create(tank=self.tank, animal=self.animal, quantity=3)
+        self.assertTrue(tank_animal.is_below_min_group_size)
+
+    def test_is_below_min_group_size_ignores_planned_status(self):
+        tank_animal = TankAnimal.objects.create(
+            tank=self.tank, animal=self.animal, quantity=3, status=TankAnimal.Status.PLANNED
+        )
+        self.assertFalse(tank_animal.is_below_min_group_size)
+
+    def test_is_below_min_group_size_false_when_enough_animals(self):
+        tank_animal = TankAnimal.objects.create(tank=self.tank, animal=self.animal, quantity=6)
+        self.assertFalse(tank_animal.is_below_min_group_size)
+
+    def test_parameter_warnings_flag_values_outside_species_tolerance(self):
+        animal = make_catalog_animal(
+            scientific_name="Paracheirodon axelrodi", temp_min_c=24, temp_max_c=27
+        )
+        tank_animal = TankAnimal.objects.create(tank=self.tank, animal=animal, quantity=10)
+        Parameter.objects.get_or_create(key="temp", defaults={"name": "Temperatur", "unit": "°C"})
+        measurement = Measurement.objects.create(tank=self.tank)
+        MeasurementValue.objects.create(
+            measurement=measurement, parameter=Parameter.objects.get(key="temp"), value=30
+        )
+        warnings = tank_animal.parameter_warnings
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0]["value"], Decimal("30"))
+
+    def test_parameter_warnings_empty_without_measurement(self):
+        tank_animal = TankAnimal.objects.create(tank=self.tank, animal=self.animal, quantity=6)
+        self.assertEqual(tank_animal.parameter_warnings, [])
+
+
+class TankAnimalViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.other_user = User.objects.create_user(
+            username="bob", email="bob@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+        self.animal = make_catalog_animal()
+        self.client.force_login(self.user)
+
+    def test_create_view_adds_stock_with_initial_movement(self):
+        response = self.client.post(
+            reverse("tanks:animal-create", kwargs={"slug": self.tank.slug}),
+            data={
+                "animal": self.animal.pk,
+                "label": "Zuchtgruppe",
+                "status": TankAnimal.Status.PRESENT,
+                "quantity": 5,
+                "quantity_male": "",
+                "quantity_female": "",
+                "added_on": "2024-05-01",
+                "origin": "Händler",
+                "note": "",
+            },
+        )
+        self.assertRedirects(
+            response, reverse("tanks:animal-list", kwargs={"slug": self.tank.slug})
+        )
+        tank_animal = TankAnimal.objects.get(tank=self.tank)
+        self.assertEqual(tank_animal.quantity, 5)
+        self.assertEqual(tank_animal.movements.count(), 1)
+
+    def test_list_view_denies_access_to_other_users_tank(self):
+        self.client.force_login(self.other_user)
+        response = self.client.get(reverse("tanks:animal-list", kwargs={"slug": self.tank.slug}))
+        self.assertEqual(response.status_code, 404)
+
+    def test_movement_view_books_a_movement(self):
+        tank_animal = TankAnimal.objects.create(tank=self.tank, animal=self.animal, quantity=6)
+        response = self.client.post(
+            reverse(
+                "tanks:animal-movements", kwargs={"slug": self.tank.slug, "pk": tank_animal.pk}
+            ),
+            data={
+                "direction": TankAnimalMovement.Direction.OUT,
+                "reason": TankAnimalMovement.Reason.SOLD,
+                "quantity": 2,
+                "occurred_on": "2024-06-01",
+                "target_tank": "",
+                "note": "",
+            },
+        )
+        self.assertRedirects(
+            response,
+            reverse(
+                "tanks:animal-movements", kwargs={"slug": self.tank.slug, "pk": tank_animal.pk}
+            ),
+        )
+        tank_animal.refresh_from_db()
+        self.assertEqual(tank_animal.quantity, 4)
+
+    def test_movement_view_rejects_overselling(self):
+        tank_animal = TankAnimal.objects.create(tank=self.tank, animal=self.animal, quantity=1)
+        response = self.client.post(
+            reverse(
+                "tanks:animal-movements", kwargs={"slug": self.tank.slug, "pk": tank_animal.pk}
+            ),
+            data={
+                "direction": TankAnimalMovement.Direction.OUT,
+                "reason": TankAnimalMovement.Reason.SOLD,
+                "quantity": 5,
+                "occurred_on": "2024-06-01",
+                "target_tank": "",
+                "note": "",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        tank_animal.refresh_from_db()
+        self.assertEqual(tank_animal.quantity, 1)
+
+
+class TankPlantTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.other_user = User.objects.create_user(
+            username="bob", email="bob@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+        self.plant = make_catalog_plant()
+        self.client.force_login(self.user)
+
+    def test_identification_certain_defaults_to_true(self):
+        tank_plant = TankPlant.objects.create(tank=self.tank, plant=self.plant)
+        self.assertTrue(tank_plant.identification_certain)
+
+    def test_parameter_warnings_flag_values_outside_species_tolerance(self):
+        plant = make_catalog_plant(
+            scientific_name="Eleocharis acicularis", ph_min=Decimal("6.0"), ph_max=Decimal("7.0")
+        )
+        tank_plant = TankPlant.objects.create(tank=self.tank, plant=plant)
+        Parameter.objects.get_or_create(key="ph", defaults={"name": "pH-Wert", "unit": ""})
+        measurement = Measurement.objects.create(tank=self.tank)
+        MeasurementValue.objects.create(
+            measurement=measurement, parameter=Parameter.objects.get(key="ph"), value=Decimal("8.0")
+        )
+        warnings = tank_plant.parameter_warnings
+        self.assertEqual(len(warnings), 1)
+        self.assertEqual(warnings[0]["value"], Decimal("8.0"))
+
+    def test_create_view_adds_planting(self):
+        response = self.client.post(
+            reverse("tanks:plant-create", kwargs={"slug": self.tank.slug}),
+            data={
+                "plant": self.plant.pk,
+                "status": TankPlant.Status.PRESENT,
+                "quantity": 10,
+                "placement": "links hinten",
+                "attached_to": "",
+                "added_on": "2024-05-01",
+                "removed_on": "",
+                "identification_certain": "on",
+                "note": "",
+            },
+        )
+        self.assertRedirects(
+            response, reverse("tanks:plant-list", kwargs={"slug": self.tank.slug})
+        )
+        self.assertTrue(TankPlant.objects.filter(tank=self.tank, plant=self.plant).exists())
+
+    def test_list_view_denies_access_to_other_users_tank(self):
+        self.client.force_login(self.other_user)
+        response = self.client.get(reverse("tanks:plant-list", kwargs={"slug": self.tank.slug}))
+        self.assertEqual(response.status_code, 404)

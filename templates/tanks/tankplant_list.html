@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Bepflanzung – {{ tank.name }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h3 mb-1">Bepflanzung – {{ tank.name }}</h1>
+    <a href="{% url 'tanks:detail' tank.slug %}" class="small">zurück zum Becken</a>
+  </div>
+  <div class="text-nowrap">
+    <a href="{% url 'tanks:plant-create' tank.slug %}" class="btn btn-primary btn-sm">Pflanze übernehmen</a>
+  </div>
+</div>
+
+{% if tank_plants %}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>Art</th>
+          <th>Status</th>
+          <th>Anzahl</th>
+          <th>Platzierung</th>
+          <th>Zugang</th>
+          <th>Hinweise</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for tank_plant in tank_plants %}
+          <tr>
+            <td>
+              {{ tank_plant.plant }}
+              {% if not tank_plant.identification_certain %}
+                <span class="badge text-bg-secondary" title="Bestimmung unsicher">unsicher bestimmt</span>
+              {% endif %}
+            </td>
+            <td>{{ tank_plant.get_status_display }}</td>
+            <td>{{ tank_plant.quantity|default:"–" }}</td>
+            <td>{{ tank_plant.placement|default:"–" }}{% if tank_plant.attached_to %} ({{ tank_plant.attached_to }}){% endif %}</td>
+            <td>{{ tank_plant.added_on|default:"–" }}</td>
+            <td>
+              {% for warning in tank_plant.parameter_warnings %}
+                <span class="badge text-bg-danger" title="Toleranz {{ warning.minimum|default:'–' }}–{{ warning.maximum|default:'–' }}">
+                  {{ warning.parameter.name }} außerhalb Toleranz ({{ warning.value }})
+                </span>
+              {% endfor %}
+            </td>
+            <td class="text-nowrap">
+              <a href="{% url 'tanks:plant-update' tank.slug tank_plant.pk %}" class="btn btn-outline-secondary btn-sm">Bearbeiten</a>
+              <a href="{% url 'tanks:plant-delete' tank.slug tank_plant.pk %}" class="btn btn-outline-danger btn-sm">Löschen</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="text-body-secondary">Noch keine Pflanze erfasst.</p>
+{% endif %}
+{% endblock %}

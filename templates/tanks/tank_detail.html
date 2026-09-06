@@ -18,6 +18,8 @@
     <a href="{% url 'tanks:measurement-list' tank.slug %}" class="btn btn-outline-primary btn-sm">Messungen</a>
     <a href="{% url 'tanks:event-list' tank.slug %}" class="btn btn-outline-primary btn-sm">Ereignisse</a>
     <a href="{% url 'tanks:schedule-list' tank.slug %}" class="btn btn-outline-primary btn-sm">Termine</a>
+    <a href="{% url 'tanks:animal-list' tank.slug %}" class="btn btn-outline-primary btn-sm">Besatz</a>
+    <a href="{% url 'tanks:plant-list' tank.slug %}" class="btn btn-outline-primary btn-sm">Bepflanzung</a>
     <a href="{% url 'tanks:update' tank.slug %}" class="btn btn-outline-secondary btn-sm">Bearbeiten</a>
     <a href="{% url 'tanks:delete' tank.slug %}" class="btn btn-outline-danger btn-sm">Löschen</a>
   </div>

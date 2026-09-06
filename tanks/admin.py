@@ -8,7 +8,10 @@ from .models import (
     Parameter,
     Photo,
     Tank,
+    TankAnimal,
+    TankAnimalMovement,
     TankParameterTarget,
+    TankPlant,
 )
 
 
@@ -80,3 +83,29 @@ class MaintenanceScheduleAdmin(admin.ModelAdmin):
         "is_active",
     )
     list_filter = ("tank", "event_category", "interval", "is_active")
+
+
+class TankAnimalMovementInline(admin.TabularInline):
+    model = TankAnimalMovement
+    extra = 0
+
+
+@admin.register(TankAnimal)
+class TankAnimalAdmin(admin.ModelAdmin):
+    list_display = ("tank", "animal", "label", "status", "quantity", "added_on")
+    list_filter = ("tank", "status")
+    search_fields = ("label", "animal__scientific_name", "animal__common_name")
+    inlines = [TankAnimalMovementInline]
+
+
+@admin.register(TankAnimalMovement)
+class TankAnimalMovementAdmin(admin.ModelAdmin):
+    list_display = ("tank_animal", "direction", "reason", "quantity", "occurred_on", "target_tank")
+    list_filter = ("direction", "reason")
+
+
+@admin.register(TankPlant)
+class TankPlantAdmin(admin.ModelAdmin):
+    list_display = ("tank", "plant", "status", "quantity", "placement", "identification_certain")
+    list_filter = ("tank", "status", "identification_certain")
+    search_fields = ("plant__scientific_name", "plant__common_name", "placement")

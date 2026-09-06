@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import CatalogAnimal, CatalogAnimalImage
+from .models import CatalogAnimal, CatalogAnimalImage, CatalogPlant, CatalogPlantImage
 
 
 class CatalogAnimalImageInline(admin.TabularInline):
@@ -21,3 +21,23 @@ class CatalogAnimalAdmin(admin.ModelAdmin):
 class CatalogAnimalImageAdmin(admin.ModelAdmin):
     list_display = ("animal", "caption", "sex", "is_primary", "position")
     list_filter = ("is_primary", "sex")
+
+
+class CatalogPlantImageInline(admin.TabularInline):
+    model = CatalogPlantImage
+    extra = 1
+
+
+@admin.register(CatalogPlant)
+class CatalogPlantAdmin(admin.ModelAdmin):
+    list_display = ("__str__", "common_name", "placement", "difficulty", "light_demand", "verified")
+    list_filter = ("placement", "difficulty", "growth_form", "light_demand", "co2_demand", "verified")
+    search_fields = ("scientific_name", "cultivar", "common_name", "family")
+    prepopulated_fields = {"slug": ("scientific_name", "cultivar")}
+    inlines = [CatalogPlantImageInline]
+
+
+@admin.register(CatalogPlantImage)
+class CatalogPlantImageAdmin(admin.ModelAdmin):
+    list_display = ("plant", "caption", "is_primary", "position")
+    list_filter = ("is_primary",)
