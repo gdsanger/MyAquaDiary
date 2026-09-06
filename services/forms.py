@@ -5,7 +5,8 @@ from datetime import datetime, time
 from django import forms
 from django.utils import timezone
 
-from core.forms import BootstrapMixin
+from core.forms import BootstrapMixin, DateField
+from tanks.models import Tank
 
 from .eheim import DEFAULT_PASSWORD, DEFAULT_USERNAME
 from .models import AIConfig, AISuggestion, Device, MailConfig, MCPToken
@@ -109,7 +110,36 @@ class DeviceDiscoveryForm(BootstrapMixin, forms.Form):
     )
 
 
-class DeviceForm(BootstrapMixin, forms.ModelForm):
+#: Felder, die jedes Gerät beschreiben — mit Anbindung wie ohne.
+DOCUMENTATION_FIELDS = [
+    "manufacturer",
+    "model_name",
+    "installed_on",
+    "maintenance_interval_days",
+    "last_maintenance_on",
+]
+
+
+class TankScopedDeviceForm(BootstrapMixin, forms.ModelForm):
+    """Basis aller Geräteformulare: das Becken ist Pflicht und ist ein eigenes.
+
+    Die Auswahl steht auf ``Tank.objects.for_user()`` — ein fremdes Becken
+    taucht nicht auf und wird beim Absenden abgewiesen, auch bei einer von Hand
+    geschickten Kennung. Ohne Benutzer (Django-Admin) bleibt die volle Auswahl
+    stehen; dort ist der Besitzer ein Feld des Formulars.
+    """
+
+    installed_on = DateField(label="In Betrieb seit", required=False)
+    last_maintenance_on = DateField(label="Letzte Wartung", required=False)
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        owner = user or (self.instance.owner if self.instance.owner_id else None)
+        if owner is not None and "tank" in self.fields:
+            self.fields["tank"].queryset = Tank.objects.for_user(owner)
+
+
+class DeviceForm(TankScopedDeviceForm):
     """Anlegen eines Geräts — meist vorbelegt aus der Mesh-Suche.
 
     Die Zugangsdaten werden als JSON verschlüsselt im Feld ``credentials``
@@ -127,7 +157,8 @@ class DeviceForm(BootstrapMixin, forms.ModelForm):
 
     class Meta:
         model = Device
-        fields = ["name", "kind", "tank_label", "mac_address", "host", "is_active"]
+        fields = ["name", "kind", "tank", "mac_address", "host", "is_active",
+                  *DOCUMENTATION_FIELDS]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -217,7 +248,32 @@ class PulseModeForm(BootstrapMixin, forms.Form):
     low_seconds = forms.IntegerField(label="Dauer niedrig (s)", min_value=1, max_value=3600, initial=30)
 
 
-class ShellyDeviceForm(BootstrapMixin, forms.ModelForm):
+class ManualDeviceForm(TankScopedDeviceForm):
+    """Ein Gerät ohne Anbindung — Filter, Heizer, CO₂-Anlage, Beleuchtung.
+
+    Nicht jedes Gerät hängt am Netz, und nicht jedes soll es müssen: eine
+    Heizung ohne WLAN gehört genauso in die Geräteliste des Beckens. Erfasst
+    wird sie als reiner Dokumentationseintrag, mit Wartungsintervall und einem
+    Status, den hier ein Mensch setzt — bei angebundenen Geräten schreibt ihn
+    die Anwendung selbst fort.
+    """
+
+    class Meta:
+        model = Device
+        fields = ["name", "kind", "tank", *DOCUMENTATION_FIELDS, "status", "status_message",
+                  "is_active"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["kind"].choices = [
+            (value, label)
+            for value, label in Device.Kind.choices
+            if value in Device.DOCUMENTED_KINDS
+        ]
+        self.fields["kind"].initial = Device.Kind.OTHER
+
+
+class ShellyDeviceForm(TankScopedDeviceForm):
     """Anlegen einer Shelly-Steckdose über ihre Adresse.
 
     Es gibt keine Mesh-Suche wie bei Eheim: eine Shelly-Steckdose ist im LAN
@@ -245,7 +301,7 @@ class ShellyDeviceForm(BootstrapMixin, forms.ModelForm):
 
     class Meta:
         model = Device
-        fields = ["name", "host", "tank_label", "is_active"]
+        fields = ["name", "host", "tank", "is_active", *DOCUMENTATION_FIELDS]
         help_texts = {"host": "IP oder Hostname der Steckdose im lokalen Netz."}
 
     def __init__(self, *args, **kwargs):
@@ -294,7 +350,11 @@ SHELLY_CONTROLS = {
 
 
 def controls_for(device) -> dict:
-    """Schaltbare Aktionen einer Geräteart — leer heißt: keine Steuerung."""
+    """Schaltbare Aktionen einer Geräteart — leer heißt: keine Steuerung.
+
+    Ein Gerät ohne Anbindung landet hier ebenso im leeren Ergebnis wie ein
+    angebundenes ohne Schaltbefehle: es gibt nichts, wohin ein Befehl ginge.
+    """
     if device.is_shelly:
         return SHELLY_CONTROLS
     if device.kind == Device.Kind.EHEIM_CLASSICVARIO:

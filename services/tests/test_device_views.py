@@ -252,6 +252,7 @@ class CredentialsTests(DeviceViewTestCase):
 class DiscoveryTests(DeviceViewTestCase):
     def setUp(self):
         super().setUp()
+        self.tank = self.device.tank
         self.device.delete()
         self.url = reverse("services:device_discover")
         self.found = [
@@ -295,6 +296,8 @@ class DiscoveryTests(DeviceViewTestCase):
             "macs": macs,
             f"name_{MAC}": "Filter Becken 1",
             f"kind_{MAC}": Device.Kind.EHEIM_CLASSICVARIO,
+            f"tank_{MAC}": self.tank.pk,
+            "tank_AA:BB:CC:00:11:22": self.tank.pk,
             f"firmware_{MAC}": "2.0.1.4",
             "firmware_AA:BB:CC:00:11:22": "2.0.0.9",
             "name_AA:BB:CC:00:11:22": "Alter Filter",
