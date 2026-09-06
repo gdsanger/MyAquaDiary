@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
@@ -120,6 +121,13 @@ class Photo(models.Model):
         on_delete=models.CASCADE,
         related_name="photos",
     )
+    event = models.ForeignKey(
+        "Event",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="photos",
+    )
     image = models.ImageField(upload_to="tanks/%Y/%m/")
     caption = models.CharField(max_length=200, blank=True)
     taken_on = models.DateField(null=True, blank=True)
@@ -134,6 +142,8 @@ class Photo(models.Model):
     def save(self, *args, **kwargs):
         if self.measurement_id and not self.tank_id:
             self.tank_id = self.measurement.tank_id
+        if self.event_id and not self.tank_id:
+            self.tank_id = self.event.tank_id
         super().save(*args, **kwargs)
 
 
@@ -272,3 +282,95 @@ class MeasurementValue(models.Model):
         if target.maximum is not None and self.value > target.maximum:
             return "high"
         return "ok"
+
+
+class Event(models.Model):
+    """Alles, was am Becken passiert und keine Messung ist: Wasserwechsel,
+    Technikänderung, Düngung, Beobachtung, Problem, Krankheit, Nachwuchs."""
+
+    class Category(models.TextChoices):
+        SETUP = "setup", "Einrichtung"
+        WATER_CHANGE = "water_change", "Wasserwechsel"
+        STOCK = "stock", "Besatz"
+        PLANTS = "plants", "Bepflanzung"
+        TECH = "tech", "Technik"
+        FERTILIZER = "fertilizer", "Düngung"
+        MAINTENANCE = "maintenance", "Pflege"
+        OBSERVATION = "observation", "Beobachtung"
+        BREEDING = "breeding", "Nachwuchs"
+        DISEASE = "disease", "Krankheit"
+        PROBLEM = "problem", "Problem"
+        OTHER = "other", "Sonstiges"
+
+    tank = models.ForeignKey(Tank, on_delete=models.CASCADE, related_name="events")
+    occurred_at = models.DateTimeField(default=timezone.now)
+    category = models.CharField(max_length=20, choices=Category.choices, default=Category.OTHER)
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+
+    # nur bei Wasserwechsel relevant; Prozent wird gegen tank.volume_net_l
+    # berechnet, nicht gespeichert (siehe water_change_percent).
+    water_changed_l = models.DecimalField(
+        "Wasserwechsel (l)", max_digits=7, decimal_places=1, null=True, blank=True
+    )
+
+    # gesetzt, wenn das Ereignis aus einem fälligen Termin erledigt wurde
+    schedule = models.ForeignKey(
+        "MaintenanceSchedule",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="events",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-occurred_at"]
+        indexes = [models.Index(fields=["tank", "-occurred_at"])]
+
+    def __str__(self):
+        return f"{self.tank} – {self.title}"
+
+    @property
+    def water_change_percent(self):
+        if self.water_changed_l is None or not self.tank.volume_net_l:
+            return None
+        percent = self.water_changed_l / self.tank.volume_net_l * 100
+        return percent.quantize(Decimal("0.1"))
+
+
+class MaintenanceSchedule(models.Model):
+    """Fälligkeits-Timer für wiederkehrende Pflege (Filterreinigung,
+    Wasserwechsel-Rhythmus etc.). Die volle Terminverwaltung mit
+    Wiederholungsregeln und Dashboard-Übersicht ist ein eigenes Ticket —
+    hier nur das Minimum, damit ein Ereignis einen fälligen Termin
+    quittieren kann."""
+
+    tank = models.ForeignKey(
+        Tank, on_delete=models.CASCADE, related_name="maintenance_schedules"
+    )
+    title = models.CharField(max_length=200)
+    category = models.CharField(
+        max_length=20, choices=Event.Category.choices, default=Event.Category.MAINTENANCE
+    )
+    interval_days = models.PositiveSmallIntegerField("Intervall (Tage)")
+    next_due_at = models.DateTimeField(default=timezone.now)
+    last_done_at = models.DateTimeField(null=True, blank=True)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["next_due_at"]
+
+    def __str__(self):
+        return f"{self.tank} – {self.title}"
+
+    @property
+    def is_due(self):
+        return self.active and self.next_due_at <= timezone.now()
+
+    def mark_done(self, occurred_at):
+        self.last_done_at = occurred_at
+        self.next_due_at = occurred_at + timedelta(days=self.interval_days)
+        self.save(update_fields=["last_done_at", "next_due_at"])

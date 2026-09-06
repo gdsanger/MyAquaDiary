@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}{% if object %}Ereignis bearbeiten{% else %}Ereignis erfassen{% endif %} – {{ tank.name }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<h1 class="h3 mb-3">{% if object %}Ereignis bearbeiten{% else %}Ereignis erfassen{% endif %} – {{ tank.name }}</h1>
+
+{% if schedule %}
+  <p class="text-body-secondary">Aus fälligem Termin „{{ schedule.title }}“ – wird beim Speichern quittiert.</p>
+{% endif %}
+
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  {% if schedule %}<input type="hidden" name="schedule" value="{{ schedule.pk }}">{% endif %}
+  <div class="row g-3 mb-3">
+    {% for field in form %}
+      <div class="col-md-4">
+        <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+        {{ field }}
+        {% if field.errors %}<div class="text-danger small">{{ field.errors|striptags }}</div>{% endif %}
+      </div>
+    {% endfor %}
+  </div>
+
+  <h2 class="h5 mt-4">Fotos</h2>
+  {{ photo_formset.management_form }}
+  {% if photo_formset.non_form_errors %}
+    <div class="text-danger small">{{ photo_formset.non_form_errors|striptags }}</div>
+  {% endif %}
+  {% for photo_form in photo_formset %}
+    <div class="border rounded p-3 mb-2">
+      {% for hidden in photo_form.hidden_fields %}{{ hidden }}{% endfor %}
+      {% for field in photo_form.visible_fields %}
+        <div class="mb-2 {% if field.field.widget.input_type == 'checkbox' %}form-check{% endif %}">
+          {% if field.field.widget.input_type == 'checkbox' %}
+            {{ field }}
+            <label for="{{ field.id_for_label }}" class="form-check-label">{{ field.label }}</label>
+          {% else %}
+            <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+            {{ field }}
+          {% endif %}
+          {% if field.errors %}<div class="text-danger small">{{ field.errors|striptags }}</div>{% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% endfor %}
+
+  <button type="submit" class="btn btn-primary">Speichern</button>
+</form>
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}Ereignis löschen – {{ tank.name }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<h1 class="h3 mb-3">Ereignis „{{ event.title }}“ vom {{ event.occurred_at|date:"d.m.Y H:i" }} löschen?</h1>
+<p class="text-body-secondary">Diese Aktion kann nicht rückgängig gemacht werden.</p>
+
+<form method="post">
+  {% csrf_token %}
+  <button type="submit" class="btn btn-danger">Endgültig löschen</button>
+  <a href="{% url 'tanks:event-list' tank.slug %}" class="btn btn-outline-secondary">Abbrechen</a>
+</form>
+{% endblock %}

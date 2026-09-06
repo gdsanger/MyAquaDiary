@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Beckenhistorie – {{ tank.name }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h3 mb-1">Beckenhistorie – {{ tank.name }}</h1>
+    <a href="{% url 'tanks:detail' tank.slug %}" class="small">zurück zum Becken</a>
+  </div>
+  <div class="text-nowrap">
+    <a href="{% url 'tanks:measurement-list' tank.slug %}" class="btn btn-outline-secondary btn-sm">Messungen</a>
+    <a href="{% url 'tanks:event-list' tank.slug %}" class="btn btn-outline-secondary btn-sm">Ereignisse</a>
+  </div>
+</div>
+
+{% if history %}
+  <ul class="list-group">
+    {% for entry in history %}
+      <li class="list-group-item">
+        <div class="d-flex justify-content-between">
+          <div>
+            {% if entry.kind == "event" %}
+              <span class="badge text-bg-secondary">{{ entry.object.get_category_display }}</span>
+              <strong>{{ entry.object.title }}</strong>
+              {% if entry.object.water_changed_l %}
+                <span class="text-body-secondary">– {{ entry.object.water_changed_l }} l{% if entry.object.water_change_percent %} ({{ entry.object.water_change_percent }} %){% endif %}</span>
+              {% endif %}
+            {% else %}
+              <span class="badge text-bg-info">Messung</span>
+              {% if entry.object.co2_mg_l %}
+                <span class="text-body-secondary">CO₂ {{ entry.object.co2_mg_l }} mg/l</span>
+              {% endif %}
+              {% if entry.object.note %}
+                <span>{{ entry.object.note|truncatechars:60 }}</span>
+              {% endif %}
+            {% endif %}
+          </div>
+          <div class="text-body-secondary text-nowrap">{{ entry.at|date:"d.m.Y H:i" }}</div>
+        </div>
+      </li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <p class="text-body-secondary">Noch keine Ereignisse oder Messungen erfasst.</p>
+{% endif %}
+{% endblock %}
