@@ -5,12 +5,64 @@ from . import views
 app_name = "catalog"
 
 urlpatterns = [
-    # Die Raster-Fragmente stehen vor den Slug-Routen, sonst schluckt der
-    # Slug-Matcher die Pfade.
+    # Die Raster-Fragmente und „neu" stehen vor den Slug-Routen, sonst
+    # schluckt der Slug-Matcher die Pfade.
     path("pflanzen/", views.PlantListView.as_view(), name="plant-list"),
     path("pflanzen/raster/", views.PlantGridView.as_view(), name="plant-grid"),
+    path("pflanzen/neu/", views.PlantSpeciesFormView.as_view(), name="plant-create"),
     path("pflanzen/<slug:slug>/", views.PlantDetailView.as_view(), name="plant-detail"),
+    path(
+        "pflanzen/<slug:slug>/bearbeiten/",
+        views.PlantSpeciesFormView.as_view(),
+        name="plant-update",
+    ),
+    path(
+        "pflanzen/<slug:slug>/loeschen/",
+        views.PlantSpeciesDeleteView.as_view(),
+        name="plant-delete",
+    ),
+    path(
+        "pflanzen/<slug:slug>/bilder/",
+        views.PlantImageUploadView.as_view(),
+        name="plant-image-upload",
+    ),
+    path(
+        "pflanzen/<slug:slug>/bilder/<int:pk>/primaer/",
+        views.PlantImagePrimaryView.as_view(),
+        name="plant-image-primary",
+    ),
+    path(
+        "pflanzen/<slug:slug>/bilder/<int:pk>/loeschen/",
+        views.PlantImageDeleteView.as_view(),
+        name="plant-image-delete",
+    ),
     path("tiere/", views.AnimalListView.as_view(), name="animal-list"),
     path("tiere/raster/", views.AnimalGridView.as_view(), name="animal-grid"),
+    path("tiere/neu/", views.AnimalSpeciesFormView.as_view(), name="animal-create"),
     path("tiere/<slug:slug>/", views.AnimalDetailView.as_view(), name="animal-detail"),
+    path(
+        "tiere/<slug:slug>/bearbeiten/",
+        views.AnimalSpeciesFormView.as_view(),
+        name="animal-update",
+    ),
+    path(
+        "tiere/<slug:slug>/loeschen/",
+        views.AnimalSpeciesDeleteView.as_view(),
+        name="animal-delete",
+    ),
+    path(
+        "tiere/<slug:slug>/bilder/",
+        views.AnimalImageUploadView.as_view(),
+        name="animal-image-upload",
+    ),
+    path(
+        "tiere/<slug:slug>/bilder/<int:pk>/primaer/",
+        views.AnimalImagePrimaryView.as_view(),
+        name="animal-image-primary",
+    ),
+    path(
+        "tiere/<slug:slug>/bilder/<int:pk>/loeschen/",
+        views.AnimalImageDeleteView.as_view(),
+        name="animal-image-delete",
+    ),
 ]

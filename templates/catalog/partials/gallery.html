@@ -1,19 +1,62 @@
-<section class="mad-card">
+{% comment %}
+Galerie einer Art. Wird bei jeder Bildaktion als Ganzes ersetzt, deshalb
+trägt der äußere Container die Zielkennung.
+
+Ohne `can_edit_catalog` ist das hier reine Anzeige: keine Schaltfläche, kein
+Formular — die zugehörigen Adressen antworten für diese Benutzer mit 403.
+{% endcomment %}
+<section class="mad-card" id="katalog-galerie">
   <div class="mad-card__header"><h2 class="mad-card__title">Galerie</h2></div>
   <div class="mad-card__body">
-    {% if images %}
+    {% if image_rows %}
       <div class="mad-gallery">
-        {% for image in images %}
+        {% for row in image_rows %}
           <figure class="m-0">
-            <img src="{{ image.image.url }}" alt="{{ image.caption|default:species.display_name }}" loading="lazy">
-            {% if image.caption %}
-              <figcaption class="mad-list__meta mt-1">{{ image.caption }}</figcaption>
+            <img src="{{ row.image.image.url }}" alt="{{ row.image.caption|default:species.display_name }}" loading="lazy">
+            <figcaption class="mad-list__meta mt-1">
+              {{ row.image.caption }}
+              {% if row.image.is_primary %}<span class="mad-status mad-status--ok">Primärbild</span>{% endif %}
+            </figcaption>
+            {% if can_edit_catalog %}
+              {% if confirm_image and confirm_image.pk == row.image.pk %}
+                <form method="post" action="{{ row.delete_url }}" class="mad-actions mt-1"
+                      hx-post="{{ row.delete_url }}" hx-target="#katalog-galerie" hx-swap="outerHTML">
+                  {% csrf_token %}
+                  <span class="mad-muted">Bild löschen?</span>
+                  <button type="submit" class="btn btn-primary btn-sm">Löschen</button>
+                  <a class="btn btn-outline-secondary btn-sm" href="{{ species.get_absolute_url }}"
+                     hx-get="{{ species.get_absolute_url }}" hx-select="#katalog-galerie"
+                     hx-target="#katalog-galerie" hx-swap="outerHTML">Abbrechen</a>
+                </form>
+              {% else %}
+                <div class="mad-actions mt-1">
+                  {% if not row.image.is_primary %}
+                    <form method="post" action="{{ row.primary_url }}"
+                          hx-post="{{ row.primary_url }}" hx-target="#katalog-galerie" hx-swap="outerHTML">
+                      {% csrf_token %}
+                      <button type="submit" class="btn btn-outline-secondary btn-sm">Als Primärbild</button>
+                    </form>
+                  {% endif %}
+                  <a class="btn btn-outline-secondary btn-sm" href="{{ row.delete_url }}"
+                     hx-get="{{ row.delete_url }}" hx-target="#katalog-galerie" hx-swap="outerHTML">Löschen</a>
+                </div>
+              {% endif %}
             {% endif %}
           </figure>
         {% endfor %}
       </div>
     {% else %}
-      <p class="mad-empty mb-0">Noch keine Bilder hinterlegt.</p>
+      <p class="mad-empty">Noch keine Bilder hinterlegt.</p>
+    {% endif %}
+
+    {% if can_edit_catalog and upload_form %}
+      <form method="post" action="{{ upload_url }}" enctype="multipart/form-data" class="mad-inline-form"
+            hx-post="{{ upload_url }}" hx-encoding="multipart/form-data"
+            hx-target="#katalog-galerie" hx-swap="outerHTML">
+        {% csrf_token %}
+        {% include "partials/form_fields.html" with form=upload_form %}
+        <button type="submit" class="btn btn-outline-primary btn-sm">Bilder hochladen</button>
+      </form>
     {% endif %}
   </div>
 </section>

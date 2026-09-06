@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}{{ species.display_name }} löschen – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="mad-page-header">
+  <div>
+    <h1 class="mad-page-title">{{ label }} löschen</h1>
+    <p class="mad-page-subtitle">{{ species.display_name }} · <i>{{ species.scientific_name }}</i></p>
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ species.get_absolute_url }}">Abbrechen</a>
+</div>
+
+<div class="row">
+  <div class="col-12 col-lg-8">
+    <section class="mad-card">
+      <div class="mad-card__body">
+        {% if usage_count %}
+          <p>
+            Diese Art wird in {{ usage_count }} Becken­eintrag{{ usage_count|pluralize:"en" }} geführt
+            und lässt sich deshalb nicht löschen — die Geschichte dieser Becken hängt daran.
+            Der Steckbrief kann stattdessen bearbeitet werden.
+          </p>
+          <div class="mad-actions">
+            <a class="btn btn-outline-secondary" href="{{ species.get_absolute_url }}">Zurück zur Art</a>
+          </div>
+        {% else %}
+          <p>
+            Der Steckbrief wird mitsamt seinen Bildern aus dem Katalog entfernt. Der Katalog
+            ist userübergreifend: die Art verschwindet damit für alle.
+          </p>
+          <form method="post">
+            {% csrf_token %}
+            <div class="mad-actions">
+              <button type="submit" class="btn btn-primary">Endgültig löschen</button>
+              <a class="btn btn-outline-secondary" href="{{ species.get_absolute_url }}">Abbrechen</a>
+            </div>
+          </form>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

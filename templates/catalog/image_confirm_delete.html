@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% comment %}
+Rückfrage vor dem Löschen eines Bildes — der Weg ohne JavaScript. Mit HTMX
+steht dieselbe Rückfrage direkt in der Galerie.
+{% endcomment %}
+
+{% block title %}Bild löschen – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="mad-page-header">
+  <div>
+    <h1 class="mad-page-title">Bild löschen</h1>
+    <p class="mad-page-subtitle">{{ species.display_name }}</p>
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ species.get_absolute_url }}">Abbrechen</a>
+</div>
+
+<div class="row">
+  <div class="col-12 col-lg-6">
+    <section class="mad-card">
+      <img class="mad-thumb" src="{{ image.image.url }}" alt="{{ image.caption|default:species.display_name }}">
+      <div class="mad-card__body">
+        <p>{{ image.caption|default:"Dieses Bild wird gelöscht." }}</p>
+        <form method="post" action="{{ action }}">
+          {% csrf_token %}
+          <div class="mad-actions">
+            <button type="submit" class="btn btn-primary">Löschen</button>
+            <a class="btn btn-outline-secondary" href="{{ species.get_absolute_url }}">Abbrechen</a>
+          </div>
+        </form>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

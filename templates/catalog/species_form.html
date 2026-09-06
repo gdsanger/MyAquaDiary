@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="mad-page-header">
+  <div>
+    <h1 class="mad-page-title">{{ title }}</h1>
+    {% if species %}<p class="mad-page-subtitle"><i>{{ species.scientific_name }}</i></p>{% endif %}
+  </div>
+  <a class="btn btn-outline-secondary btn-sm"
+     href="{% if species %}{{ species.get_absolute_url }}{% else %}{{ list_url }}{% endif %}">Abbrechen</a>
+</div>
+
+<div class="row">
+  <div class="col-12 col-lg-8">
+    <section class="mad-card">
+      <div class="mad-card__body">
+        <form method="post">
+          {% csrf_token %}
+          {% include "partials/form_fields.html" %}
+          <div class="mad-actions">
+            <button type="submit" class="btn btn-primary">Speichern</button>
+            <a class="btn btn-outline-secondary"
+               href="{% if species %}{{ species.get_absolute_url }}{% else %}{{ list_url }}{% endif %}">Abbrechen</a>
+          </div>
+        </form>
+      </div>
+    </section>
+    {% if species %}
+      <p class="mad-muted mt-3">Bilder werden auf der Detailseite der Art gepflegt.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

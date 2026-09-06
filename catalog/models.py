@@ -15,6 +15,26 @@ def animal_image_path(instance, filename):
     return f"catalog/animals/{instance.species_id}/{filename}"
 
 
+class CatalogPermission(models.Model):
+    """Trägermodell der katalogweiten Pflegeberechtigung.
+
+    Am Becken entscheidet Eigentümerschaft, hier nicht: der Katalog ist
+    userübergreifend, ein Steckbrief gehört niemandem. Deshalb — und nur
+    hier — ein echtes Django-Recht.
+
+    Das Modell hat keine Tabelle (``managed = False``) und dient allein dazu,
+    dass es das Recht genau einmal gibt. An beide Artmodelle gehängt, gäbe es
+    ``can_edit_catalog`` zweimal und niemand wüsste, welches gemeint ist.
+    """
+
+    class Meta:
+        managed = False
+        default_permissions = ()
+        permissions = [("can_edit_catalog", "Darf den Katalog pflegen")]
+        verbose_name = "Katalogberechtigung"
+        verbose_name_plural = "Katalogberechtigungen"
+
+
 class SpeciesQuerySet(models.QuerySet):
     def search(self, term):
         """Freitextsuche über wissenschaftlichen und deutschen Namen."""

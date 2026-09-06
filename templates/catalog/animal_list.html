@@ -8,6 +8,9 @@
     <h1 class="mad-page-title">Tiere</h1>
     <p class="mad-page-subtitle">Katalog aller erfassten Tierarten</p>
   </div>
+  {% if can_edit_catalog %}
+    <a href="{{ create_url }}" class="btn btn-primary btn-sm">Tierart anlegen</a>
+  {% endif %}
 </div>
 
 {% include "catalog/partials/filters.html" %}
