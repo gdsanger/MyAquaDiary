@@ -1,0 +1,43 @@
+{% comment %}
+Karte der Beckenuebersicht. Erwartet ein Becken aus `with_overview()`, also
+mit den Zaehlern animal_count, plant_count, open_task_count, last_measured_at.
+{% endcomment %}
+<article class="mad-card mad-tank-edge {{ tank.accent_class }}">
+  {% if tank.cover_image %}
+    <img class="mad-thumb" src="{{ tank.cover_image.url }}" alt="Titelbild {{ tank.name }}" loading="lazy">
+  {% else %}
+    <div class="mad-thumb mad-thumb--empty">Kein Titelbild</div>
+  {% endif %}
+
+  <div class="mad-card__body">
+    <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+      <h2 class="mad-card__title">
+        <a href="{{ tank.get_absolute_url }}">{{ tank.name }}</a>
+      </h2>
+      <span class="mad-watertype mad-watertype--{{ tank.water_type }}">{{ tank.get_water_type_display }}</span>
+    </div>
+
+    <dl class="mad-definition mb-3">
+      <dt>Volumen</dt>
+      <dd>{{ tank.volume_liters|floatformat:0 }} l</dd>
+      <dt>{% if tank.is_dissolved %}Laufzeit{% else %}Alter{% endif %}</dt>
+      <dd>{{ tank.age_display }}</dd>
+      <dt>Tiere</dt>
+      <dd>{{ tank.animal_count }}</dd>
+      <dt>Pflanzen</dt>
+      <dd>{{ tank.plant_count }}</dd>
+      <dt>Letzte Messung</dt>
+      <dd>{% if tank.last_measured_at %}{{ tank.last_measured_at|date:"d.m.Y" }}{% else %}—{% endif %}</dd>
+    </dl>
+
+    {% if tank.is_dissolved %}
+      <span class="mad-status">Aufgelöst am {{ tank.dissolved_on|date:"d.m.Y" }}</span>
+    {% elif tank.open_task_count %}
+      <span class="mad-status mad-status--warn">
+        {{ tank.open_task_count }} offene{{ tank.open_task_count|pluralize:"r," }} Termin{{ tank.open_task_count|pluralize:"e" }}
+      </span>
+    {% else %}
+      <span class="mad-status mad-status--ok">Keine offenen Termine</span>
+    {% endif %}
+  </div>
+</article>

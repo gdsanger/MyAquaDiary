@@ -1,0 +1,19 @@
+<section class="mad-card">
+  <div class="mad-card__header"><h2 class="mad-card__title">Galerie</h2></div>
+  <div class="mad-card__body">
+    {% if images %}
+      <div class="mad-gallery">
+        {% for image in images %}
+          <figure class="m-0">
+            <img src="{{ image.image.url }}" alt="{{ image.caption|default:species.display_name }}" loading="lazy">
+            {% if image.caption %}
+              <figcaption class="mad-list__meta mt-1">{{ image.caption }}</figcaption>
+            {% endif %}
+          </figure>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="mad-empty mb-0">Noch keine Bilder hinterlegt.</p>
+    {% endif %}
+  </div>
+</section>

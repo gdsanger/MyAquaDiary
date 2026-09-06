@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tank.name }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="mad-page-header">
+  <div>
+    <h1 class="mad-page-title mad-tank-label {{ tank.accent_class }}">
+      <span class="mad-tank-dot" aria-hidden="true"></span>{{ tank.name }}
+    </h1>
+    <p class="mad-page-subtitle">
+      {{ tank.volume_liters|floatformat:0 }} l
+      · <span class="mad-watertype mad-watertype--{{ tank.water_type }}">{{ tank.get_water_type_display }}</span>
+      · seit {{ tank.setup_date|date:"d.m.Y" }} ({{ tank.age_display }})
+      {% if tank.is_dissolved %}· aufgelöst am {{ tank.dissolved_on|date:"d.m.Y" }}{% endif %}
+    </p>
+  </div>
+  <a href="{% url 'tanks:list' %}" class="btn btn-outline-secondary btn-sm">Alle Becken</a>
+</div>
+
+{% include "tanks/partials/tab_area.html" %}
+{% endblock %}

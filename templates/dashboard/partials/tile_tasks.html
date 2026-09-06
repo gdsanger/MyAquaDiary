@@ -1,0 +1,58 @@
+{% comment %}
+Terminkachel. Die Quittierung schickt einen POST auf denselben Ausschnitt
+zurueck — HTMX tauscht nur diese Kachel, das uebrige Dashboard bleibt stehen.
+Ohne JavaScript funktioniert dasselbe Formular als normaler POST mit Redirect.
+{% endcomment %}
+<section class="mad-card" id="tile-tasks" aria-label="Fällige und anstehende Termine">
+  <div class="mad-card__header">
+    <h2 class="mad-card__title">Fällige und anstehende Termine</h2>
+    <button type="button" class="btn btn-sm btn-outline-secondary"
+            hx-get="{% url 'dashboard:tile-tasks' %}" hx-target="#tile-tasks" hx-swap="outerHTML">
+      Aktualisieren
+    </button>
+  </div>
+
+  {% if completed_task %}
+    <div class="mad-alert mad-alert--ok m-3" role="status">
+      <div>
+        <p class="mad-alert__title">„{{ completed_task.title }}“ quittiert</p>
+        {% if completed_task.is_active %}
+          <p class="mad-alert__meta">Nächster Termin am {{ completed_task.due_on|date:"d.m.Y" }}.</p>
+        {% else %}
+          <p class="mad-alert__meta">Einmaliger Termin — abgeschlossen.</p>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+
+  <ul class="mad-list">
+    {% for task in tasks %}
+      <li class="mad-tank-edge {{ task.tank.accent_class }}">
+        <div class="mad-list__row">
+          <div class="mad-list__main">
+            <p class="mad-list__title">{{ task.title }}</p>
+            <p class="mad-list__meta">
+              <span class="mad-tank-dot" aria-hidden="true"></span>{{ task.tank.name }}
+              · {{ task.get_category_display }}
+            </p>
+          </div>
+          <span class="mad-status mad-status--{{ task.status_value }}">{{ task.due_label }}</span>
+          <form method="post" action="{% url 'dashboard:task-complete' task.pk %}"
+                hx-post="{% url 'dashboard:task-complete' task.pk %}"
+                hx-target="#tile-tasks" hx-swap="outerHTML">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm mad-btn-ack">
+              Erledigt<span class="visually-hidden">: {{ task.title }} ({{ task.tank.name }})</span>
+            </button>
+          </form>
+        </div>
+      </li>
+    {% empty %}
+      <li class="mad-empty">Keine fälligen oder anstehenden Termine.</li>
+    {% endfor %}
+  </ul>
+
+  {% if task_overflow %}
+    <div class="mad-card__footer mad-muted">und {{ task_overflow }} weitere</div>
+  {% endif %}
+</section>
