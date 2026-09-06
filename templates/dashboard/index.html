@@ -4,7 +4,68 @@
 
 {% block content %}
 <h1 class="h3 mb-3">Willkommen, {{ user }}</h1>
-<p class="text-body-secondary">
-  Hier entstehen die KPIs und fälligen Termine deiner Becken.
-</p>
+
+<h2 class="h5">Fällige Termine</h2>
+{% if due_schedules %}
+  <div class="table-responsive mb-4">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>Becken</th>
+          <th>Termin</th>
+          <th>Kategorie</th>
+          <th>Fällig seit</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for schedule in due_schedules %}
+          <tr>
+            <td><a href="{% url 'tanks:detail' schedule.tank.slug %}">{{ schedule.tank.name }}</a></td>
+            <td>{{ schedule.title }}</td>
+            <td>{{ schedule.get_event_category_display }}</td>
+            <td>{{ schedule.next_due_on }}</td>
+            <td>
+              <a href="{% url 'tanks:event-create' schedule.tank.slug %}?termin={{ schedule.pk }}" class="btn btn-outline-success btn-sm">Quittieren</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="text-body-secondary mb-4">Keine fälligen Termine.</p>
+{% endif %}
+
+<h2 class="h5">Anstehende Termine</h2>
+{% if upcoming_schedules %}
+  <div class="table-responsive mb-4">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>Becken</th>
+          <th>Termin</th>
+          <th>Kategorie</th>
+          <th>Fällig am</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for schedule in upcoming_schedules %}
+          <tr>
+            <td><a href="{% url 'tanks:detail' schedule.tank.slug %}">{{ schedule.tank.name }}</a></td>
+            <td>{{ schedule.title }}</td>
+            <td>{{ schedule.get_event_category_display }}</td>
+            <td>{{ schedule.next_due_on }}</td>
+            <td>
+              <a href="{% url 'tanks:event-create' schedule.tank.slug %}?termin={{ schedule.pk }}" class="btn btn-outline-secondary btn-sm">Quittieren</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="text-body-secondary mb-4">Keine anstehenden Termine.</p>
+{% endif %}
 {% endblock %}

@@ -2,6 +2,7 @@ import datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
@@ -626,9 +627,10 @@ class EventFromScheduleTests(TestCase):
         self.schedule = MaintenanceSchedule.objects.create(
             tank=self.tank,
             title="Filter reinigen",
-            category=Event.Category.MAINTENANCE,
+            event_category=Event.Category.MAINTENANCE,
+            interval=MaintenanceSchedule.Interval.CUSTOM,
             interval_days=14,
-            next_due_at=datetime.datetime(2024, 3, 1, 9, 0, tzinfo=datetime.timezone.utc),
+            next_due_on=datetime.date(2024, 3, 1),
         )
 
     def test_create_form_prefills_title_and_category_from_schedule(self):
@@ -654,13 +656,245 @@ class EventFromScheduleTests(TestCase):
         self.assertEqual(event.schedule, self.schedule)
 
         self.schedule.refresh_from_db()
-        self.assertEqual(self.schedule.last_done_at, event.occurred_at)
-        self.assertEqual(self.schedule.next_due_at, event.occurred_at + datetime.timedelta(days=14))
+        self.assertEqual(self.schedule.last_done_on, datetime.date(2024, 3, 5))
+        self.assertEqual(self.schedule.next_due_on, datetime.date(2024, 3, 19))
 
-    def test_is_due_reflects_next_due_at(self):
+    def test_next_due_on_is_computed_from_completion_not_old_due_date(self):
+        """Ein versäumter Termin darf sich nicht vom alten Solltermin aus
+        fortschreiben, sonst türmen sich Fälligkeiten übereinander."""
+
+        self.schedule.mark_done(datetime.date(2024, 4, 1))
+        self.assertEqual(self.schedule.next_due_on, datetime.date(2024, 4, 15))
+
+    def test_is_due_reflects_next_due_on(self):
         self.assertTrue(self.schedule.is_due)
-        self.schedule.mark_done(timezone.now())
+        self.schedule.mark_done(timezone.localdate())
         self.assertFalse(self.schedule.is_due)
+
+    def test_inactive_schedule_is_never_due_or_upcoming(self):
+        self.schedule.is_active = False
+        self.schedule.save(update_fields=["is_active"])
+        self.assertFalse(self.schedule.is_due)
+        self.assertFalse(self.schedule.is_upcoming)
+
+
+class MaintenanceScheduleIntervalTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+
+    def make_schedule(self, **overrides):
+        defaults = dict(
+            tank=self.tank,
+            title="Wasserwechsel",
+            interval=MaintenanceSchedule.Interval.WEEKLY,
+            next_due_on=datetime.date(2024, 1, 31),
+        )
+        defaults.update(overrides)
+        return MaintenanceSchedule.objects.create(**defaults)
+
+    def test_weekly_interval_adds_seven_days(self):
+        schedule = self.make_schedule(interval=MaintenanceSchedule.Interval.WEEKLY)
+        self.assertEqual(
+            schedule.compute_next_due_on(datetime.date(2024, 1, 31)), datetime.date(2024, 2, 7)
+        )
+
+    def test_monthly_interval_clamps_to_last_day_of_shorter_month(self):
+        schedule = self.make_schedule(interval=MaintenanceSchedule.Interval.MONTHLY)
+        self.assertEqual(
+            schedule.compute_next_due_on(datetime.date(2024, 1, 31)), datetime.date(2024, 2, 29)
+        )
+
+    def test_yearly_interval_adds_twelve_months(self):
+        schedule = self.make_schedule(interval=MaintenanceSchedule.Interval.YEARLY)
+        self.assertEqual(
+            schedule.compute_next_due_on(datetime.date(2024, 1, 31)), datetime.date(2025, 1, 31)
+        )
+
+    def test_custom_interval_requires_interval_days(self):
+        schedule = self.make_schedule(interval=MaintenanceSchedule.Interval.CUSTOM, interval_days=None)
+        with self.assertRaises(ValidationError):
+            schedule.full_clean()
+
+    def test_is_upcoming_within_lead_days(self):
+        schedule = self.make_schedule(
+            next_due_on=timezone.localdate() + datetime.timedelta(days=2), lead_days=2
+        )
+        self.assertFalse(schedule.is_due)
+        self.assertTrue(schedule.is_upcoming)
+
+    def test_is_upcoming_false_beyond_lead_days(self):
+        schedule = self.make_schedule(
+            next_due_on=timezone.localdate() + datetime.timedelta(days=5), lead_days=2
+        )
+        self.assertFalse(schedule.is_due)
+        self.assertFalse(schedule.is_upcoming)
+
+
+class ScheduleCrudViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+        self.client.force_login(self.user)
+
+    def test_create_schedule(self):
+        response = self.client.post(
+            reverse("tanks:schedule-create", kwargs={"slug": self.tank.slug}),
+            {
+                "title": "Wasserwechsel 30 %",
+                "event_category": Event.Category.WATER_CHANGE,
+                "description": "",
+                "interval": MaintenanceSchedule.Interval.WEEKLY,
+                "interval_days": "",
+                "next_due_on": "2024-06-01",
+                "lead_days": "2",
+                "notify_email": "on",
+                "is_active": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        schedule = MaintenanceSchedule.objects.get(tank=self.tank)
+        self.assertEqual(schedule.title, "Wasserwechsel 30 %")
+
+    def test_custom_interval_without_days_is_rejected(self):
+        response = self.client.post(
+            reverse("tanks:schedule-create", kwargs={"slug": self.tank.slug}),
+            {
+                "title": "Sonderaufgabe",
+                "event_category": Event.Category.MAINTENANCE,
+                "description": "",
+                "interval": MaintenanceSchedule.Interval.CUSTOM,
+                "interval_days": "",
+                "next_due_on": "2024-06-01",
+                "lead_days": "2",
+                "notify_email": "on",
+                "is_active": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(MaintenanceSchedule.objects.filter(tank=self.tank).exists())
+
+    def test_delete_schedule(self):
+        schedule = MaintenanceSchedule.objects.create(
+            tank=self.tank,
+            title="Düngen",
+            interval=MaintenanceSchedule.Interval.WEEKLY,
+            next_due_on=datetime.date(2024, 6, 1),
+        )
+        response = self.client.post(
+            reverse("tanks:schedule-delete", kwargs={"slug": self.tank.slug, "pk": schedule.pk})
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(MaintenanceSchedule.objects.filter(pk=schedule.pk).exists())
+
+    def test_other_users_tank_is_not_accessible(self):
+        other = User.objects.create_user(
+            username="bob", email="bob@example.com", password="s3cret-pw"
+        )
+        other_tank = make_tank(other, name="Anderes Becken")
+        response = self.client.get(
+            reverse("tanks:schedule-list", kwargs={"slug": other_tank.slug})
+        )
+        self.assertEqual(response.status_code, 404)
+
+
+class DashboardDueSchedulesTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+        self.client.force_login(self.user)
+
+    def test_due_and_upcoming_schedules_are_listed(self):
+        due = MaintenanceSchedule.objects.create(
+            tank=self.tank,
+            title="Fällig",
+            interval=MaintenanceSchedule.Interval.WEEKLY,
+            next_due_on=timezone.localdate(),
+        )
+        upcoming = MaintenanceSchedule.objects.create(
+            tank=self.tank,
+            title="Bald",
+            interval=MaintenanceSchedule.Interval.WEEKLY,
+            next_due_on=timezone.localdate() + datetime.timedelta(days=1),
+            lead_days=2,
+        )
+        MaintenanceSchedule.objects.create(
+            tank=self.tank,
+            title="Weit weg",
+            interval=MaintenanceSchedule.Interval.WEEKLY,
+            next_due_on=timezone.localdate() + datetime.timedelta(days=30),
+        )
+        MaintenanceSchedule.objects.create(
+            tank=self.tank,
+            title="Deaktiviert",
+            interval=MaintenanceSchedule.Interval.WEEKLY,
+            next_due_on=timezone.localdate(),
+            is_active=False,
+        )
+
+        response = self.client.get(reverse("dashboard:index"))
+        self.assertContains(response, due.title)
+        self.assertContains(response, upcoming.title)
+        self.assertNotContains(response, "Weit weg")
+        self.assertNotContains(response, "Deaktiviert")
+
+
+class SendDueRemindersCommandTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="alice", email="alice@example.com", password="s3cret-pw"
+        )
+        self.tank = make_tank(self.user)
+
+    def test_sends_one_mail_per_user_and_sets_last_reminded_on(self):
+        schedule = MaintenanceSchedule.objects.create(
+            tank=self.tank,
+            title="Fällig",
+            interval=MaintenanceSchedule.Interval.WEEKLY,
+            next_due_on=timezone.localdate(),
+        )
+        call_command("send_due_reminders")
+        self.assertEqual(len(mail.outbox), 1)
+        schedule.refresh_from_db()
+        self.assertEqual(schedule.last_reminded_on, timezone.localdate())
+
+    def test_does_not_send_twice_on_the_same_day(self):
+        MaintenanceSchedule.objects.create(
+            tank=self.tank,
+            title="Fällig",
+            interval=MaintenanceSchedule.Interval.WEEKLY,
+            next_due_on=timezone.localdate(),
+            last_reminded_on=timezone.localdate(),
+        )
+        call_command("send_due_reminders")
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_inactive_schedule_is_not_reminded(self):
+        MaintenanceSchedule.objects.create(
+            tank=self.tank,
+            title="Fällig",
+            interval=MaintenanceSchedule.Interval.WEEKLY,
+            next_due_on=timezone.localdate(),
+            is_active=False,
+        )
+        call_command("send_due_reminders")
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_not_yet_due_schedule_is_not_reminded(self):
+        MaintenanceSchedule.objects.create(
+            tank=self.tank,
+            title="Weit weg",
+            interval=MaintenanceSchedule.Interval.WEEKLY,
+            next_due_on=timezone.localdate() + datetime.timedelta(days=30),
+        )
+        call_command("send_due_reminders")
+        self.assertEqual(len(mail.outbox), 0)
 
 
 class TankHistoryViewTests(TestCase):

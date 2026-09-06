@@ -1,7 +1,15 @@
 from django import forms
 from django.forms import inlineformset_factory
 
-from .models import Event, Measurement, MeasurementValue, Photo, Tank, TankParameterTarget
+from .models import (
+    Event,
+    MaintenanceSchedule,
+    Measurement,
+    MeasurementValue,
+    Photo,
+    Tank,
+    TankParameterTarget,
+)
 
 
 class TankForm(forms.ModelForm):
@@ -99,3 +107,23 @@ EventPhotoFormSet = inlineformset_factory(
     extra=1,
     can_delete=True,
 )
+
+
+class MaintenanceScheduleForm(forms.ModelForm):
+    class Meta:
+        model = MaintenanceSchedule
+        fields = [
+            "title",
+            "event_category",
+            "description",
+            "interval",
+            "interval_days",
+            "next_due_on",
+            "lead_days",
+            "notify_email",
+            "is_active",
+        ]
+        widgets = {
+            "description": forms.Textarea(attrs={"rows": 2}),
+            "next_due_on": forms.DateInput(attrs={"type": "date"}),
+        }

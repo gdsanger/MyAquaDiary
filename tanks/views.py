@@ -7,6 +7,7 @@ from django.forms import inlineformset_factory
 from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse, reverse_lazy
+from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.views import View
 from django.views.generic import CreateView, DeleteView, DetailView, ListView, UpdateView
@@ -14,6 +15,7 @@ from django.views.generic import CreateView, DeleteView, DetailView, ListView, U
 from .forms import (
     EventForm,
     EventPhotoFormSet,
+    MaintenanceScheduleForm,
     MeasurementForm,
     MeasurementPhotoFormSet,
     MeasurementValueForm,
@@ -511,7 +513,7 @@ class EventCreateView(EventOwnerMixin, EventFormMixin, CreateView):
         schedule = self.get_schedule()
         if schedule:
             initial["title"] = schedule.title
-            initial["category"] = schedule.category
+            initial["category"] = schedule.event_category
         return initial
 
     def get_context_data(self, **kwargs):
@@ -524,7 +526,7 @@ class EventCreateView(EventOwnerMixin, EventFormMixin, CreateView):
         form.instance.schedule = schedule
         response = super().form_valid(form)
         if schedule and self.object is not None:
-            schedule.mark_done(self.object.occurred_at)
+            schedule.mark_done(timezone.localtime(self.object.occurred_at).date())
         return response
 
 
@@ -544,3 +546,66 @@ class EventDeleteView(EventQuerysetMixin, DeleteView):
 
     def get_success_url(self):
         return reverse("tanks:event-list", kwargs={"slug": self.tank.slug})
+
+
+class ScheduleOwnerMixin(LoginRequiredMixin):
+    def dispatch(self, request, *args, **kwargs):
+        self.tank = get_object_or_404(Tank.objects.for_user(request.user), slug=kwargs["slug"])
+        return super().dispatch(request, *args, **kwargs)
+
+
+class ScheduleQuerysetMixin(ScheduleOwnerMixin):
+    def get_queryset(self):
+        return MaintenanceSchedule.objects.filter(tank=self.tank)
+
+
+class ScheduleListView(ScheduleQuerysetMixin, ListView):
+    model = MaintenanceSchedule
+    context_object_name = "schedules"
+    template_name = "tanks/schedule_list.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["tank"] = self.tank
+        return context
+
+
+class ScheduleFormMixin:
+    model = MaintenanceSchedule
+    form_class = MaintenanceScheduleForm
+    template_name = "tanks/schedule_form.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["tank"] = self.tank
+        return context
+
+    def form_valid(self, form):
+        form.instance.tank = self.tank
+        messages.success(self.request, "Termin gespeichert.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("tanks:schedule-list", kwargs={"slug": self.tank.slug})
+
+
+class ScheduleCreateView(ScheduleOwnerMixin, ScheduleFormMixin, CreateView):
+    pass
+
+
+class ScheduleUpdateView(ScheduleQuerysetMixin, ScheduleFormMixin, UpdateView):
+    pass
+
+
+class ScheduleDeleteView(ScheduleQuerysetMixin, DeleteView):
+    model = MaintenanceSchedule
+    context_object_name = "schedule"
+    template_name = "tanks/schedule_confirm_delete.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["tank"] = self.tank
+        return context
+
+    def get_success_url(self):
+        return reverse("tanks:schedule-list", kwargs={"slug": self.tank.slug})

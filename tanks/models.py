@@ -1,3 +1,4 @@
+import calendar
 from datetime import timedelta
 from decimal import Decimal
 
@@ -340,37 +341,99 @@ class Event(models.Model):
         return percent.quantize(Decimal("0.1"))
 
 
+def _add_months(date, months):
+    """Kalendermonate addieren statt fixer Tagesanzahl, sonst wandert ein
+    monatlicher Termin über die Zeit durch den Monat (28–31 Tage Drift)."""
+
+    month_index = date.month - 1 + months
+    year = date.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(date.day, calendar.monthrange(year, month)[1])
+    return date.replace(year=year, month=month, day=day)
+
+
 class MaintenanceSchedule(models.Model):
     """Fälligkeits-Timer für wiederkehrende Pflege (Filterreinigung,
-    Wasserwechsel-Rhythmus etc.). Die volle Terminverwaltung mit
-    Wiederholungsregeln und Dashboard-Übersicht ist ein eigenes Ticket —
-    hier nur das Minimum, damit ein Ereignis einen fälligen Termin
-    quittieren kann."""
+    Wasserwechsel-Rhythmus etc.). Genau ein nächster Termin je Serie — keine
+    `Occurrence`-Historie versäumter Einzeltermine, siehe Modul-Docstring
+    dieses Tickets."""
 
-    tank = models.ForeignKey(
-        Tank, on_delete=models.CASCADE, related_name="maintenance_schedules"
-    )
+    class Interval(models.TextChoices):
+        DAILY = "daily", "Täglich"
+        WEEKLY = "weekly", "Wöchentlich"
+        BIWEEKLY = "biweekly", "Alle 2 Wochen"
+        MONTHLY = "monthly", "Monatlich"
+        QUARTERLY = "quarterly", "Vierteljährlich"
+        YEARLY = "yearly", "Jährlich"
+        CUSTOM = "custom", "Individuell (Tage)"
+
+    tank = models.ForeignKey(Tank, on_delete=models.CASCADE, related_name="schedules")
     title = models.CharField(max_length=200)
-    category = models.CharField(
-        max_length=20, choices=Event.Category.choices, default=Event.Category.MAINTENANCE
+    event_category = models.CharField(
+        "Ereigniskategorie",
+        max_length=20,
+        choices=Event.Category.choices,
+        default=Event.Category.MAINTENANCE,
     )
-    interval_days = models.PositiveSmallIntegerField("Intervall (Tage)")
-    next_due_at = models.DateTimeField(default=timezone.now)
-    last_done_at = models.DateTimeField(null=True, blank=True)
-    active = models.BooleanField(default=True)
+    description = models.TextField(blank=True)
+
+    interval = models.CharField(max_length=10, choices=Interval.choices, default=Interval.MONTHLY)
+    interval_days = models.PositiveSmallIntegerField(
+        "Intervall (Tage)", null=True, blank=True
+    )
+    next_due_on = models.DateField("Nächster Termin", default=timezone.localdate)
+    last_done_on = models.DateField("Zuletzt erledigt", null=True, blank=True)
+    last_reminded_on = models.DateField(null=True, blank=True)
+
+    lead_days = models.PositiveSmallIntegerField("Vorlauf (Tage)", default=2)
+    notify_email = models.BooleanField("Per E-Mail erinnern", default=True)
+    is_active = models.BooleanField(default=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["next_due_at"]
+        ordering = ["next_due_on"]
 
     def __str__(self):
         return f"{self.tank} – {self.title}"
 
+    def clean(self):
+        super().clean()
+        if self.interval == self.Interval.CUSTOM and not self.interval_days:
+            raise ValidationError(
+                {"interval_days": "Bei individuellem Intervall ist die Tagesanzahl erforderlich."}
+            )
+
     @property
     def is_due(self):
-        return self.active and self.next_due_at <= timezone.now()
+        return self.is_active and self.next_due_on <= timezone.localdate()
 
-    def mark_done(self, occurred_at):
-        self.last_done_at = occurred_at
-        self.next_due_at = occurred_at + timedelta(days=self.interval_days)
-        self.save(update_fields=["last_done_at", "next_due_at"])
+    @property
+    def is_upcoming(self):
+        if not self.is_active or self.is_due:
+            return False
+        return self.next_due_on <= timezone.localdate() + timedelta(days=self.lead_days)
+
+    def compute_next_due_on(self, from_date):
+        if self.interval == self.Interval.DAILY:
+            return from_date + timedelta(days=1)
+        if self.interval == self.Interval.WEEKLY:
+            return from_date + timedelta(days=7)
+        if self.interval == self.Interval.BIWEEKLY:
+            return from_date + timedelta(days=14)
+        if self.interval == self.Interval.MONTHLY:
+            return _add_months(from_date, 1)
+        if self.interval == self.Interval.QUARTERLY:
+            return _add_months(from_date, 3)
+        if self.interval == self.Interval.YEARLY:
+            return _add_months(from_date, 12)
+        return from_date + timedelta(days=self.interval_days)
+
+    def mark_done(self, done_on):
+        """Rechnet den nächsten Termin vom Erledigungsdatum aus fort statt
+        vom alten Solltermin — sonst türmen sich nach einer versäumten
+        Woche mehrere Fälligkeiten übereinander."""
+
+        self.last_done_on = done_on
+        self.next_due_on = self.compute_next_due_on(done_on)
+        self.save(update_fields=["last_done_on", "next_due_on"])

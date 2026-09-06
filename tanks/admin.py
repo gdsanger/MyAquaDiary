@@ -71,5 +71,12 @@ class EventAdmin(admin.ModelAdmin):
 
 @admin.register(MaintenanceSchedule)
 class MaintenanceScheduleAdmin(admin.ModelAdmin):
-    list_display = ("tank", "title", "category", "interval_days", "next_due_at", "active")
-    list_filter = ("tank", "category", "active")
+    list_display = (
+        "tank",
+        "title",
+        "event_category",
+        "interval",
+        "next_due_on",
+        "is_active",
+    )
+    list_filter = ("tank", "event_category", "interval", "is_active")
