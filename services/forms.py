@@ -233,6 +233,9 @@ class ShellyDeviceForm(BootstrapMixin, forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.instance.kind = Device.Kind.SHELLY_PLUG
+        # Am Modell ist die Adresse optional (Eheim-Geräte im Mesh brauchen
+        # keine eigene); für eine Steckdose ist sie der ganze Zugang.
+        self.fields["host"].required = True
         if self.instance.pk:
             self.fields["username"].initial = self.instance.api_user
 

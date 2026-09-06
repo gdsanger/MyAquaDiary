@@ -71,6 +71,24 @@ class AddPlugTests(PlugViewTestCase):
         self.client.logout()
         self.assertEqual(self.client.get(self.url).status_code, 302)
 
+    def test_the_form_says_that_no_cloud_is_involved(self):
+        response = self.client.get(self.url)
+
+        self.assertContains(response, "lokalen Netz")
+        self.assertContains(response, "Cloud")
+
+
+class ListTests(PlugViewTestCase):
+    def test_the_plug_is_listed_and_loads_its_status_via_htmx(self):
+        with patch("services.devices.service_for") as service_for:
+            response = self.client.get(reverse("services:device_list"))
+
+        self.assertContains(response, self.device.name)
+        self.assertContains(response, "Becken 1")
+        self.assertContains(response, reverse("services:device_status", args=[self.device.pk]))
+        self.assertContains(response, reverse("services:energy_overview"))
+        service_for.assert_not_called()
+
 
 class StatusTests(PlugViewTestCase):
     def url(self):

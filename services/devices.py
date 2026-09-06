@@ -152,7 +152,7 @@ def check_firmware(device: Device) -> str:
 
 
 # --------------------------------------------------------------------------
-# Schreiben — welche Aktionen es gibt, steht in services.forms.CONTROL_FORMS.
+# Schreiben — welche Aktionen es gibt, steht in services.forms.controls_for.
 # Ein Firmware-Update ist keine davon; der Client sperrt ``/doupdate`` zudem.
 # --------------------------------------------------------------------------
 
