@@ -1,0 +1,50 @@
+{% comment %}
+Basislayout aller HTML-Mails.
+
+Bewusste Einschränkungen für die Mail-Clients:
+* Reines Table-Layout mit Inline-Styles — Outlook (Word-Renderer) unterstützt
+  weder Flexbox noch Grid und ignoriert externe Stylesheets.
+* Fest heller Hintergrund inklusive color-scheme-Hinweis, unabhängig vom
+  UI-Theme: Dark Mode wird von den Clients sehr unterschiedlich umgesetzt.
+* Feste Breite 600px als Attribut plus max-width als Style.
+
+Kontext: site_name, site_url (siehe services.graph.mail.base_context)
+{% endcomment %}<!doctype html>
+<html lang="de" style="color-scheme:light;supported-color-schemes:light;">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>{% block title %}{{ site_name }}{% endblock %}</title>
+</head>
+<body style="margin:0; padding:0; width:100%; background-color:#f5fafb; color:#1b2b2e; font-family:Helvetica,Arial,sans-serif; -webkit-font-smoothing:antialiased;">
+<div style="display:none; max-height:0; overflow:hidden; mso-hide:all; font-size:1px; line-height:1px; color:#f5fafb;">{% block preheader %}{% endblock %}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5fafb;">
+  <tr>
+    <td align="center" style="padding:24px 12px;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px; background-color:#ffffff; border:1px solid #dceaee; border-radius:6px;">
+        <tr>
+          <td style="padding:20px 28px; background-color:#0f7a8c; border-radius:6px 6px 0 0;">
+            <span style="font-size:18px; font-weight:bold; color:#ffffff;">{{ site_name }}</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:28px; font-size:15px; line-height:22px; color:#1b2b2e;">
+            {% block content %}{% endblock %}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:16px 28px 24px 28px; border-top:1px solid #dceaee; font-size:12px; line-height:18px; color:#5b7278;">
+            {% block footer %}
+              Diese Nachricht wurde automatisch von {{ site_name }} verschickt.{% if site_url %}<br>
+              <a href="{{ site_url }}" style="color:#0f7a8c;">{{ site_url }}</a>{% endif %}
+            {% endblock %}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>

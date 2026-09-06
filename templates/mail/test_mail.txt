@@ -1,0 +1,9 @@
+{% extends "mail/base.txt" %}
+{% block content %}Testmail
+
+Wenn diese Nachricht ankommt, ist der Mailversand über die Microsoft Graph API
+korrekt eingerichtet.
+
+Absender: {{ sender_address }}
+
+Diese Mail wurde manuell aus der Administration ausgelöst.{% endblock %}

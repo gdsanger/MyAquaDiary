@@ -1,0 +1,12 @@
+{% extends "mail/base.txt" %}
+{% block content %}Willkommen bei {{ site_name }}
+
+Hallo {{ recipient_name }},
+
+dein Zugang ist angelegt. Bestätige die Registrierung über den folgenden Link,
+dann kannst du dein erstes Becken anlegen.
+
+{{ activation_url }}
+
+Der Link ist {{ valid_hours|default:"24" }} Stunden gültig. Hast du dich nicht
+registriert, ignoriere diese Mail einfach.{% endblock %}

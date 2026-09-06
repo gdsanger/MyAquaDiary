@@ -1,0 +1,10 @@
+{% extends "mail/base.txt" %}
+{% block content %}Fällige Termine
+
+Hallo {{ recipient_name }},
+
+diese Aufgaben stehen in deinen Becken an:
+{% for appointment in appointments %}
+* {{ appointment.title }} ({{ appointment.tank_name|default:"ohne Becken" }}), fällig {{ appointment.due_date|date:"d.m.Y"|default:"–" }}{% endfor %}
+{% if detail_url %}
+Termine öffnen: {{ detail_url }}{% endif %}{% endblock %}

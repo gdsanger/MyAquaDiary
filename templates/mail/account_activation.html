@@ -1,0 +1,23 @@
+{% extends "mail/base.html" %}
+{% comment %}Kontext: recipient_name, activation_url, valid_hours{% endcomment %}
+
+{% block title %}Zugang aktivieren{% endblock %}
+{% block preheader %}Bitte bestätige deine Registrierung bei {{ site_name }}.{% endblock %}
+
+{% block content %}
+  <h1 style="margin:0 0 16px 0; font-size:20px; line-height:26px; color:#1b2b2e;">Willkommen bei {{ site_name }}</h1>
+  <p style="margin:0 0 16px 0;">Hallo {{ recipient_name }},</p>
+  <p style="margin:0 0 16px 0;">
+    dein Zugang ist angelegt. Bestätige die Registrierung über den folgenden Link,
+    dann kannst du dein erstes Becken anlegen.
+  </p>
+  {% include "mail/_button.html" with url=activation_url label="Zugang aktivieren" %}
+  <p style="margin:0 0 12px 0; font-size:13px; color:#5b7278;">
+    Falls der Button nicht funktioniert, kopiere diese Adresse in den Browser:<br>
+    <a href="{{ activation_url }}" style="color:#0f7a8c; word-break:break-all;">{{ activation_url }}</a>
+  </p>
+  <p style="margin:0; font-size:13px; color:#5b7278;">
+    Der Link ist {{ valid_hours|default:"24" }} Stunden gültig. Hast du dich nicht registriert,
+    ignoriere diese Mail einfach.
+  </p>
+{% endblock %}

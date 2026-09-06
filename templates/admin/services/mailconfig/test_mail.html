@@ -1,0 +1,28 @@
+{% extends "admin/base_site.html" %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Start</a>
+    &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+    &rsaquo; <a href="{% url 'admin:services_mailconfig_changelist' %}">{{ opts.verbose_name }}</a>
+    &rsaquo; Testmail senden
+  </div>
+{% endblock %}
+
+{% block content %}
+  <h1>Testmail senden</h1>
+  <p>
+    Versendet eine Testnachricht über die hinterlegte Graph-Konfiguration.
+    Absender: <strong>{{ config.sender_address }}</strong>
+  </p>
+  <form method="post">
+    {% csrf_token %}
+    <fieldset class="module aligned">
+      {{ form.as_div }}
+    </fieldset>
+    <div class="submit-row">
+      <input type="submit" value="Testmail senden" class="default">
+      <a href="{% url 'admin:services_mailconfig_changelist' %}" class="closelink">Abbrechen</a>
+    </div>
+  </form>
+{% endblock %}

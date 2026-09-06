@@ -1,0 +1,33 @@
+{% extends "mail/base.html" %}
+{% comment %}
+Kontext:
+  recipient_name — Anrede
+  appointments   — Liste mit .title, .due_date, .tank_name (Objekte oder Dicts)
+  detail_url     — optionaler Link in die Anwendung
+{% endcomment %}
+
+{% block title %}Fällige Termine{% endblock %}
+{% block preheader %}{{ appointments|length }} Termin(e) in deinen Becken sind fällig.{% endblock %}
+
+{% block content %}
+  <h1 style="margin:0 0 16px 0; font-size:20px; line-height:26px; color:#1b2b2e;">Fällige Termine</h1>
+  <p style="margin:0 0 16px 0;">Hallo {{ recipient_name }},</p>
+  <p style="margin:0 0 16px 0;">
+    diese Aufgaben stehen in deinen Becken an:
+  </p>
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px 0; border-collapse:collapse;">
+    <tr>
+      <th align="left" style="padding:8px 12px; background-color:#f5fafb; border:1px solid #dceaee; font-size:13px; color:#5b7278; font-weight:bold;">Aufgabe</th>
+      <th align="left" style="padding:8px 12px; background-color:#f5fafb; border:1px solid #dceaee; font-size:13px; color:#5b7278; font-weight:bold;">Becken</th>
+      <th align="left" style="padding:8px 12px; background-color:#f5fafb; border:1px solid #dceaee; font-size:13px; color:#5b7278; font-weight:bold;">Fällig</th>
+    </tr>
+    {% for appointment in appointments %}
+      <tr>
+        <td style="padding:8px 12px; border:1px solid #dceaee; font-size:14px;">{{ appointment.title }}</td>
+        <td style="padding:8px 12px; border:1px solid #dceaee; font-size:14px;">{{ appointment.tank_name|default:"–" }}</td>
+        <td style="padding:8px 12px; border:1px solid #dceaee; font-size:14px;">{{ appointment.due_date|date:"d.m.Y"|default:"–" }}</td>
+      </tr>
+    {% endfor %}
+  </table>
+  {% if detail_url %}{% include "mail/_button.html" with url=detail_url label="Termine öffnen" %}{% endif %}
+{% endblock %}
