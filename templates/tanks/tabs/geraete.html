@@ -1,0 +1,30 @@
+<section class="mad-card">
+  <div class="mad-card__header"><h2 class="mad-card__title">Geräte</h2></div>
+  <ul class="mad-list">
+    {% for device in devices %}
+      <li>
+        <div class="mad-list__row">
+          <div class="mad-list__main">
+            <p class="mad-list__title">{{ device.name }}</p>
+            <p class="mad-list__meta">
+              {{ device.get_kind_display }}
+              {% if device.manufacturer %}· {{ device.manufacturer }} {{ device.model_name }}{% endif %}
+              {% if device.last_seen_at %}· zuletzt erreicht {{ device.last_seen_at|date:"d.m.Y H:i" }}{% endif %}
+            </p>
+            {% if device.status_message %}
+              <p class="mad-list__meta">{{ device.status_message }}</p>
+            {% endif %}
+          </div>
+          <span class="mad-status mad-status--{{ device.status }}">{{ device.get_status_display }}</span>
+          {% if device.maintenance_due_on %}
+            <span class="mad-status mad-status--{{ device.maintenance_status_value }}">
+              Wartung {{ device.maintenance_due_on|date:"d.m.Y" }}
+            </span>
+          {% endif %}
+        </div>
+      </li>
+    {% empty %}
+      <li class="mad-empty">Noch keine Geräte erfasst.</li>
+    {% endfor %}
+  </ul>
+</section>

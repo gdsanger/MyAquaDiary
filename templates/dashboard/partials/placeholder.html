@@ -1,0 +1,18 @@
+{% comment %}
+Platzhalter einer Dashboard-Kachel. Laedt sich per HTMX selbst nach und
+ersetzt sich dabei vollstaendig (hx-swap="outerHTML"). Dadurch ist jede Kachel
+unabhaengig: eine langsame Abfrage blockiert die uebrigen nicht.
+
+Parameter: url, title
+{% endcomment %}
+<section class="mad-card" aria-label="{{ title }}" aria-busy="true"
+         hx-get="{{ url }}" hx-trigger="load" hx-target="this" hx-swap="outerHTML">
+  <div class="mad-card__header">
+    <h2 class="mad-card__title">{{ title }}</h2>
+  </div>
+  <div class="mad-placeholder">
+    <div class="mad-placeholder__bar"></div>
+    <div class="mad-placeholder__bar"></div>
+    <span class="visually-hidden">{{ title }} werden geladen …</span>
+  </div>
+</section>

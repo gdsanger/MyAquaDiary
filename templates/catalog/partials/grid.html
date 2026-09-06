@@ -1,0 +1,42 @@
+{% comment %}
+Katalograster. Wird als Ganzes von HTMX ersetzt, deshalb traegt der aeussere
+Container die Zielkennung.
+{% endcomment %}
+<div id="katalog-raster">
+  <p class="mad-muted mb-3" role="status" aria-live="polite">
+    {{ result_count }} Treffer{% if filters.q %} für „{{ filters.q }}“{% endif %}
+  </p>
+
+  {% if species_list %}
+    <div class="mad-grid">
+      {% for species in species_list %}
+        <article class="mad-card">
+          {% if species.primary_image %}
+            <img class="mad-thumb" src="{{ species.primary_image.image.url }}"
+                 alt="{{ species.display_name }}" loading="lazy">
+          {% else %}
+            <div class="mad-thumb mad-thumb--empty">Kein Bild</div>
+          {% endif %}
+          <div class="mad-card__body">
+            <h2 class="mad-card__title mb-1">
+              <a href="{{ species.get_absolute_url }}">{{ species.display_name }}</a>
+            </h2>
+            <p class="mad-list__meta mb-2"><i>{{ species.scientific_name }}</i></p>
+            {% if species.summary %}
+              <p class="mad-muted">{{ species.summary }}</p>
+            {% endif %}
+            <div class="d-flex flex-wrap gap-2">
+              <span class="mad-watertype mad-watertype--{{ species.water_type }}">{{ species.get_water_type_display }}</span>
+              {# Anspruch bewusst neutral: gruen/orange/rot bleiben dem Zielbereich vorbehalten. #}
+              <span class="mad-status">Anspruch: {{ species.get_difficulty_display }}</span>
+            </div>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="mad-card">
+      <p class="mad-empty mb-0">Keine Art gefunden. Suche oder Filter anpassen.</p>
+    </div>
+  {% endif %}
+</div>

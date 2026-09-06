@@ -1,0 +1,20 @@
+<section class="mb-4" aria-label="Kennzahlen">
+  <div class="mad-kpi-grid">
+    <div class="mad-kpi">
+      <span class="mad-kpi__label">Becken</span>
+      <span class="mad-kpi__value">{{ tank_count }}</span>
+    </div>
+    <div class="mad-kpi">
+      <span class="mad-kpi__label">Gesamtvolumen</span>
+      <span class="mad-kpi__value">{{ total_volume|floatformat:0 }}<span class="mad-kpi__unit">l</span></span>
+    </div>
+    <div class="mad-kpi">
+      <span class="mad-kpi__label">Tiere</span>
+      <span class="mad-kpi__value">{{ animal_count }}</span>
+    </div>
+    <div class="mad-kpi">
+      <span class="mad-kpi__label">Arten</span>
+      <span class="mad-kpi__value">{{ species_count }}</span>
+    </div>
+  </div>
+</section>

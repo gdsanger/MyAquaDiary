@@ -1,0 +1,27 @@
+<section class="mad-card" id="tile-activity" aria-label="Letzte Aktivitäten">
+  <div class="mad-card__header">
+    <h2 class="mad-card__title">Letzte Aktivitäten</h2>
+    <button type="button" class="btn btn-sm btn-outline-secondary"
+            hx-get="{% url 'dashboard:tile-activity' %}" hx-target="#tile-activity" hx-swap="outerHTML">
+      Aktualisieren
+    </button>
+  </div>
+
+  <ul class="mad-list">
+    {% for entry in entries %}
+      <li class="mad-tank-edge {{ entry.tank.accent_class }}">
+        <div class="mad-list__row">
+          <div class="mad-list__main">
+            <p class="mad-list__title">{{ entry.title }}</p>
+            <p class="mad-list__meta">
+              <span class="mad-tank-dot" aria-hidden="true"></span>{{ entry.tank.name }}
+              · {{ entry.kind_label }} · {{ entry.timestamp|date:"d.m.Y H:i" }}
+            </p>
+          </div>
+        </div>
+      </li>
+    {% empty %}
+      <li class="mad-empty">Noch keine Aktivitäten erfasst.</li>
+    {% endfor %}
+  </ul>
+</section>

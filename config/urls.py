@@ -27,6 +27,7 @@ urlpatterns = [
     ),
     path("", include("core.urls")),
     path("tanks/", include("tanks.urls")),
+    path("becken/", include("tanks.urls")),
     path("katalog/", include("catalog.urls")),
     path("", include("dashboard.urls")),
 ]
@@ -35,4 +36,5 @@ if settings.DEBUG:
     import debug_toolbar
 
     urlpatterns += [path("__debug__/", include(debug_toolbar.urls))]
+    # Titelbilder und Galeriefotos in der Entwicklung direkt ausliefern.
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

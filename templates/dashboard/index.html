@@ -2,6 +2,11 @@
 
 {% block title %}Dashboard – MyAquaDiary{% endblock %}
 
+{% comment %}
+Das Geruest des Dashboards enthaelt bewusst keine Daten: alle Kacheln laden
+sich per HTMX selbst nach. Eine langsame Kachel haelt die Seite nicht auf.
+{% endcomment %}
+
 {% block content %}
 <h1 class="h3 mb-3">Willkommen, {{ user }}</h1>
 
@@ -68,4 +73,48 @@
 {% else %}
   <p class="text-body-secondary mb-4">Keine anstehenden Termine.</p>
 {% endif %}
+<div class="mad-page-header">
+  <div>
+    <h1 class="mad-page-title">Dashboard</h1>
+    <p class="mad-page-subtitle">Überblick über alle Becken</p>
+  </div>
+  <a href="{% url 'tanks:list' %}" class="btn btn-outline-primary btn-sm">Zur Beckenübersicht</a>
+</div>
+
+<section class="mb-4" aria-label="Kennzahlen" aria-busy="true"
+         hx-get="{% url 'dashboard:tile-kpi' %}" hx-trigger="load" hx-target="this" hx-swap="outerHTML">
+  <div class="mad-kpi-grid">
+    {% for _ in "1234" %}
+      <div class="mad-kpi">
+        <div class="mad-placeholder__bar"></div>
+        <div class="mad-placeholder__bar"></div>
+      </div>
+    {% endfor %}
+  </div>
+  <span class="visually-hidden">Kennzahlen werden geladen …</span>
+</section>
+
+{% url 'dashboard:tile-tasks' as tasks_url %}
+{% url 'dashboard:tile-chart' as chart_url %}
+{% url 'dashboard:tile-warnings' as warnings_url %}
+{% url 'dashboard:tile-activity' as activity_url %}
+
+<div class="row g-4">
+  <div class="col-12 col-lg-7">
+    <div class="mb-4">
+      {% include "dashboard/partials/placeholder.html" with url=tasks_url title="Fällige und anstehende Termine" %}
+    </div>
+    <div>
+      {% include "dashboard/partials/placeholder.html" with url=chart_url title="Verlauf" %}
+    </div>
+  </div>
+  <div class="col-12 col-lg-5">
+    <div class="mb-4">
+      {% include "dashboard/partials/placeholder.html" with url=warnings_url title="Warnungen" %}
+    </div>
+    <div>
+      {% include "dashboard/partials/placeholder.html" with url=activity_url title="Letzte Aktivitäten" %}
+    </div>
+  </div>
+</div>
 {% endblock %}

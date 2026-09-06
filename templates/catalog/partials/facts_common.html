@@ -1,0 +1,17 @@
+{% comment %}Steckbriefzeilen, die Pflanzen und Tiere teilen.{% endcomment %}
+<dt>Wassertyp</dt>
+<dd><span class="mad-watertype mad-watertype--{{ species.water_type }}">{{ species.get_water_type_display }}</span></dd>
+<dt>Anspruch</dt>
+<dd>{{ species.get_difficulty_display }}</dd>
+{% if species.temperature_range %}
+  <dt>Temperatur</dt>
+  <dd>{{ species.temperature_range }}</dd>
+{% endif %}
+{% if species.ph_range %}
+  <dt>pH-Wert</dt>
+  <dd>{{ species.ph_range }}</dd>
+{% endif %}
+{% if species.gh_range %}
+  <dt>Gesamthärte</dt>
+  <dd>{{ species.gh_range }}</dd>
+{% endif %}

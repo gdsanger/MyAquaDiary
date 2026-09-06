@@ -165,4 +165,6 @@ urlpatterns = [
         views.TankPlantDeleteView.as_view(),
         name="plant-delete",
     ),
+    path("<slug:slug>/", views.TankDetailView.as_view(), name="detail"),
+    path("<slug:slug>/reiter/<slug:tab>/", views.TankTabView.as_view(), name="tab"),
 ]

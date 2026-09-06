@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}{{ species.display_name }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="mad-page-header">
+  <div>
+    <h1 class="mad-page-title">{{ species.display_name }}</h1>
+    <p class="mad-page-subtitle"><i>{{ species.scientific_name }}</i></p>
+  </div>
+  <a href="{% url 'catalog:plant-list' %}" class="btn btn-outline-secondary btn-sm">Zurück zum Katalog</a>
+</div>
+
+<div class="row g-4">
+  <div class="col-12 col-lg-6">
+    <section class="mad-card">
+      <div class="mad-card__header"><h2 class="mad-card__title">Steckbrief</h2></div>
+      <div class="mad-card__body">
+        <dl class="mad-definition mb-0">
+          {% include "catalog/partials/facts_common.html" %}
+          <dt>Standort</dt>
+          <dd>{{ species.get_placement_display }}</dd>
+          <dt>Wuchs</dt>
+          <dd>{{ species.get_growth_rate_display }}</dd>
+          <dt>Lichtbedarf</dt>
+          <dd>{{ species.get_light_demand_display }}</dd>
+          <dt>CO₂</dt>
+          <dd>{% if species.co2_required %}erforderlich{% else %}nicht erforderlich{% endif %}</dd>
+          {% if species.max_height_cm %}
+            <dt>Wuchshöhe</dt>
+            <dd>bis {{ species.max_height_cm }} cm</dd>
+          {% endif %}
+        </dl>
+        {% if species.description %}
+          <p class="mt-3 mb-0">{{ species.description|linebreaksbr }}</p>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    {% include "catalog/partials/own_tanks.html" %}
+  </div>
+
+  <div class="col-12">
+    {% include "catalog/partials/gallery.html" %}
+  </div>
+</div>
+{% endblock %}

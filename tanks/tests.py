@@ -1471,3 +1471,223 @@ class TankTimelineViewTests(TestCase):
         response = self.client.get(reverse("tanks:timeline", kwargs={"slug": self.tank.slug}))
 
         self.assertEqual(list(response.context["photos"]), [older, newer])
+from datetime import timedelta
+from decimal import Decimal
+
+from django.test import TestCase
+from django.urls import reverse
+from django.utils import timezone
+
+from core.enums import Status
+from core.testing import (
+    create_animal,
+    create_measurement,
+    create_plant,
+    create_tank,
+    create_task,
+    create_user,
+    stock,
+)
+from tanks.charts import parameter_series
+from tanks.models import Parameter, Planting, Tank, classify_value
+from tanks.views import TAB_KEYS
+
+
+class ClassifyValueTests(TestCase):
+    """Statuslogik: grün im Zielbereich, orange knapp daneben, rot deutlich."""
+
+    def test_inside_range_is_ok(self):
+        self.assertEqual(classify_value(Decimal("7.0"), Decimal("6.5"), Decimal("7.5")), Status.OK)
+
+    def test_slightly_outside_range_is_a_warning(self):
+        # Bereichsbreite 1.0, Toleranz 0.2 — 7.6 liegt 0.1 daneben.
+        self.assertEqual(
+            classify_value(Decimal("7.6"), Decimal("6.5"), Decimal("7.5")), Status.WARN
+        )
+
+    def test_clearly_outside_range_is_critical(self):
+        self.assertEqual(
+            classify_value(Decimal("8.5"), Decimal("6.5"), Decimal("7.5")), Status.CRITICAL
+        )
+
+    def test_open_ended_range_uses_the_known_bound(self):
+        self.assertEqual(classify_value(Decimal("0.05"), None, Decimal("0.10")), Status.OK)
+        self.assertEqual(classify_value(Decimal("0.11"), None, Decimal("0.10")), Status.WARN)
+        self.assertEqual(classify_value(Decimal("1.50"), None, Decimal("0.10")), Status.CRITICAL)
+
+    def test_without_a_target_range_no_statement_is_made(self):
+        self.assertEqual(classify_value(Decimal("7.0"), None, None), Status.UNKNOWN)
+
+
+class TankModelTests(TestCase):
+    def setUp(self):
+        self.user = create_user()
+
+    def test_accent_class_refers_to_the_stylesheet(self):
+        tank = create_tank(self.user, accent=5)
+        self.assertEqual(tank.accent_class, "mad-tank-accent-5")
+
+    def test_age_display(self):
+        today = timezone.localdate()
+        self.assertEqual(create_tank(self.user, slug="a", setup_date=today).age_display, "0 Tage")
+        self.assertEqual(
+            create_tank(self.user, slug="b", setup_date=today - timedelta(days=200)).age_display,
+            "6 Monate",
+        )
+        self.assertEqual(
+            create_tank(self.user, slug="c", setup_date=today - timedelta(days=1200)).age_display,
+            "3 Jahre",
+        )
+
+    def test_dissolved_tank_age_stops_at_the_dissolution_date(self):
+        today = timezone.localdate()
+        tank = create_tank(
+            self.user,
+            setup_date=today - timedelta(days=800),
+            dissolved_on=today - timedelta(days=400),
+        )
+        self.assertTrue(tank.is_dissolved)
+        self.assertEqual(tank.age.days, 400)
+
+    def test_overview_counts_are_computed_without_cross_joins(self):
+        """Mehrere Zähler über verschiedene Beziehungen dürfen sich nicht
+        gegenseitig multiplizieren."""
+        tank = create_tank(self.user)
+        stock(tank, create_animal(), quantity=10)
+        stock(tank, create_animal("Corydoras paleatus", common_name="Panzerwels"), quantity=6)
+        Planting.objects.create(
+            tank=tank, species=create_plant(), quantity=4, planted_on=timezone.localdate()
+        )
+        create_task(tank, days_until_due=-1)
+        create_measurement(tank, "ph", "7.0")
+
+        overview = Tank.objects.for_user(self.user).with_overview().get(pk=tank.pk)
+        self.assertEqual(overview.animal_count, 16)
+        self.assertEqual(overview.plant_count, 4)
+        self.assertEqual(overview.open_task_count, 1)
+        self.assertIsNotNone(overview.last_measured_at)
+
+
+class TankListViewTests(TestCase):
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+
+    def test_requires_login(self):
+        self.client.logout()
+        response = self.client.get(reverse("tanks:list"))
+        self.assertEqual(response.status_code, 302)
+
+    def test_dissolved_tanks_are_listed_separately(self):
+        active = create_tank(self.user, name="Aktiv", slug="aktiv")
+        dissolved = create_tank(
+            self.user, name="Aufgelöst", slug="aufgeloest", dissolved_on=timezone.localdate()
+        )
+        response = self.client.get(reverse("tanks:list"))
+        self.assertEqual(list(response.context["active_tanks"]), [active])
+        self.assertEqual(list(response.context["dissolved_tanks"]), [dissolved])
+        self.assertContains(response, "Aufgelöste Becken")
+
+    def test_other_users_tanks_are_invisible(self):
+        create_tank(create_user("fremd"), name="Fremdbecken", slug="fremd")
+        response = self.client.get(reverse("tanks:list"))
+        self.assertNotContains(response, "Fremdbecken")
+
+    def test_card_shows_the_required_facts(self):
+        tank = create_tank(self.user)
+        stock(tank, create_animal(), quantity=12)
+        create_measurement(tank, "ph", "7.0")
+        response = self.client.get(reverse("tanks:list"))
+        self.assertContains(response, tank.name)
+        self.assertContains(response, "240 l")
+        self.assertContains(response, "Letzte Messung")
+        self.assertContains(response, tank.accent_class)
+
+
+class TankDetailViewTests(TestCase):
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.tank = create_tank(self.user)
+
+    def test_all_tabs_render(self):
+        for tab in TAB_KEYS:
+            with self.subTest(tab=tab):
+                response = self.client.get(f"{self.tank.get_absolute_url()}?reiter={tab}")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context["active_tab"], tab)
+
+    def test_unknown_tab_falls_back_to_the_overview(self):
+        response = self.client.get(f"{self.tank.get_absolute_url()}?reiter=gibtsnicht")
+        self.assertEqual(response.context["active_tab"], "uebersicht")
+
+    def test_tab_fragment_is_a_partial(self):
+        url = reverse("tanks:tab", args=[self.tank.slug, "messwerte"])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertNotIn("<html", content)
+        self.assertIn('id="tab-area"', content)
+
+    def test_unknown_tab_fragment_is_not_found(self):
+        response = self.client.get(reverse("tanks:tab", args=[self.tank.slug, "unsinn"]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_foreign_tank_is_not_reachable(self):
+        foreign = create_tank(create_user("fremd"), slug="fremd")
+        self.assertEqual(self.client.get(foreign.get_absolute_url()).status_code, 404)
+
+    def test_visiting_the_detail_remembers_the_tank(self):
+        self.client.get(self.tank.get_absolute_url())
+        self.assertEqual(self.client.session["last_tank_id"], self.tank.pk)
+
+    def test_measurement_tab_shows_target_range_and_status(self):
+        create_measurement(self.tank, "no2", "1.500")
+        response = self.client.get(f"{self.tank.get_absolute_url()}?reiter=messwerte")
+        self.assertContains(response, "mad-status--critical")
+        self.assertContains(response, "bis 0,10 mg/l")
+
+
+class ChartTests(TestCase):
+    def setUp(self):
+        self.user = create_user()
+        self.tank = create_tank(self.user)
+        self.parameter = Parameter.objects.get(key="ph")
+
+    def test_without_measurements_there_is_no_series(self):
+        self.assertIsNone(parameter_series(self.tank, self.parameter))
+
+    def test_coordinates_stay_inside_the_view_box(self):
+        for day in range(6):
+            create_measurement(self.tank, "ph", f"6.{day}", days_ago=day)
+        series = parameter_series(self.tank, self.parameter)
+        for point in series["points"]:
+            self.assertGreaterEqual(point["x"], 0)
+            self.assertLessEqual(point["x"], series["view_width"])
+            self.assertGreaterEqual(point["y"], 0)
+            self.assertLessEqual(point["y"], series["view_height"])
+
+    def test_points_are_ordered_chronologically(self):
+        for day in (10, 5, 1):
+            create_measurement(self.tank, "ph", "7.0", days_ago=day)
+        series = parameter_series(self.tank, self.parameter)
+        x_values = [point["x"] for point in series["points"]]
+        self.assertEqual(x_values, sorted(x_values))
+
+    def test_a_single_measurement_is_centred(self):
+        create_measurement(self.tank, "ph", "7.0")
+        series = parameter_series(self.tank, self.parameter)
+        self.assertEqual(series["points"][0]["x"], series["view_width"] / 2)
+
+    def test_higher_values_sit_higher_in_the_chart(self):
+        create_measurement(self.tank, "ph", "6.0", days_ago=2)
+        create_measurement(self.tank, "ph", "8.0", days_ago=1)
+        low, high = parameter_series(self.tank, self.parameter)["points"]
+        self.assertGreater(low["y"], high["y"])
+
+    def test_target_band_covers_the_target_range(self):
+        create_measurement(self.tank, "ph", "7.0")
+        series = parameter_series(self.tank, self.parameter)
+        self.assertIsNotNone(series["band"])
+        self.assertGreater(series["band"]["height"], 0)
+        self.assertEqual(series["target_label"], "6,5–7,5")
