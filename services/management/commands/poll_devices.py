@@ -26,7 +26,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        queryset = Device.objects.filter(is_active=True, kind__in=Device.EHEIM_KINDS)
+        queryset = Device.objects.filter(is_active=True, kind__in=Device.POLLED_KINDS)
         if options.get("device_id"):
             queryset = queryset.filter(pk=options["device_id"])
         if options.get("owner"):
@@ -43,6 +43,10 @@ class Command(BaseCommand):
                     details.append(f"{reading.rpm_percent} %")
                 if reading.mode_label:
                     details.append(reading.mode_label)
+                if reading.power_w is not None:
+                    details.append(f"{reading.power_w} W")
+                if reading.energy_total_wh is not None:
+                    details.append(f"{reading.energy_total_kwh} kWh")
                 self.stdout.write(f"{device}: {', '.join(details) or 'gelesen'}")
                 if reading.has_error:
                     self.stdout.write(self.style.WARNING(f"{device}: {reading.error_text}"))

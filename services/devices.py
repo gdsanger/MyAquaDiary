@@ -1,8 +1,12 @@
-"""Bindeglied zwischen den Gerätemodellen und der Eheim-Anbindung.
+"""Bindeglied zwischen den Gerätemodellen und den Geräteanbindungen.
 
 Hier — und nur hier — treffen Django-Modelle und HTTP-Schicht aufeinander:
 Status lesen und als :class:`~services.models.DeviceReading` ablegen, Befehle
 ausführen und protokollieren, Warnungen für das Dashboard zusammenstellen.
+
+Welche Anbindung zuständig ist, entscheidet allein :func:`service_for`; ob
+hinter einem Gerät ein Eheim-Filter oder eine Shelly-Steckdose steckt, ist
+oberhalb dieses Moduls kein Thema mehr.
 
 Aufrufer bekommen entweder ein Ergebnisobjekt oder ``None`` — ein nicht
 erreichbares Gerät darf weder eine Seite noch einen Cron-Lauf aufhalten.
@@ -22,12 +26,29 @@ from .eheim import (
     FIRMWARE_HINT,
     error_text,
     is_supported_firmware,
-    service_for,
 )
+from .eheim import service_for as eheim_service_for
 from .eheim.convert import format_minutes, to_minutes
 from .models import Device, DeviceEvent, DeviceReading
+from .shelly import ShellyError, ShellyService
+from .shelly import service_for as shelly_service_for
 
 logger = logging.getLogger(__name__)
+
+#: Alles, was eine Anbindung an Fehlern melden kann. Beide Hierarchien haben
+#: bewusst keine gemeinsame Basisklasse — die APIs haben nichts miteinander zu
+#: tun; zusammengeführt wird erst hier.
+DEVICE_ERRORS = (EheimError, ShellyError)
+
+
+def service_for(device: Device):
+    """Anbindung passend zur Geräteart.
+
+    Einzige Stelle, an der die Zuordnung Geräteart -> Anbindung getroffen wird.
+    """
+    if device.is_shelly:
+        return shelly_service_for(device)
+    return eheim_service_for(device)
 
 
 @dataclass(frozen=True)
@@ -59,24 +80,39 @@ class ProbeResult:
 
 
 def read_status(device: Device) -> DeviceStatus:
-    """Status eines Geräts lesen. Wirft :class:`EheimError`."""
+    """Status eines Geräts lesen. Wirft :data:`DEVICE_ERRORS`."""
     return service_for(device).read_status()
 
 
-def store_reading(device: Device, status: DeviceStatus) -> DeviceReading:
-    """Status als Messwert ablegen und ``last_seen`` fortschreiben."""
+def store_reading(device: Device, status) -> DeviceReading:
+    """Status als Messwert ablegen und ``last_seen`` fortschreiben.
+
+    Die Statusobjekte der Anbindungen füllen jeweils nur ihre eigenen Felder —
+    ein Filter hat keine Wattstunden, eine Steckdose keine Drehzahl. Deshalb
+    wird hier tolerant gelesen und nur gespeichert, was da ist.
+    """
     reading = DeviceReading.objects.create(
         device=device,
         read_at=timezone.now(),
         payload=status.payload or {},
-        rpm_percent=_non_negative(status.rpm_percent),
-        pump_mode=_non_negative(status.pump_mode),
-        error_code=_non_negative(status.error_code),
-        service_due_in=_non_negative(status.service_due_in),
+        rpm_percent=_non_negative(getattr(status, "rpm_percent", None)),
+        pump_mode=_non_negative(getattr(status, "pump_mode", None)),
+        error_code=_non_negative(getattr(status, "error_code", None)),
+        service_due_in=_non_negative(getattr(status, "service_due_in", None)),
         is_on=status.is_on,
+        power_w=_non_negative(getattr(status, "power_w", None)),
+        energy_total_wh=_non_negative(getattr(status, "energy_total_wh", None)),
+        temperature_c=getattr(status, "temperature_c", None),
     )
     device.last_seen = reading.read_at
-    device.save(update_fields=["last_seen"])
+    updated = ["last_seen"]
+    # Die erkannte Generation bleibt am Gerät: der Umweg über /shelly fällt
+    # damit nur beim ersten Kontakt an.
+    generation = getattr(status, "generation", None)
+    if generation and device.generation != generation:
+        device.generation = generation
+        updated.append("generation")
+    device.save(update_fields=updated)
     return reading
 
 
@@ -91,7 +127,7 @@ def probe(device: Device) -> ProbeResult:
         return ProbeResult(error="Das Gerät ist deaktiviert.")
     try:
         status = read_status(device)
-    except EheimError as exc:
+    except DEVICE_ERRORS as exc:
         logger.info("Gerät %s nicht abfragbar: %s", device, exc)
         return ProbeResult(error=str(exc))
     except Exception:  # pragma: no cover - Notnagel, darf nichts blockieren
@@ -133,9 +169,9 @@ def execute(device: Device, action: str, params: dict | None = None, *, user=Non
 
     title = _action_label(action)
     try:
-        title = describe(action, params)
+        title = describe(device, action, params)
         _apply(device, action, params)
-    except (EheimError, ValueError, KeyError) as exc:
+    except (*DEVICE_ERRORS, ValueError, KeyError) as exc:
         message = str(exc)
         record_event(
             device,
@@ -154,13 +190,17 @@ def execute(device: Device, action: str, params: dict | None = None, *, user=Non
     return CommandResult(True, title)
 
 
-def describe(action: str, params: dict | None = None) -> str:
+def describe(device: Device, action: str, params: dict | None = None) -> str:
     """Klartext eines Befehls — für den Bestätigungsdialog und das Protokoll.
 
     Beides aus derselben Funktion: was der Bestätigungsdialog ankündigt, steht
     hinterher wortgleich im Protokoll.
     """
     params = params or {}
+    if device.is_shelly:
+        if action in ("on", "off"):
+            return f"Steckdose {device.name} {'eingeschaltet' if action == 'on' else 'ausgeschaltet'}"
+        raise ValueError(f"Unbekannte Aktion: {action}")
     if action == "on":
         return "Filter eingeschaltet"
     if action == "off":
@@ -183,6 +223,12 @@ def describe(action: str, params: dict | None = None) -> str:
 def _apply(device: Device, action: str, params: dict) -> None:
     """Schickt den Befehl ans Gerät."""
     service = service_for(device)
+    if device.is_shelly:
+        if not isinstance(service, ShellyService) or action not in ("on", "off"):
+            raise ValueError("Für diesen Gerätetyp gibt es keine Steuerung.")
+        service.set_output(action == "on")
+        return
+
     if not isinstance(service, ClassicVarioService):
         raise ValueError("Für diesen Gerätetyp gibt es keine Steuerung.")
 
@@ -228,7 +274,12 @@ def change_password(device: Device, password: str, *, user=None) -> CommandResul
     Das Werkspasswort im LAN stehen zu lassen ist kein guter Zustand; deshalb
     gehört das Ändern zur Einrichtung dazu. Das Passwort selbst taucht weder im
     Protokoll noch im Log auf.
+
+    Nur für Eheim: das Passwort einer Shelly-Steckdose wird in deren eigener
+    Oberfläche gesetzt, und ein zweiter Weg dorthin wäre eine Fehlerquelle mehr.
     """
+    if not device.is_eheim:
+        return CommandResult(False, "Für diesen Gerätetyp gibt es hier keine Zugangsdaten.")
     try:
         service_for(device).change_auth(password, device.api_user)
     except (EheimError, ValueError) as exc:
