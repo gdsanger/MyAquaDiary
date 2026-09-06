@@ -1,0 +1,88 @@
+<div class="row g-4">
+  <div class="col-12 col-lg-6">
+    <section class="mad-card">
+      <div class="mad-card__header"><h2 class="mad-card__title">Steckbrief</h2></div>
+      <div class="mad-card__body">
+        <dl class="mad-definition mb-0">
+          <dt>Volumen</dt>
+          <dd>{{ tank.volume_liters|floatformat:0 }} l</dd>
+          {% if tank.dimensions %}
+            <dt>Maße</dt>
+            <dd>{{ tank.dimensions }}</dd>
+          {% endif %}
+          <dt>Wassertyp</dt>
+          <dd><span class="mad-watertype mad-watertype--{{ tank.water_type }}">{{ tank.get_water_type_display }}</span></dd>
+          {% if tank.location %}
+            <dt>Standort</dt>
+            <dd>{{ tank.location }}</dd>
+          {% endif %}
+          <dt>Eingerichtet</dt>
+          <dd>{{ tank.setup_date|date:"d.m.Y" }}</dd>
+          <dt>{% if tank.is_dissolved %}Laufzeit{% else %}Alter{% endif %}</dt>
+          <dd>{{ tank.age_display }}</dd>
+        </dl>
+        {% if tank.notes %}
+          <p class="mad-muted mt-3 mb-0">{{ tank.notes|linebreaksbr }}</p>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <section class="mad-card">
+      <div class="mad-card__header"><h2 class="mad-card__title">Aktuelle Messwerte</h2></div>
+      <ul class="mad-list">
+        {% for measurement in measurements %}
+          <li>
+            <div class="mad-list__row">
+              <div class="mad-list__main">
+                <p class="mad-list__title">{{ measurement.parameter.name }}</p>
+                <p class="mad-list__meta">
+                  Ziel {{ measurement.target_label }} · {{ measurement.measured_at|date:"d.m.Y" }}
+                </p>
+              </div>
+              <span class="mad-value mad-value--{{ measurement.status_code }}">{{ measurement.display_value }}</span>
+              <span class="mad-status mad-status--{{ measurement.status_code }}">{{ measurement.status_label }}</span>
+            </div>
+          </li>
+        {% empty %}
+          <li class="mad-empty">Noch keine Messwerte erfasst.</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <section class="mad-card">
+      <div class="mad-card__header"><h2 class="mad-card__title">Offene Termine</h2></div>
+      <ul class="mad-list">
+        {% for task in open_tasks %}
+          <li>
+            <div class="mad-list__row">
+              <div class="mad-list__main">
+                <p class="mad-list__title">{{ task.title }}</p>
+                <p class="mad-list__meta">{{ task.get_category_display }} · {{ task.due_on|date:"d.m.Y" }}</p>
+              </div>
+              <span class="mad-status mad-status--{{ task.status_value }}">{{ task.due_label }}</span>
+            </div>
+          </li>
+        {% empty %}
+          <li class="mad-empty">Keine offenen Termine.</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <section class="mad-card">
+      <div class="mad-card__header"><h2 class="mad-card__title">Titelbild</h2></div>
+      {% if tank.cover_image %}
+        <img class="mad-thumb" src="{{ tank.cover_image.url }}" alt="Titelbild {{ tank.name }}">
+      {% elif photo %}
+        <img class="mad-thumb" src="{{ photo.image.url }}" alt="{{ photo.caption|default:'Foto des Beckens' }}">
+      {% else %}
+        <p class="mad-empty mb-0">Kein Bild hinterlegt.</p>
+      {% endif %}
+    </section>
+  </div>
+</div>

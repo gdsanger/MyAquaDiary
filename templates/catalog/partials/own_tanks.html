@@ -1,0 +1,17 @@
+<section class="mad-card">
+  <div class="mad-card__header"><h2 class="mad-card__title">In eigenen Becken</h2></div>
+  <ul class="mad-list">
+    {% for tank in own_tanks %}
+      <li class="mad-tank-edge {{ tank.accent_class }}">
+        <div class="mad-list__row">
+          <div class="mad-list__main">
+            <p class="mad-list__title">{% include "partials/tank_label.html" with tank=tank %}</p>
+            <p class="mad-list__meta">{{ tank.volume_liters|floatformat:0 }} l · {{ tank.get_water_type_display }}</p>
+          </div>
+        </div>
+      </li>
+    {% empty %}
+      <li class="mad-empty">Diese Art kommt in keinem deiner Becken vor.</li>
+    {% endfor %}
+  </ul>
+</section>

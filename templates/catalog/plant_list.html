@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Pflanzenkatalog – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="mad-page-header">
+  <div>
+    <h1 class="mad-page-title">Pflanzen</h1>
+    <p class="mad-page-subtitle">Katalog aller erfassten Pflanzenarten</p>
+  </div>
+</div>
+
+{% include "catalog/partials/filters.html" %}
+{% include "catalog/partials/grid.html" %}
+{% endblock %}

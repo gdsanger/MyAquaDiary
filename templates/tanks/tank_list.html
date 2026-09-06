@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Becken – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="mad-page-header">
+  <div>
+    <h1 class="mad-page-title">Becken</h1>
+    <p class="mad-page-subtitle">{{ active_tanks|length }} aktive Becken</p>
+  </div>
+</div>
+
+{% if active_tanks %}
+  <div class="mad-grid">
+    {% for tank in active_tanks %}
+      {% include "tanks/partials/tank_card.html" with tank=tank %}
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="mad-card">
+    <p class="mad-empty mb-0">Noch kein Becken angelegt.</p>
+  </div>
+{% endif %}
+
+{% if dissolved_tanks %}
+  <h2 class="mad-section-title mt-5">Aufgelöste Becken</h2>
+  <div class="mad-grid">
+    {% for tank in dissolved_tanks %}
+      {% include "tanks/partials/tank_card.html" with tank=tank %}
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

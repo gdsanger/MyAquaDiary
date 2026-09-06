@@ -1,0 +1,33 @@
+<section class="mad-card">
+  <div class="mad-card__header"><h2 class="mad-card__title">Besatz</h2></div>
+  <ul class="mad-list">
+    {% for stocking in stockings %}
+      <li>
+        <div class="mad-list__row">
+          <div class="mad-list__main">
+            <p class="mad-list__title">
+              {{ stocking.quantity }}× <a href="{{ stocking.species.get_absolute_url }}">{{ stocking.species.display_name }}</a>
+            </p>
+            <p class="mad-list__meta">
+              <i>{{ stocking.species.scientific_name }}</i>
+              · {{ stocking.species.get_category_display }}
+              · eingesetzt {{ stocking.added_on|date:"d.m.Y" }}
+              {% if stocking.removed_on %}· entnommen {{ stocking.removed_on|date:"d.m.Y" }}{% endif %}
+            </p>
+          </div>
+          {% if not stocking.is_active %}
+            <span class="mad-status">Nicht mehr im Becken</span>
+          {% elif stocking.group_status == "warn" %}
+            <span class="mad-status mad-status--warn">
+              Gruppe zu klein (mind. {{ stocking.species.min_group_size }})
+            </span>
+          {% else %}
+            <span class="mad-status mad-status--ok">Gruppengröße in Ordnung</span>
+          {% endif %}
+        </div>
+      </li>
+    {% empty %}
+      <li class="mad-empty">Noch kein Besatz erfasst.</li>
+    {% endfor %}
+  </ul>
+</section>

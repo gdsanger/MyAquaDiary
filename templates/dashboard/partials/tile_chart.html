@@ -1,0 +1,24 @@
+<section class="mad-card" id="tile-chart" aria-label="Verlauf der Leitparameter">
+  <div class="mad-card__header">
+    <h2 class="mad-card__title">Verlauf{% if tank %} · {{ tank.name }}{% endif %}</h2>
+    <button type="button" class="btn btn-sm btn-outline-secondary"
+            hx-get="{% url 'dashboard:tile-chart' %}" hx-target="#tile-chart" hx-swap="outerHTML">
+      Aktualisieren
+    </button>
+  </div>
+
+  {% if charts %}
+    <div class="mad-card__body">
+      {% for chart in charts %}
+        {% include "tanks/partials/chart.html" with chart=chart %}
+      {% endfor %}
+    </div>
+    <div class="mad-card__footer">
+      <a href="{{ tank.get_absolute_url }}?reiter=messwerte">Alle Messwerte von {{ tank.name }}</a>
+    </div>
+  {% elif tank %}
+    <p class="mad-empty mb-0">Für {{ tank.name }} liegen noch keine Messwerte der Leitparameter vor.</p>
+  {% else %}
+    <p class="mad-empty mb-0">Noch kein Becken angelegt.</p>
+  {% endif %}
+</section>
