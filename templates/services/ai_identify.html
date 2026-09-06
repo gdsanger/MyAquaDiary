@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}Art bestimmen – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+  <h1 class="h3 mb-0">Art bestimmen</h1>
+  <a class="btn btn-outline-secondary" href="{% url 'services:ai_suggestion_list' %}">
+    Vorschläge{% if open_drafts %} <span class="badge text-bg-secondary">{{ open_drafts }}</span>{% endif %}
+  </a>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-5">
+    {% include "services/_ai_budget.html" %}
+
+    <div class="card">
+      <div class="card-body">
+        <form method="post" enctype="multipart/form-data">
+          {% csrf_token %}
+          {% include "services/_form_fields.html" %}
+          <button type="submit" class="btn btn-primary">Bestimmen lassen</button>
+        </form>
+        <p class="small text-body-secondary mt-3 mb-0">
+          Das Foto wird verkleinert an Anthropic Claude geschickt und nicht gespeichert.
+          Beim Verkleinern fallen auch die EXIF-Daten weg — der Aufnahmeort verlässt
+          das Haus also nicht.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-7">
+    {% if found and found.ok %}
+      <div class="card mb-3">
+        <div class="card-body">
+          {% include "services/_ai_notice.html" %}
+          {% if found.image_notes %}
+            <p class="small mb-0 mt-2"><strong>Zum Foto:</strong> {{ found.image_notes }}</p>
+          {% endif %}
+        </div>
+      </div>
+
+      {% for candidate in found.candidates %}
+        <div class="card mb-2">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start gap-2">
+              <h2 class="h5 mb-1">{{ candidate.label }}</h2>
+              {% if candidate.confidence_percent is not None %}
+                <span class="badge text-bg-light">{{ candidate.confidence_percent }} % sicher</span>
+              {% endif %}
+            </div>
+            {% if candidate.reasoning %}<p class="mb-1">{{ candidate.reasoning }}</p>{% endif %}
+            {% if candidate.distinguishing_features %}
+              <p class="small text-body-secondary mb-2">
+                Abgrenzung: {{ candidate.distinguishing_features }}
+              </p>
+            {% endif %}
+
+            {% if candidate.matches %}
+              <p class="small mb-2">
+                Im Katalog:
+                {% for match in candidate.matches %}
+                  <span class="badge text-bg-light">{{ match.label }} · {{ match.status_label }}</span>
+                {% endfor %}
+              </p>
+            {% else %}
+              <p class="small text-body-secondary mb-2">Noch nicht im Katalog.</p>
+            {% endif %}
+
+            <form method="post" action="{% url 'services:ai_suggestion_create' %}">
+              {% csrf_token %}
+              <input type="hidden" name="kind" value="{{ kind }}">
+              <input type="hidden" name="scientific_name" value="{{ candidate.scientific_name }}">
+              <input type="hidden" name="common_name" value="{{ candidate.common_name }}">
+              <input type="hidden" name="confidence" value="{{ candidate.confidence|default_if_none:'' }}">
+              <input type="hidden" name="reasoning" value="{{ candidate.reasoning }}">
+              <button type="submit" class="btn btn-outline-primary btn-sm">Als Entwurf übernehmen</button>
+            </form>
+          </div>
+        </div>
+      {% endfor %}
+    {% elif found %}
+      <div class="card">
+        <div class="card-body">
+          <p class="mb-0">{{ found.error }}</p>
+          {% if found.image_notes %}
+            <p class="small text-body-secondary mb-0 mt-2">{{ found.image_notes }}</p>
+          {% endif %}
+        </div>
+      </div>
+    {% else %}
+      <div class="card">
+        <div class="card-body">
+          <p class="mb-2">Noch keine Bestimmung.</p>
+          <p class="text-body-secondary mb-0">
+            Lade ein Foto hoch, und Claude nennt die wahrscheinlichsten Arten samt
+            Abgleich mit dem Artenkatalog. Jeder Treffer ist ein Vorschlag: erst deine
+            Bestätigung macht daraus einen Katalogeintrag.
+          </p>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

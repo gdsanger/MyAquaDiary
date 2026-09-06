@@ -29,6 +29,13 @@
             <li class="nav-item">
               <a class="nav-link" href="{% url 'services:energy_overview' %}">Stromverbrauch</a>
             </li>
+            {# Ohne hinterlegten API-Key gibt es die KI-Seiten nicht — dann
+               führt auch kein Menüpunkt dorthin. #}
+            {% if ai_enabled %}
+              <li class="nav-item">
+                <a class="nav-link" href="{% url 'services:ai_identify' %}">KI</a>
+              </li>
+            {% endif %}
           {% endif %}
         </ul>
         <ul class="navbar-nav ms-auto">

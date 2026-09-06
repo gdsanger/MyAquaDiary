@@ -3,7 +3,7 @@
 from django import forms
 
 from .eheim import DEFAULT_PASSWORD, DEFAULT_USERNAME
-from .models import Device, MailConfig
+from .models import AIConfig, AISuggestion, Device, MailConfig
 from .shelly import GEN2_USERNAME
 
 
@@ -45,6 +45,38 @@ class TestMailForm(forms.Form):
     """Empfänger für die Testmail aus dem Admin."""
 
     recipient = forms.EmailField(label="Empfänger", widget=forms.EmailInput(attrs={"size": 40}))
+
+
+class AIConfigForm(forms.ModelForm):
+    """Pflege des Claude-Zugangs.
+
+    Der API-Key wird nie in das Formular zurückgeschrieben. Bleibt das Feld
+    leer, behält der gespeicherte Key seine Gültigkeit.
+    """
+
+    api_key = forms.CharField(
+        label="API-Key",
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Wird verschlüsselt gespeichert und nie angezeigt. Leer lassen, "
+        "um den gespeicherten Key beizubehalten.",
+    )
+
+    class Meta:
+        model = AIConfig
+        fields = [
+            "is_enabled",
+            "api_key",
+            "model_name",
+            "monthly_token_budget",
+            "per_user_daily_limit",
+        ]
+
+    def clean_api_key(self):
+        value = self.cleaned_data.get("api_key", "")
+        if not value and self.instance.pk:
+            return self.instance.api_key
+        return value
 
 
 class BootstrapMixin:
@@ -282,3 +314,45 @@ def controls_for(device) -> dict:
     if device.kind == Device.Kind.EHEIM_CLASSICVARIO:
         return EHEIM_CONTROLS
     return {}
+
+
+class IdentifyForm(BootstrapMixin, forms.Form):
+    """Foto für eine Bestimmung.
+
+    Das Bild wird nicht gespeichert: es geht verkleinert an Claude und ist
+    danach wieder weg. Was bleibt, ist der Vorschlag — und den bestätigt der
+    Benutzer selbst.
+    """
+
+    kind = forms.ChoiceField(label="Was ist zu sehen?", choices=AISuggestion.Kind.choices)
+    photo = forms.ImageField(
+        label="Foto",
+        help_text="Wird vor dem Versand verkleinert. Je schärfer und näher, desto besser.",
+    )
+    notes = forms.CharField(
+        label="Beobachtung (optional)",
+        max_length=500,
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2}),
+        help_text="Größe, Verhalten, Fundort — alles, was das Bild nicht zeigt.",
+    )
+
+
+class CandidateForm(forms.Form):
+    """Der übernommene Kandidat einer Bestimmung.
+
+    Die Bestimmung selbst wird nicht zwischengespeichert; der ausgewählte
+    Kandidat kommt aus den versteckten Feldern der Ergebnisliste zurück.
+    """
+
+    kind = forms.ChoiceField(choices=AISuggestion.Kind.choices)
+    scientific_name = forms.CharField(max_length=160, required=False)
+    common_name = forms.CharField(max_length=160, required=False)
+    confidence = forms.FloatField(min_value=0, max_value=1, required=False)
+    reasoning = forms.CharField(max_length=2000, required=False)
+
+    def clean(self):
+        cleaned = super().clean()
+        if not (cleaned.get("scientific_name") or cleaned.get("common_name")):
+            raise forms.ValidationError("Ohne Namen lässt sich kein Vorschlag ablegen.")
+        return cleaned

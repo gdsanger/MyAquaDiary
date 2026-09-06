@@ -2,14 +2,26 @@
 
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
+from django.db.models import Sum
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
+from django.utils import timezone
 from django.utils.html import format_html
 
-from .forms import DeviceForm, MailConfigForm, TestMailForm
+from .ai import budget_status
+from .forms import AIConfigForm, DeviceForm, MailConfigForm, TestMailForm
 from .graph import GraphMailService, render_mail
-from .models import Device, DeviceEvent, DeviceReading, MailConfig, MailLog
+from .models import (
+    AIConfig,
+    AISuggestion,
+    AIUsageLog,
+    Device,
+    DeviceEvent,
+    DeviceReading,
+    MailConfig,
+    MailLog,
+)
 
 
 @admin.register(MailConfig)
@@ -204,3 +216,116 @@ class DeviceEventAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return False
+
+
+@admin.register(AIConfig)
+class AIConfigAdmin(admin.ModelAdmin):
+    """Singleton-Admin: anlegen nur, solange keine Konfiguration existiert."""
+
+    form = AIConfigForm
+    fieldsets = [
+        (None, {"fields": ["is_enabled", "status"]}),
+        (
+            "Zugang",
+            {
+                "fields": ["api_key", "model_name"],
+                "description": "Der Key liegt verschlüsselt in der Datenbank und wird "
+                "weder angezeigt noch protokolliert.",
+            },
+        ),
+        (
+            "Kostenkontrolle",
+            {
+                "fields": ["monthly_token_budget", "per_user_daily_limit", "usage"],
+                "description": "Bilderkennung ist der teure Teil. Ist eine Grenze "
+                "erreicht, werden weitere Aufrufe abgelehnt und dem Benutzer erklärt.",
+            },
+        ),
+        ("Verwaltung", {"fields": ["updated_at"]}),
+    ]
+    readonly_fields = ["status", "usage", "updated_at"]
+
+    @admin.display(description="Status")
+    def status(self, obj):
+        if obj is not None and obj.is_configured:
+            return format_html('<span style="color:#4caf7d;">KI-Funktionen aktiv</span>')
+        return format_html(
+            '<span style="color:#d2483b;">Nicht konfiguriert – KI-Funktionen sind ausgeblendet</span>'
+        )
+
+    @admin.display(description="Verbrauch")
+    def usage(self, obj):
+        """Monatsverbrauch und Kosten auf einen Blick."""
+        if obj is None or not obj.pk:
+            return "—"
+        current = budget_status(config=obj)
+        spent = AIUsageLog.objects.filter(
+            created_at__gte=timezone.localtime().replace(
+                day=1, hour=0, minute=0, second=0, microsecond=0
+            )
+        ).aggregate(total=Sum("total_cost_usd"))["total"] or 0
+        limit = f" von {current.monthly_limit}" if current.monthly_limit else " (ohne Grenze)"
+        return format_html(
+            "{} Token{} in diesem Monat · {} USD",
+            current.monthly_used,
+            limit,
+            f"{spent:.2f}",
+        )
+
+    def has_add_permission(self, request):
+        return super().has_add_permission(request) and not AIConfig.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        # Abgeschaltet wird über "KI-Funktionen aktiv", nicht durch Löschen.
+        return False
+
+    def get_changeform_initial_data(self, request):
+        """Neuanlage mit den Environment-Werten vorbelegen — ohne den Key."""
+        initial = AIConfig.defaults_from_env()
+        initial.pop("api_key", None)
+        return initial
+
+
+@admin.register(AIUsageLog)
+class AIUsageLogAdmin(admin.ModelAdmin):
+    """Reines Leseprotokoll — Einträge entstehen nur durch Aufrufe."""
+
+    list_display = ["created_at", "action", "user", "model_name", "prompt_tokens",
+                    "completion_tokens", "total_cost_usd", "duration_ms", "success"]
+    list_filter = ["success", "action", "model_name", "created_at"]
+    search_fields = ["user__username", "user__email"]
+    date_hierarchy = "created_at"
+    readonly_fields = ["created_at", "user", "action", "model_name", "prompt_tokens",
+                       "completion_tokens", "total_cost_usd", "duration_ms", "success",
+                       "error_message"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(AISuggestion)
+class AISuggestionAdmin(admin.ModelAdmin):
+    """Einblick in die Vorschläge. Entschieden wird in der Anwendung, nicht hier
+    — die Bestätigung gehört zu dem Benutzer, der den Vorschlag angefordert
+    hat."""
+
+    list_display = ["created_at", "label", "kind", "user", "status", "confidence", "catalog_ref"]
+    list_filter = ["status", "kind", "created_at"]
+    search_fields = ["scientific_name", "common_name"]
+    date_hierarchy = "created_at"
+    readonly_fields = ["created_at", "decided_at", "user", "kind", "scientific_name",
+                       "common_name", "confidence", "reasoning", "payload", "status",
+                       "catalog_ref"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Vorschlag")
+    def label(self, obj):
+        return obj.label
