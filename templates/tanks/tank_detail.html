@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tank.name }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<h1 class="h3 mb-3">{{ tank.name }}</h1>
+{% if tank.volume_liters %}
+  <p class="text-body-secondary">{{ tank.volume_liters }} l</p>
+{% endif %}
+{% endblock %}

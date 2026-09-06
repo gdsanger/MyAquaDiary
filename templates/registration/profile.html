@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Profil – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-12 col-sm-8 col-md-6 col-lg-5">
+    <div class="card">
+      <div class="card-body">
+        <h1 class="h4 card-title mb-3">Mein Profil</h1>
+        <form method="post" enctype="multipart/form-data">
+          {% csrf_token %}
+          {% for field in form %}
+            <div class="mb-3 {% if field.field.widget.input_type == 'checkbox' %}form-check{% endif %}">
+              {% if field.field.widget.input_type == 'checkbox' %}
+                {{ field }}
+                <label for="{{ field.id_for_label }}" class="form-check-label">{{ field.label }}</label>
+              {% else %}
+                <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                {{ field }}
+              {% endif %}
+              {% if field.errors %}
+                <div class="text-danger small">{{ field.errors|striptags }}</div>
+              {% endif %}
+            </div>
+          {% endfor %}
+          <button type="submit" class="btn btn-primary">Speichern</button>
+        </form>
+        <p class="mt-3 mb-0">
+          <a href="{% url 'password_change' %}">Passwort ändern</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

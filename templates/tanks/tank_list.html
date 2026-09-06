@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}Meine Becken – MyAquaDiary{% endblock %}
+
+{% block content %}
+<h1 class="h3 mb-3">Meine Becken</h1>
+{% if tanks %}
+  <ul class="list-group">
+    {% for tank in tanks %}
+      <li class="list-group-item">
+        <a href="{% url 'tanks:detail' tank.pk %}">{{ tank.name }}</a>
+      </li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <p class="text-body-secondary">Du hast noch kein Becken angelegt.</p>
+{% endif %}
+{% endblock %}
