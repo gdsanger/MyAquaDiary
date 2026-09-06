@@ -1,5 +1,9 @@
+from decimal import Decimal
+
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 from django.utils.text import slugify
 
 
@@ -103,7 +107,19 @@ class Tank(models.Model):
 
 
 class Photo(models.Model):
+    """Gemeinsames Foto-Modell für Becken- und Messungsbelege. `tank` bleibt
+    Pflichtfeld, wird bei einem Messungsfoto aber automatisch aus der
+    Messung übernommen — so landet ein Belegfoto zugleich in der
+    Becken-Galerie, ohne dass die Anlage doppelt gepflegt werden muss."""
+
     tank = models.ForeignKey(Tank, on_delete=models.CASCADE, related_name="photos")
+    measurement = models.ForeignKey(
+        "Measurement",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="photos",
+    )
     image = models.ImageField(upload_to="tanks/%Y/%m/")
     caption = models.CharField(max_length=200, blank=True)
     taken_on = models.DateField(null=True, blank=True)
@@ -114,6 +130,11 @@ class Photo(models.Model):
 
     def __str__(self):
         return f"{self.tank} – {self.caption or self.image.name}"
+
+    def save(self, *args, **kwargs):
+        if self.measurement_id and not self.tank_id:
+            self.tank_id = self.measurement.tank_id
+        super().save(*args, **kwargs)
 
 
 class Parameter(models.Model):
@@ -157,3 +178,97 @@ class TankParameterTarget(models.Model):
 
     def __str__(self):
         return f"{self.tank} – {self.parameter}"
+
+
+class Source(models.TextChoices):
+    MANUAL = "manual", "Manuell"
+    DEVICE = "device", "Gerät"
+    IMPORT = "import", "Import"
+
+
+class Measurement(models.Model):
+    """Eine Messreihe zu einem Zeitpunkt (z. B. pH, KH und Temperatur aus
+    einem Tröpfchentest), nicht ein einzelner Messwert. Die Einzelwerte
+    hängen als `MeasurementValue` daran."""
+
+    tank = models.ForeignKey(Tank, on_delete=models.CASCADE, related_name="measurements")
+    measured_at = models.DateTimeField(default=timezone.now)
+    note = models.TextField(blank=True)
+    source = models.CharField(max_length=10, choices=Source.choices, default=Source.MANUAL)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-measured_at"]
+        indexes = [models.Index(fields=["tank", "-measured_at"])]
+
+    def __str__(self):
+        return f"{self.tank} – {timezone.localtime(self.measured_at):%d.%m.%Y %H:%M}"
+
+    def value_for(self, parameter_key):
+        return next(
+            (
+                value
+                for value in self.values.all()
+                if value.parameter.key == parameter_key and value.value is not None
+            ),
+            None,
+        )
+
+    @property
+    def co2_mg_l(self):
+        """CO2 [mg/l] = 3 * KH * 10^(7 - pH) — bewusst berechnet statt
+        gespeichert, sonst driftet der Wert bei nachträglicher Korrektur
+        von KH oder pH auseinander."""
+
+        kh = self.value_for("kh")
+        ph = self.value_for("ph")
+        if kh is None or ph is None:
+            return None
+        co2 = 3 * float(kh.value) * (10 ** (7 - float(ph.value)))
+        return Decimal(str(round(co2, 1)))
+
+
+class MeasurementValue(models.Model):
+    measurement = models.ForeignKey(Measurement, on_delete=models.CASCADE, related_name="values")
+    parameter = models.ForeignKey(
+        Parameter, on_delete=models.PROTECT, related_name="measurement_values"
+    )
+    value = models.DecimalField(max_digits=9, decimal_places=3, null=True, blank=True)
+    below_detection = models.BooleanField("n.n.", default=False)
+
+    class Meta:
+        ordering = ["parameter__position", "parameter__name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["measurement", "parameter"], name="unique_measurement_parameter"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.measurement} – {self.parameter}"
+
+    def clean(self):
+        super().clean()
+        if self.value is not None and self.below_detection:
+            raise ValidationError("Entweder Messwert oder „n.n.“ angeben, nicht beides.")
+        if self.value is None and not self.below_detection:
+            raise ValidationError("Messwert oder „n.n.“ ist erforderlich.")
+        if self.below_detection and self.parameter_id and not self.parameter.supports_below_detection:
+            raise ValidationError("Dieser Parameter unterstützt „n.n.“ nicht.")
+
+    @property
+    def target(self):
+        return self.measurement.tank.targets.filter(parameter_id=self.parameter_id).first()
+
+    @property
+    def status(self):
+        if self.value is None:
+            return None
+        target = self.target
+        if target is None:
+            return None
+        if target.minimum is not None and self.value < target.minimum:
+            return "low"
+        if target.maximum is not None and self.value > target.maximum:
+            return "high"
+        return "ok"

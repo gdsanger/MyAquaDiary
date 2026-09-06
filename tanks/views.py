@@ -1,13 +1,25 @@
+import csv
+
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.http import HttpResponseRedirect
+from django.db import transaction
+from django.forms import inlineformset_factory
+from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse, reverse_lazy
+from django.utils.dateparse import parse_date
 from django.views import View
 from django.views.generic import CreateView, DeleteView, DetailView, ListView, UpdateView
 
-from .forms import TankForm, TankParameterTargetForm, TankPhotoFormSet
-from .models import Parameter, Tank, TankParameterTarget
+from .forms import (
+    MeasurementForm,
+    MeasurementPhotoFormSet,
+    MeasurementValueForm,
+    TankForm,
+    TankParameterTargetForm,
+    TankPhotoFormSet,
+)
+from .models import Measurement, MeasurementValue, Parameter, Tank, TankParameterTarget
 
 
 class TankOwnerQuerysetMixin(LoginRequiredMixin):
@@ -151,3 +163,215 @@ class TankParameterTargetDetailView(LoginRequiredMixin, View):
             "tanks/_parameter_target_row.html",
             {"tank": tank, "parameter": parameter, "target": target},
         )
+
+
+def build_measurement_value_formset(tank, measurement, data=None, files=None):
+    """Baut den Formset für die Messwerte: eine vorbelegte Zeile je
+    Zielparameter des Beckens, der in dieser Messung noch keinen Wert hat,
+    plus ein paar leere Zeilen zum freien Hinzufügen weiterer Parameter."""
+
+    existing_parameter_ids = (
+        set(measurement.values.values_list("parameter_id", flat=True))
+        if measurement and measurement.pk
+        else set()
+    )
+    missing_target_parameter_ids = [
+        target.parameter_id
+        for target in tank.targets.all()
+        if target.parameter_id not in existing_parameter_ids
+    ]
+    formset_class = inlineformset_factory(
+        Measurement,
+        MeasurementValue,
+        form=MeasurementValueForm,
+        extra=len(missing_target_parameter_ids) + 2,
+        can_delete=True,
+    )
+    if data is not None:
+        return formset_class(data, files, instance=measurement)
+    initial = [{"parameter": parameter_id} for parameter_id in missing_target_parameter_ids]
+    return formset_class(instance=measurement, initial=initial)
+
+
+class MeasurementOwnerMixin(LoginRequiredMixin):
+    def dispatch(self, request, *args, **kwargs):
+        self.tank = get_object_or_404(Tank.objects.for_user(request.user), slug=kwargs["slug"])
+        return super().dispatch(request, *args, **kwargs)
+
+
+class MeasurementQuerysetMixin(MeasurementOwnerMixin):
+    def get_queryset(self):
+        return Measurement.objects.filter(tank=self.tank)
+
+
+class MeasurementListView(MeasurementQuerysetMixin, ListView):
+    model = Measurement
+    context_object_name = "measurements"
+    template_name = "tanks/measurement_list.html"
+
+    def get_queryset(self):
+        return super().get_queryset().prefetch_related("values__parameter", "photos")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        measurements = list(context["measurements"])
+        for measurement in measurements:
+            measurement.value_map = {value.parameter_id: value for value in measurement.values.all()}
+        context["measurements"] = measurements
+        context["tank"] = self.tank
+        context["parameters"] = Parameter.objects.filter(
+            measurement_values__measurement__tank=self.tank
+        ).distinct()
+        return context
+
+
+class MeasurementFormMixin:
+    model = Measurement
+    form_class = MeasurementForm
+    template_name = "tanks/measurement_form.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["tank"] = self.tank
+        if self.request.method == "POST":
+            context["value_formset"] = build_measurement_value_formset(
+                self.tank, self.object, data=self.request.POST
+            )
+            context["photo_formset"] = MeasurementPhotoFormSet(
+                self.request.POST, self.request.FILES, instance=self.object
+            )
+        else:
+            context["value_formset"] = build_measurement_value_formset(self.tank, self.object)
+            context["photo_formset"] = MeasurementPhotoFormSet(instance=self.object)
+        return context
+
+    def form_valid(self, form):
+        was_new = self.object is None
+        form.instance.tank = self.tank
+        forms_are_valid = False
+        with transaction.atomic():
+            self.object = form.save()
+
+            value_formset = build_measurement_value_formset(
+                self.tank, self.object, data=self.request.POST
+            )
+            photo_formset = MeasurementPhotoFormSet(
+                self.request.POST, self.request.FILES, instance=self.object
+            )
+            forms_are_valid = value_formset.is_valid() and photo_formset.is_valid()
+            if forms_are_valid:
+                value_formset.save()
+                for photo in photo_formset.save(commit=False):
+                    photo.tank = self.tank
+                    photo.measurement = self.object
+                    photo.save()
+                for photo in photo_formset.deleted_objects:
+                    photo.delete()
+            else:
+                transaction.set_rollback(True)
+
+        if not forms_are_valid:
+            if was_new:
+                self.object = None
+            return self.render_to_response(self.get_context_data(form=form))
+
+        messages.success(self.request, "Messung gespeichert.")
+        return HttpResponseRedirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse("tanks:measurement-list", kwargs={"slug": self.tank.slug})
+
+
+class MeasurementCreateView(MeasurementOwnerMixin, MeasurementFormMixin, CreateView):
+    pass
+
+
+class MeasurementUpdateView(MeasurementQuerysetMixin, MeasurementFormMixin, UpdateView):
+    pass
+
+
+class MeasurementDeleteView(MeasurementQuerysetMixin, DeleteView):
+    model = Measurement
+    context_object_name = "measurement"
+    template_name = "tanks/measurement_confirm_delete.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["tank"] = self.tank
+        return context
+
+    def get_success_url(self):
+        return reverse("tanks:measurement-list", kwargs={"slug": self.tank.slug})
+
+
+class MeasurementChartDataView(LoginRequiredMixin, View):
+    def get(self, request, slug):
+        tank = get_object_or_404(Tank.objects.for_user(request.user), slug=slug)
+        parameter = get_object_or_404(Parameter, key=request.GET.get("parameter"))
+
+        values = (
+            MeasurementValue.objects.filter(
+                measurement__tank=tank, parameter=parameter, value__isnull=False
+            )
+            .select_related("measurement")
+            .order_by("measurement__measured_at")
+        )
+        date_from = parse_date(request.GET.get("von") or "")
+        date_to = parse_date(request.GET.get("bis") or "")
+        if date_from:
+            values = values.filter(measurement__measured_at__date__gte=date_from)
+        if date_to:
+            values = values.filter(measurement__measured_at__date__lte=date_to)
+
+        return JsonResponse(
+            {
+                "labels": [
+                    value.measurement.measured_at.strftime("%Y-%m-%d %H:%M") for value in values
+                ],
+                "values": [float(value.value) for value in values],
+                "unit": parameter.unit,
+            }
+        )
+
+
+class MeasurementExportView(LoginRequiredMixin, View):
+    def get(self, request, slug):
+        tank = get_object_or_404(Tank.objects.for_user(request.user), slug=slug)
+        measurements = (
+            Measurement.objects.filter(tank=tank)
+            .prefetch_related("values__parameter")
+            .order_by("measured_at")
+        )
+        parameters = list(
+            Parameter.objects.filter(measurement_values__measurement__tank=tank).distinct()
+        )
+
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = f'attachment; filename="{tank.slug}-messungen.csv"'
+        writer = csv.writer(response)
+        writer.writerow(
+            ["Datum", "Quelle", "Notiz"]
+            + [f"{p.name} ({p.unit})" if p.unit else p.name for p in parameters]
+            + ["CO2 (mg/l, berechnet)"]
+        )
+        for measurement in measurements:
+            values_by_parameter = {
+                value.parameter_id: value for value in measurement.values.all()
+            }
+            row = [
+                measurement.measured_at.strftime("%Y-%m-%d %H:%M"),
+                measurement.get_source_display(),
+                measurement.note,
+            ]
+            for parameter in parameters:
+                value = values_by_parameter.get(parameter.id)
+                if value is None:
+                    row.append("")
+                elif value.below_detection:
+                    row.append("n.n.")
+                else:
+                    row.append(str(value.value))
+            co2 = measurement.co2_mg_l
+            row.append(str(co2) if co2 is not None else "")
+            writer.writerow(row)
+        return response

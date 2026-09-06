@@ -20,4 +20,34 @@ urlpatterns = [
         views.TankParameterTargetDetailView.as_view(),
         name="target-detail",
     ),
+    path(
+        "<slug:slug>/messungen/",
+        views.MeasurementListView.as_view(),
+        name="measurement-list",
+    ),
+    path(
+        "<slug:slug>/messungen/neu/",
+        views.MeasurementCreateView.as_view(),
+        name="measurement-create",
+    ),
+    path(
+        "<slug:slug>/messungen/<int:pk>/bearbeiten/",
+        views.MeasurementUpdateView.as_view(),
+        name="measurement-update",
+    ),
+    path(
+        "<slug:slug>/messungen/<int:pk>/loeschen/",
+        views.MeasurementDeleteView.as_view(),
+        name="measurement-delete",
+    ),
+    path(
+        "<slug:slug>/messungen/export.csv",
+        views.MeasurementExportView.as_view(),
+        name="measurement-export",
+    ),
+    path(
+        "<slug:slug>/messungen/diagramm-daten/",
+        views.MeasurementChartDataView.as_view(),
+        name="measurement-chart-data",
+    ),
 ]
