@@ -31,7 +31,7 @@ docker compose exec web python manage.py createsuperuser
 | `catalog` | Pflanzen- und Tier-Katalog (userübergreifend) |
 | `tanks` | Becken, Messreihen, Ereignisse, Termine, Besatz, Bepflanzung, Fotos |
 | `dashboard` | KPIs, fällige Termine |
-| `services` | Anbindung Graph-API, Eheim, Shelly, KI |
+| `services` | Anbindung Graph-API, Eheim, Shelly, KI; Verbrauchsauswertung |
 
 ## Mailversand (Microsoft Graph)
 
@@ -125,3 +125,69 @@ Views und Templates kommen sie nicht vor.
 allgemeinen Endpunkten, je Gerätetyp eine Ableitung (v1: classicVARIO+e).
 Weitere Typen wie pHcontrol+e oder thermocontrol+e brauchen nur eine weitere
 Ableitung und einen Eintrag in `Device.Kind`.
+
+## Shelly-Steckdosen
+
+Angebunden über die **lokale HTTP-API** der Geräte
+([Doku](https://shelly-api-docs.shelly.cloud/)) — nicht über die Shelly Cloud:
+ohne Cloud-Konto, ohne Ratelimit und ohne Abhängigkeit von einem Fremddienst.
+Unterstützt werden beide Generationen:
+
+| | Gen1 (Plug S) | Gen2+ (Plus Plug S) |
+|---|---|---|
+| Status | `GET /status` | `GET /rpc/Switch.GetStatus?id=0` |
+| Schalten | `GET /relay/0?turn=on` | `GET /rpc/Switch.Set?id=0&on=true` |
+| Anmeldung | Basic Auth | Digest Auth, Benutzer `admin` |
+
+Welche Generation vorliegt, erkennt die Anwendung über `/shelly` — den einzigen
+Endpunkt, den beide Generationen beantworten. Das Ergebnis steht danach am
+Gerät; der Umweg fällt also nur beim ersten Kontakt an. Oberhalb von
+`services/shelly/` kommt die Unterscheidung nicht mehr vor.
+
+Einrichten unter *Geräte → Steckdose anbinden*: Adresse eingeben, optional
+Benutzer und Passwort (im Auslieferungszustand ist die lokale API offen).
+Angelegt wird nur, was auf `/shelly` geantwortet hat. Das Feld *Becken* ist die
+Grundlage der Verbrauchsauswertung — solange das Becken-Modell nicht im Epic
+liegt, ist es ein Freitext am Gerät.
+
+Gelesen werden Schaltzustand, Leistung, Zählerstand und Gerätetemperatur; der
+Statusabruf läuft wie bei Eheim per HTMX und mit kurzem Timeout
+(`SHELLY_TIMEOUT`, Default 5 s). Erfasst wird periodisch mit demselben Command
+wie bei Eheim:
+
+```bash
+docker compose exec web python manage.py poll_devices
+```
+
+**Schalten** ist möglich, aber mit Bedacht: jede Aktion wird vor dem Senden zur
+Bestätigung angezeigt und anschließend protokolliert — wer das Licht um 3 Uhr
+nachts an hatte, lässt sich später nachvollziehen. **Zeitpläne und Automatik
+gibt es bewusst nicht**; das kann der Shelly selbst, und ein zweiter Zeitplan an
+derselben Steckdose wäre eine Fehlerquelle ohne Gegenwert. Firmware-Update,
+Neustart und Werksreset sperrt der Client (`BLOCKED_PATHS`).
+
+### Stromverbrauch
+
+Die Steckdose meldet einen **Zählerstand**, keinen Verbrauch je Zeitraum — der
+entsteht in `services/energy.py` als Differenz zweier Messwerte. Gen1 zählt
+dabei in Wattminuten (`/60` in `services/shelly/convert.py`), Gen2 in
+Wattstunden; gespeichert wird einheitlich in Wattstunden. Ein fallender
+Zählerstand (Gen1 nach Stromausfall) gilt als Verbrauch seit dem Reset.
+
+Unter *Stromverbrauch* stehen Tag, Monat und Jahr je Becken im Vergleich, dazu
+die Kosten mit dem Arbeitspreis aus `ENERGY_PRICE_PER_KWH` (Default 0,35 €/kWh).
+Gespeichert werden Kilowattstunden, keine Beträge. Die Seite rechnet
+ausschließlich aus gespeicherten Messwerten und fragt kein Gerät ab — sie ist
+damit auch dann vollständig, wenn gerade keine Steckdose antwortet.
+
+Aus dem Code:
+
+```python
+from services import devices, energy
+from services.shelly import service_for
+
+devices.probe(device)                                   # lesen + ablegen
+devices.execute(device, "on", user=request.user)        # schalten + protokollieren
+service_for(device).read_status()                       # nur lesen, ohne Persistenz
+energy.usage_by_tank(user, energy.PERIOD_MONTH)         # Vergleich je Becken
+```

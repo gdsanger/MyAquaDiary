@@ -18,6 +18,11 @@ from services.eheim import (
     mode_label,
     normalize_mac,
 )
+from services.shelly import (
+    KIND_SHELLY_PLUG,
+    generation_label,
+    watt_hours_to_kilowatt_hours,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -151,10 +156,14 @@ class Device(models.Model):
     class Kind(models.TextChoices):
         EHEIM_CLASSICVARIO = KIND_CLASSICVARIO, "Eheim classicVARIO+e"
         EHEIM_OTHER = KIND_EHEIM_OTHER, "Eheim (sonstiges)"
-        SHELLY_PLUG = "shelly_plug", "Shelly Plug"
+        SHELLY_PLUG = KIND_SHELLY_PLUG, "Shelly Plug"
 
     #: Arten, die über die Eheim-REST-API angesprochen werden.
     EHEIM_KINDS = frozenset({Kind.EHEIM_CLASSICVARIO, Kind.EHEIM_OTHER})
+    #: Arten, die über die lokale Shelly-API angesprochen werden.
+    SHELLY_KINDS = frozenset({Kind.SHELLY_PLUG})
+    #: Alles, was ``poll_devices`` periodisch abfragt.
+    POLLED_KINDS = EHEIM_KINDS | SHELLY_KINDS
 
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -178,6 +187,18 @@ class Device(models.Model):
     )
     credentials = EncryptedTextField("Zugangsdaten", blank=True, default="")
     firmware = models.CharField("Gerätesoftware", max_length=40, blank=True)
+    generation = models.PositiveSmallIntegerField(
+        "Generation",
+        null=True,
+        blank=True,
+        help_text="Nur bei Shelly: 1 oder 2+. Wird beim ersten Kontakt über /shelly erkannt.",
+    )
+    tank_label = models.CharField(
+        "Becken",
+        max_length=120,
+        blank=True,
+        help_text="Becken, an dem das Gerät hängt — Grundlage der Verbrauchsauswertung.",
+    )
     is_active = models.BooleanField(
         "aktiv",
         default=True,
@@ -207,6 +228,8 @@ class Device(models.Model):
 
     def clean(self):
         self.mac_address = normalize_mac(self.mac_address) if self.mac_address else ""
+        if self.is_shelly and not self.host:
+            raise ValidationError({"host": "Ohne Adresse lässt sich das Gerät nicht erreichen."})
         if not self.is_eheim:
             return
         # Beide Felder gemeinsam melden, sonst schickt das Formular den
@@ -250,14 +273,37 @@ class Device(models.Model):
 
     @property
     def uses_default_password(self) -> bool:
-        """True, solange das Werkspasswort hinterlegt ist."""
-        return self.api_password == DEFAULT_PASSWORD
+        """True, solange das Eheim-Werkspasswort hinterlegt ist.
+
+        Nur für Eheim eine Aussage: eine Shelly-Steckdose kommt ohne gesetztes
+        Passwort aus dem Karton, ein leeres Feld ist dort kein Warnzeichen.
+        """
+        return self.is_eheim and self.api_password == DEFAULT_PASSWORD
 
     # -- Zustand -------------------------------------------------------------
 
     @property
     def is_eheim(self) -> bool:
         return self.kind in self.EHEIM_KINDS
+
+    @property
+    def is_shelly(self) -> bool:
+        return self.kind in self.SHELLY_KINDS
+
+    @property
+    def generation_label(self) -> str:
+        """Shelly-Generation im Klartext (``Gen1``/``Gen2+``)."""
+        return generation_label(self.generation)
+
+    @property
+    def tank_name(self) -> str:
+        """Becken für Anzeige und Auswertung.
+
+        Bis das Becken-Modell im Epic liegt, ist das ein Freitextfeld am Gerät;
+        die Auswertung gruppiert ausschließlich hierüber. Wird daraus später
+        ein Fremdschlüssel, ändert sich genau diese eine Stelle.
+        """
+        return self.tank_label.strip() or "ohne Becken"
 
     @property
     def firmware_supported(self):
@@ -291,6 +337,19 @@ class DeviceReading(models.Model):
     service_due_in = models.PositiveIntegerField("Wartung in (h)", null=True, blank=True)
     is_on = models.BooleanField("eingeschaltet", null=True, blank=True)
 
+    # Steckdosen (Shelly). ``energy_total_wh`` ist der Zählerstand des Geräts,
+    # kein Verbrauch je Zeitraum — der entsteht als Differenz zweier Messwerte
+    # in services.energy.
+    power_w = models.DecimalField(
+        "Leistung (W)", max_digits=9, decimal_places=2, null=True, blank=True
+    )
+    energy_total_wh = models.DecimalField(
+        "Zählerstand (Wh)", max_digits=12, decimal_places=2, null=True, blank=True
+    )
+    temperature_c = models.DecimalField(
+        "Gerätetemperatur (°C)", max_digits=5, decimal_places=1, null=True, blank=True
+    )
+
     class Meta:
         verbose_name = "Gerätemesswert"
         verbose_name_plural = "Gerätemesswerte"
@@ -317,6 +376,11 @@ class DeviceReading(models.Model):
         if self.service_due_in is None:
             return None
         return round(self.service_due_in / 24)
+
+    @property
+    def energy_total_kwh(self):
+        """Zählerstand in Kilowattstunden — die Einheit auf der Stromrechnung."""
+        return watt_hours_to_kilowatt_hours(self.energy_total_wh)
 
 
 class DeviceEvent(models.Model):

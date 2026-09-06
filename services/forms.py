@@ -4,6 +4,7 @@ from django import forms
 
 from .eheim import DEFAULT_PASSWORD, DEFAULT_USERNAME
 from .models import Device, MailConfig
+from .shelly import GEN2_USERNAME
 
 
 class MailConfigForm(forms.ModelForm):
@@ -108,7 +109,7 @@ class DeviceForm(BootstrapMixin, forms.ModelForm):
 
     class Meta:
         model = Device
-        fields = ["name", "kind", "mac_address", "host", "is_active"]
+        fields = ["name", "kind", "tank_label", "mac_address", "host", "is_active"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -198,12 +199,86 @@ class PulseModeForm(BootstrapMixin, forms.Form):
     low_seconds = forms.IntegerField(label="Dauer niedrig (s)", min_value=1, max_value=3600, initial=30)
 
 
+class ShellyDeviceForm(BootstrapMixin, forms.ModelForm):
+    """Anlegen einer Shelly-Steckdose über ihre Adresse.
+
+    Es gibt keine Mesh-Suche wie bei Eheim: eine Shelly-Steckdose ist im LAN
+    für sich allein erreichbar. Angegeben wird deshalb die Adresse; Generation,
+    Modell und Softwarestand liest die Anwendung selbst über ``/shelly``.
+
+    Zugangsdaten sind optional — im Auslieferungszustand ist die lokale API
+    offen; erst ein am Gerät gesetzter Login macht sie nötig.
+    """
+
+    username = forms.CharField(
+        label="Benutzer",
+        max_length=100,
+        required=False,
+        initial=GEN2_USERNAME,
+        help_text="Nur nötig, wenn am Gerät ein Login gesetzt ist. Gen2 kennt nur „admin“.",
+    )
+    password = forms.CharField(
+        label="Passwort",
+        max_length=200,
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Leer lassen, wenn am Gerät kein Login gesetzt ist.",
+    )
+
+    class Meta:
+        model = Device
+        fields = ["name", "host", "tank_label", "is_active"]
+        help_texts = {"host": "IP oder Hostname der Steckdose im lokalen Netz."}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.instance.kind = Device.Kind.SHELLY_PLUG
+        # Am Modell ist die Adresse optional (Eheim-Geräte im Mesh brauchen
+        # keine eigene); für eine Steckdose ist sie der ganze Zugang.
+        self.fields["host"].required = True
+        if self.instance.pk:
+            self.fields["username"].initial = self.instance.api_user
+
+    def clean_password(self):
+        password = self.cleaned_data.get("password", "")
+        if not password and self.instance.pk:
+            return self.instance.api_password
+        return password
+
+    def save(self, commit=True):
+        device = super().save(commit=False)
+        device.kind = Device.Kind.SHELLY_PLUG
+        device.set_credentials(
+            self.cleaned_data.get("username") or GEN2_USERNAME,
+            self.cleaned_data.get("password", ""),
+        )
+        if commit:
+            device.save()
+        return device
+
+
 #: Aktion -> (Formularklasse, Anzeigetext). Aktionen ohne Parameter (ein/aus)
 #: haben kein Formular.
-CONTROL_FORMS = {
+EHEIM_CONTROLS = {
     "on": (None, "Filter einschalten"),
     "off": (None, "Filter ausschalten"),
     "manual": (ManualModeForm, "Manueller Modus"),
     "bio": (BioModeForm, "Bio-Modus"),
     "pulse": (PulseModeForm, "Pulse-Modus"),
 }
+
+#: Eine Steckdose kann genau zwei Dinge — und mehr soll sie hier auch nicht
+#: können. Zeitpläne und Automatik kann der Shelly selbst besser.
+SHELLY_CONTROLS = {
+    "on": (None, "Steckdose einschalten"),
+    "off": (None, "Steckdose ausschalten"),
+}
+
+
+def controls_for(device) -> dict:
+    """Schaltbare Aktionen einer Geräteart — leer heißt: keine Steuerung."""
+    if device.is_shelly:
+        return SHELLY_CONTROLS
+    if device.kind == Device.Kind.EHEIM_CLASSICVARIO:
+        return EHEIM_CONTROLS
+    return {}

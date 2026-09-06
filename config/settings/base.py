@@ -125,6 +125,13 @@ GRAPH_MAIL = {
 # Anzeige nicht aufhalten.
 EHEIM_TIMEOUT = env.int("EHEIM_TIMEOUT", default=5)
 
+# Timeout für Requests an Shelly-Geräte im LAN — aus demselben Grund kurz.
+SHELLY_TIMEOUT = env.int("SHELLY_TIMEOUT", default=5)
+
+# Arbeitspreis je Kilowattstunde für die Verbrauchsauswertung. Reine
+# Anzeigehilfe: gespeichert werden Kilowattstunden, keine Beträge.
+ENERGY_PRICE_PER_KWH = env("ENERGY_PRICE_PER_KWH", default="0.35")
+
 # Basis-URL für absolute Links in Mails (Mails haben keinen Request-Kontext).
 SITE_URL = env("SITE_URL", default="http://localhost:8000")
 

@@ -137,13 +137,14 @@ class DeviceAdmin(admin.ModelAdmin):
     die Geräteseiten, nicht über den Admin."""
 
     form = DeviceForm
-    list_display = ["name", "owner", "kind", "host", "mac_address", "firmware", "is_active", "last_seen"]
+    list_display = ["name", "owner", "kind", "tank_label", "host", "mac_address", "firmware",
+                    "is_active", "last_seen"]
     list_filter = ["kind", "is_active"]
-    search_fields = ["name", "mac_address", "host"]
+    search_fields = ["name", "mac_address", "host", "tank_label"]
     readonly_fields = ["last_seen", "created_at", "password_status"]
     fieldsets = [
-        (None, {"fields": ["owner", "name", "kind", "is_active"]}),
-        ("Netz", {"fields": ["host", "mac_address", "firmware"]}),
+        (None, {"fields": ["owner", "name", "kind", "tank_label", "is_active"]}),
+        ("Netz", {"fields": ["host", "mac_address", "firmware", "generation"]}),
         (
             "Zugang",
             {
@@ -165,8 +166,8 @@ class DeviceAdmin(admin.ModelAdmin):
 
     def get_form(self, request, obj=None, **kwargs):
         # Der Besitzer gehört zum Modell, nicht zum Benutzerformular der App.
-        kwargs["fields"] = ["owner", "name", "kind", "is_active", "host", "mac_address",
-                            "firmware", "username", "password"]
+        kwargs["fields"] = ["owner", "name", "kind", "tank_label", "is_active", "host",
+                            "mac_address", "firmware", "generation", "username", "password"]
         return super().get_form(request, obj, **kwargs)
 
 
@@ -174,11 +175,12 @@ class DeviceAdmin(admin.ModelAdmin):
 class DeviceReadingAdmin(admin.ModelAdmin):
     """Reines Leseprotokoll — Messwerte entstehen nur durch Abfragen."""
 
-    list_display = ["read_at", "device", "is_on", "rpm_percent", "pump_mode", "error_code"]
+    list_display = ["read_at", "device", "is_on", "rpm_percent", "pump_mode", "power_w",
+                    "energy_total_wh", "error_code"]
     list_filter = ["device", "error_code"]
     date_hierarchy = "read_at"
     readonly_fields = ["device", "read_at", "payload", "rpm_percent", "pump_mode", "error_code",
-                       "service_due_in", "is_on"]
+                       "service_due_in", "is_on", "power_w", "energy_total_wh", "temperature_c"]
 
     def has_add_permission(self, request):
         return False

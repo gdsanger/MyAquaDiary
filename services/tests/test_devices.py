@@ -251,7 +251,7 @@ class ExecuteTests(TestCase):
         self.assertFalse(DeviceEvent.objects.get().succeeded)
 
     def test_confirmation_text_matches_the_log_entry(self):
-        summary = device_service.describe("manual", {"speed_percent": 70})
+        summary = device_service.describe(self.device, "manual", {"speed_percent": 70})
         result, _ = self.execute("manual", {"speed_percent": 70})
         self.assertEqual(summary, DeviceEvent.objects.get().title)
         self.assertEqual(summary, result.message)
@@ -360,9 +360,13 @@ class PollCommandTests(TestCase):
         self.assertEqual(DeviceReading.objects.get().device, self.device)
         self.assertNotIn(other.name, output)
 
-    def test_non_eheim_devices_are_skipped(self):
+    def test_inactive_devices_are_skipped(self):
         Device.objects.create(
-            owner=self.user, name="Steckdose", kind=Device.Kind.SHELLY_PLUG, host="192.168.1.60"
+            owner=self.user,
+            name="Steckdose",
+            kind=Device.Kind.SHELLY_PLUG,
+            host="192.168.1.60",
+            is_active=False,
         )
         output, _ = self.run_command(FakeResponse(200, CLASSICVARIO_PAYLOAD))
         self.assertNotIn("Steckdose", output)
