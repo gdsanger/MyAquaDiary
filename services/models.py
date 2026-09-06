@@ -1,11 +1,14 @@
 """Persistente Konfiguration und Protokoll der externen Services."""
 
+import hashlib
 import json
 import logging
+import secrets
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 from core.fields import EncryptedTextField
 from services.eheim import (
@@ -651,3 +654,227 @@ class AISuggestion(models.Model):
     def has_profile(self) -> bool:
         """True, sobald ein Steckbrief-Entwurf am Vorschlag hängt."""
         return bool(self.payload)
+
+
+# --------------------------------------------------------------------------
+# MCP-Server
+# --------------------------------------------------------------------------
+
+#: Erkennungszeichen am Anfang jedes Tokens. Macht einen versehentlich in einen
+#: Chat kopierten Token als Zugangsdatum erkennbar — und für eine spätere
+#: Suche nach geleakten Tokens greifbar.
+MCP_TOKEN_PREFIX = "mad_"
+#: Zufallsanteil in Bytes. 32 Byte = 256 Bit; ein Rateversuch ist damit
+#: aussichtslos, weshalb der Token als schneller SHA-256 gespeichert werden darf
+#: (siehe :meth:`MCPToken.hash_key`).
+MCP_TOKEN_BYTES = 32
+#: So viele Zeichen des Zufallsanteils bleiben im Klartext stehen, damit der
+#: Benutzer in der Liste erkennt, welcher Token in welchem Client steckt.
+MCP_TOKEN_HINT_CHARS = 6
+
+
+class MCPTokenQuerySet(models.QuerySet):
+    def usable(self):
+        """Tokens, mit denen man sich gerade anmelden kann."""
+        now = timezone.now()
+        return self.filter(revoked_at__isnull=True).filter(
+            models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now)
+        )
+
+
+class MCPToken(models.Model):
+    """Persönlicher Zugang eines Benutzers zum MCP-Endpunkt.
+
+    Der Klartext existiert genau einmal — beim Anlegen, auf der Seite, die ihn
+    ausgibt. Gespeichert wird nur der SHA-256-Hash: geht die Datenbank verloren,
+    verliert niemand seine Becken an einen fremden KI-Client. Ein Salt (bcrypt,
+    Argon2) brächte hier nichts: der Token ist kein Passwort, sondern 256 Bit
+    Zufall, und ein Wörterbuchangriff darauf existiert nicht. Der schnelle Hash
+    erlaubt dafür den Zugriff über einen Index statt über einen Tabellenscan.
+
+    Der Token trägt den Benutzer — und **nur** den Benutzer. Jedes Tool arbeitet
+    ausschließlich gegen dessen Becken; einen Token, der auf fremde Daten zeigt,
+    gibt es nicht (siehe :mod:`services.mcp.data`).
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Benutzer",
+        on_delete=models.CASCADE,
+        related_name="mcp_tokens",
+    )
+    name = models.CharField(
+        "Name",
+        max_length=120,
+        help_text="Wofür der Token gedacht ist, z. B. „Claude Desktop, Arbeitsrechner“.",
+    )
+    token_hash = models.CharField("Hash", max_length=64, unique=True, editable=False)
+    hint = models.CharField(
+        "Erkennung",
+        max_length=20,
+        blank=True,
+        editable=False,
+        help_text="Die ersten Zeichen des Tokens — nur zur Wiedererkennung in der Liste.",
+    )
+    allow_write = models.BooleanField(
+        "darf schreiben",
+        default=False,
+        help_text="Ohne Haken kann der Token ausschließlich lesen. Ein Token für "
+        "reine Auswertungen braucht kein Schreibrecht.",
+    )
+    created_at = models.DateTimeField("angelegt", auto_now_add=True)
+    last_used_at = models.DateTimeField("zuletzt benutzt", null=True, blank=True)
+    expires_at = models.DateTimeField(
+        "gültig bis",
+        null=True,
+        blank=True,
+        help_text="Leer = unbegrenzt gültig.",
+    )
+    revoked_at = models.DateTimeField("widerrufen am", null=True, blank=True)
+
+    objects = MCPTokenQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "MCP-Token"
+        verbose_name_plural = "MCP-Tokens"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["user", "-created_at"])]
+
+    def __str__(self):
+        return f"{self.name} ({self.user})"
+
+    # -- Anlegen und Prüfen ---------------------------------------------------
+
+    @staticmethod
+    def hash_key(key: str) -> str:
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def issue(cls, user, name: str, **fields) -> tuple["MCPToken", str]:
+        """Legt einen Token an und gibt ihn zusammen mit dem Klartext zurück.
+
+        Der Klartext wird nirgends gespeichert und nirgends protokolliert — der
+        Aufrufer zeigt ihn einmal an, danach ist er weg.
+        """
+        key = MCP_TOKEN_PREFIX + secrets.token_urlsafe(MCP_TOKEN_BYTES)
+        token = cls.objects.create(
+            user=user,
+            name=name,
+            token_hash=cls.hash_key(key),
+            hint=key[: len(MCP_TOKEN_PREFIX) + MCP_TOKEN_HINT_CHARS],
+            **fields,
+        )
+        return token, key
+
+    @classmethod
+    def resolve(cls, key: str) -> "MCPToken | None":
+        """Der zu einem Klartext gehörende, benutzbare Token — sonst ``None``.
+
+        Widerrufene und abgelaufene Tokens sind hier bereits aussortiert; der
+        Aufrufer bekommt keine Auskunft darüber, welcher der beiden Fälle
+        vorlag oder ob es den Token je gab.
+        """
+        if not key:
+            return None
+        return (
+            cls.objects.usable()
+            .select_related("user")
+            .filter(token_hash=cls.hash_key(key))
+            .first()
+        )
+
+    def touch(self) -> None:
+        """Hält fest, dass der Token gerade benutzt wurde."""
+        self.last_used_at = timezone.now()
+        self.save(update_fields=["last_used_at"])
+
+    def revoke(self) -> None:
+        """Entzieht den Token. Zurücknehmen lässt sich das nicht — ein
+        widerrufener Token ist verbrannt, der Client bekommt einen neuen."""
+        if self.revoked_at is None:
+            self.revoked_at = timezone.now()
+            self.save(update_fields=["revoked_at"])
+
+    # -- Zustand --------------------------------------------------------------
+
+    @property
+    def is_revoked(self) -> bool:
+        return self.revoked_at is not None
+
+    @property
+    def is_expired(self) -> bool:
+        return self.expires_at is not None and self.expires_at <= timezone.now()
+
+    @property
+    def is_usable(self) -> bool:
+        return not (self.is_revoked or self.is_expired)
+
+    @property
+    def status_label(self) -> str:
+        if self.is_revoked:
+            return "widerrufen"
+        if self.is_expired:
+            return "abgelaufen"
+        return "aktiv"
+
+    @property
+    def access_label(self) -> str:
+        return "lesen und schreiben" if self.allow_write else "nur lesen"
+
+
+class MCPAccessLog(models.Model):
+    """Protokoll der schreibenden MCP-Aufrufe — auch der abgewiesenen.
+
+    Wer später eine unplausible Messreihe findet, soll erkennen können, woher
+    sie kam: welcher Token, welches Werkzeug, welche Parameter, welcher
+    Datensatz. Lesende Aufrufe stehen bewusst nicht hier — sie verändern nichts,
+    und ein Protokoll jeder Abfrage wäre eine Bewegungsdatenbank über den
+    eigenen Benutzer, kein Sicherheitsgewinn.
+
+    ``arguments`` enthält die Parameter des Aufrufs so, wie der Client sie
+    geschickt hat. Über MCP laufen keine Zugangsdaten, deshalb ist das
+    unproblematisch.
+    """
+
+    token = models.ForeignKey(
+        MCPToken,
+        verbose_name="Token",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="access_log",
+    )
+    # Der Benutzer steht zusätzlich am Eintrag: ein gelöschter Token soll die
+    # Herkunft eines Datensatzes nicht mit ins Grab nehmen.
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Benutzer",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="mcp_access_log",
+    )
+    token_name = models.CharField("Token-Name", max_length=120, blank=True)
+    tool = models.CharField("Werkzeug", max_length=60)
+    arguments = models.JSONField("Parameter", default=dict, blank=True)
+    object_ref = models.CharField(
+        "Datensatz",
+        max_length=100,
+        blank=True,
+        help_text="Angelegter Datensatz, z. B. tanks.Measurement:12.",
+    )
+    succeeded = models.BooleanField("erfolgreich", default=True)
+    error_message = models.TextField("Fehler", blank=True)
+    created_at = models.DateTimeField("Zeitpunkt", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "MCP-Protokoll"
+        verbose_name_plural = "MCP-Protokoll"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["-created_at"]),
+            models.Index(fields=["user", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.tool} – {self.token_name or 'unbekannter Token'}"
