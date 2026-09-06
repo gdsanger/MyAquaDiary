@@ -1,0 +1,21 @@
+{% comment %}
+Reiterleiste plus Inhalt. Der Klick auf einen Reiter tauscht per HTMX nur
+diesen Block; das href zeigt auf dieselbe Ansicht als Vollseite, damit die
+Reiter ohne JavaScript und als Lesezeichen funktionieren.
+{% endcomment %}
+<div id="tab-area">
+  <div class="mad-tabs" role="tablist" aria-label="Bereiche des Beckens">
+    {% for key, label in tabs %}
+      <a class="mad-tabs__link" role="tab" id="tab-{{ key }}"
+         aria-selected="{% if key == active_tab %}true{% else %}false{% endif %}"
+         aria-controls="tab-panel"
+         href="{{ tank.get_absolute_url }}?reiter={{ key }}"
+         hx-get="{% url 'tanks:tab' tank.slug key %}"
+         hx-target="#tab-area" hx-swap="outerHTML"
+         hx-push-url="{{ tank.get_absolute_url }}?reiter={{ key }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <div id="tab-panel" role="tabpanel" aria-labelledby="tab-{{ active_tab }}">
+    {% include tab_template %}
+  </div>
+</div>

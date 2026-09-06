@@ -1,0 +1,29 @@
+<section class="mad-card">
+  <div class="mad-card__header"><h2 class="mad-card__title">Pflanzen</h2></div>
+  <ul class="mad-list">
+    {% for planting in plantings %}
+      <li>
+        <div class="mad-list__row">
+          <div class="mad-list__main">
+            <p class="mad-list__title">
+              {{ planting.quantity }}× <a href="{{ planting.species.get_absolute_url }}">{{ planting.species.display_name }}</a>
+            </p>
+            <p class="mad-list__meta">
+              <i>{{ planting.species.scientific_name }}</i>
+              · {{ planting.species.get_placement_display }}
+              · gepflanzt {{ planting.planted_on|date:"d.m.Y" }}
+              {% if planting.removed_on %}· entfernt {{ planting.removed_on|date:"d.m.Y" }}{% endif %}
+            </p>
+          </div>
+          {% if planting.is_active %}
+            <span class="mad-status mad-status--ok">Im Becken</span>
+          {% else %}
+            <span class="mad-status">Entfernt</span>
+          {% endif %}
+        </div>
+      </li>
+    {% empty %}
+      <li class="mad-empty">Noch keine Pflanzen erfasst.</li>
+    {% endfor %}
+  </ul>
+</section>
