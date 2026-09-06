@@ -6,6 +6,7 @@ app_name = "services"
 
 urlpatterns = [
     path("geraete/", views.device_list, name="device_list"),
+    path("geraete/neu/", views.device_add, name="device_add"),
     path("geraete/suchen/", views.device_discover, name="device_discover"),
     path("geraete/steckdose/", views.shelly_add, name="shelly_add"),
     path("geraete/verbrauch/", views.energy_overview, name="energy_overview"),

@@ -1,9 +1,22 @@
+import re
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from core.testing import (
+    create_animal,
+    create_measurement,
+    create_tank,
+    create_task,
+    create_user,
+    stock,
+    tank_named,
+)
 from services.models import Device, DeviceReading
+from tanks.models import TaskCompletion
 
 
 class DashboardWarningTests(TestCase):
@@ -16,6 +29,7 @@ class DashboardWarningTests(TestCase):
         self.client.force_login(self.user)
         self.device = Device.objects.create(
             owner=self.user,
+            tank=tank_named(self.user),
             name="Filter Becken 1",
             kind=Device.Kind.EHEIM_CLASSICVARIO,
             mac_address="AA:BB:CC:DD:EE:FF",
@@ -55,22 +69,7 @@ class DashboardWarningTests(TestCase):
         self.add_reading(1)
         with self.assertNumQueries(4):
             self.client.get(reverse("dashboard:index"))
-import re
-from datetime import timedelta
 
-from django.test import TestCase
-from django.urls import reverse
-from django.utils import timezone
-
-from core.testing import (
-    create_animal,
-    create_measurement,
-    create_tank,
-    create_task,
-    create_user,
-    stock,
-)
-from tanks.models import Device, TaskCompletion
 
 TILE_URLS = [
     "dashboard:tile-kpi",
@@ -229,6 +228,7 @@ class WarningTileTests(TestCase):
 
     def test_device_error_and_due_maintenance_are_reported(self):
         Device.objects.create(
+            owner=self.user,
             tank=self.tank,
             name="Außenfilter",
             kind=Device.Kind.FILTER,

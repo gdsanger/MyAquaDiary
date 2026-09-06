@@ -15,6 +15,8 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
+from tanks.models import Tank
+
 from . import ai
 from . import devices as device_service
 from . import energy
@@ -33,6 +35,7 @@ from .forms import (
     DeviceForm,
     DevicePasswordForm,
     IdentifyForm,
+    ManualDeviceForm,
     MCPTokenForm,
     ShellyDeviceForm,
     controls_for,
@@ -100,11 +103,18 @@ def _device(request, pk) -> Device:
 
 @login_required
 def device_list(request):
-    """Übersicht der eigenen Geräte; der Status kommt je Karte per HTMX nach."""
+    """Übersicht der eigenen Geräte; der Status kommt je Karte per HTMX nach.
+
+    Angebundene und nur dokumentierte Geräte stehen in derselben Liste — es ist
+    dieselbe Geräteliste, die auch der Beckenreiter „Geräte" zeigt.
+    """
     return render(
         request,
         "services/device_list.html",
-        {"devices": request.user.devices.all(), "warnings": device_service.warnings_for(request.user)},
+        {
+            "devices": request.user.devices.select_related("tank"),
+            "warnings": device_service.warnings_for(request.user),
+        },
     )
 
 
@@ -116,7 +126,7 @@ def device_detail(request, pk):
     eine Steckdose Leistung und Verbrauch.
     """
     device = _device(request, pk)
-    readings = list(device.readings.all()[:CHART_READINGS])
+    readings = list(device.readings.all()[:CHART_READINGS]) if device.is_connected else []
     period = energy.normalize_period(request.GET.get("zeitraum"))
     buckets = energy.device_buckets(device, period) if device.is_shelly else []
     return render(
@@ -167,6 +177,25 @@ def device_status(request, pk):
 
 @login_required
 @require_http_methods(["GET", "POST"])
+def device_add(request):
+    """Ein Gerät ohne Anbindung erfassen.
+
+    Für alles, was am Becken hängt und nicht am Netz: Heizer, CO₂-Anlage,
+    Beleuchtung. Der Weg über die Mesh-Suche oder die Shelly-Adresse steht
+    daneben und ändert sich nicht — es ist dasselbe Modell, nur ohne Anbindung.
+    """
+    form = ManualDeviceForm(request.POST or None, user=request.user)
+    if request.method == "POST" and form.is_valid():
+        device = form.save(commit=False)
+        device.owner = request.user
+        device.save()
+        messages.success(request, f"{device.name} erfasst.")
+        return redirect("services:device_detail", pk=device.pk)
+    return render(request, "services/device_add.html", {"form": form})
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
 def device_discover(request):
     """Mesh über ein erreichbares Gerät durchsuchen und Geräte anlegen.
 
@@ -198,13 +227,32 @@ def device_discover(request):
     return render(
         request,
         "services/device_discover.html",
-        {"form": form, "found": found, "error": error, "kinds": Device.Kind.choices},
+        {
+            "form": form,
+            "found": found,
+            "error": error,
+            "kinds": [
+                (value, label)
+                for value, label in Device.Kind.choices
+                if value in Device.EHEIM_KINDS
+            ],
+            "tanks": Tank.objects.for_user(request.user),
+        },
     )
+
+
+def _selected_tank(tanks, value):
+    """Das gewählte Becken aus der Auswahl des Benutzers, sonst ``None``."""
+    try:
+        return tanks.filter(pk=int(value)).first()
+    except (TypeError, ValueError):
+        return None
 
 
 def _create_selected(request, credentials) -> int:
     """Legt die angehakten Geräte an; meldet jedes Ergebnis als Message."""
     created = 0
+    tanks = Tank.objects.for_user(request.user)
     for mac in request.POST.getlist("macs"):
         mac = normalize_mac(mac)
         firmware = request.POST.get(f"firmware_{mac}", "").strip()
@@ -216,11 +264,19 @@ def _create_selected(request, credentials) -> int:
         if Device.objects.filter(owner=request.user, mac_address=mac).exists():
             messages.info(request, f"{mac} ist bereits angelegt.")
             continue
+        # Das Becken ist Pflicht — und es ist eines des Benutzers. Eine fremde
+        # Kennung findet sich hier schlicht nicht wieder.
+        tank = _selected_tank(tanks, request.POST.get(f"tank_{mac}"))
+        if tank is None:
+            messages.error(request, f"{mac}: Bitte ein Becken auswählen.")
+            continue
 
+        kind = request.POST.get(f"kind_{mac}", "")
         device = Device(
             owner=request.user,
+            tank=tank,
             name=request.POST.get(f"name_{mac}", "").strip() or mac,
-            kind=request.POST.get(f"kind_{mac}") or Device.Kind.EHEIM_OTHER,
+            kind=kind if kind in Device.EHEIM_KINDS else Device.Kind.EHEIM_OTHER,
             mac_address=mac,
             host=credentials["host"],
             firmware=firmware[:40],
@@ -246,15 +302,24 @@ def _create_selected(request, credentials) -> int:
 @login_required
 @require_http_methods(["GET", "POST"])
 def device_edit(request, pk):
-    """Stammdaten und Zugangsdaten eines Geräts pflegen."""
+    """Stammdaten und — bei angebundenen Geräten — Zugangsdaten pflegen."""
     device = _device(request, pk)
-    form_class = ShellyDeviceForm if device.is_shelly else DeviceForm
-    form = form_class(request.POST or None, instance=device)
+    form_class = _form_class(device)
+    form = form_class(request.POST or None, instance=device, user=request.user)
     if request.method == "POST" and form.is_valid():
         form.save()
         messages.success(request, "Gerät gespeichert.")
         return redirect("services:device_detail", pk=device.pk)
     return render(request, "services/device_form.html", {"form": form, "device": device})
+
+
+def _form_class(device: Device):
+    """Formular passend zur Geräteart — ohne Anbindung ohne Zugangsdaten."""
+    if device.is_shelly:
+        return ShellyDeviceForm
+    if device.is_eheim:
+        return DeviceForm
+    return ManualDeviceForm
 
 
 @login_required
@@ -346,7 +411,7 @@ def shelly_add(request):
     Gerät nicht, wird nichts angelegt — ein Karteileichen-Gerät mit falscher
     Adresse hilft niemandem.
     """
-    form = ShellyDeviceForm(request.POST or None)
+    form = ShellyDeviceForm(request.POST or None, user=request.user)
     if request.method == "POST" and form.is_valid():
         device = form.save(commit=False)
         device.owner = request.user

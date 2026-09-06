@@ -2,7 +2,6 @@ from django.contrib import admin
 
 from .models import (
     CareTask,
-    Device,
     Event,
     Measurement,
     Parameter,
@@ -76,12 +75,6 @@ class CareTaskAdmin(admin.ModelAdmin):
     list_display = ["title", "tank", "category", "due_on", "interval_days", "is_active"]
     list_filter = ["tank", "category", "is_active"]
     inlines = [TaskCompletionInline]
-
-
-@admin.register(Device)
-class DeviceAdmin(admin.ModelAdmin):
-    list_display = ["name", "tank", "kind", "status", "last_maintenance_on"]
-    list_filter = ["tank", "kind", "status"]
 
 
 @admin.register(TankPhoto)

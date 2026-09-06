@@ -7,6 +7,7 @@
   <h1 class="h3 mb-0">Geräte</h1>
   <div class="d-flex flex-wrap gap-2">
     <a class="btn btn-outline-secondary" href="{% url 'services:energy_overview' %}">Stromverbrauch</a>
+    <a class="btn btn-outline-primary" href="{% url 'services:device_add' %}">Gerät erfassen</a>
     <a class="btn btn-outline-primary" href="{% url 'services:shelly_add' %}">Steckdose anbinden</a>
     <a class="btn btn-primary" href="{% url 'services:device_discover' %}">Geräte suchen</a>
   </div>
@@ -27,12 +28,26 @@
                 </h2>
                 <p class="small text-body-secondary mb-2">
                   {{ device.get_kind_display }}{% if device.generation_label %} {{ device.generation_label }}{% endif %}
-                  · {{ device.host|default:"ohne Adresse" }}
-                  {% if device.tank_label %} · {{ device.tank_label }}{% endif %}
+                  {% if device.is_connected %} · {{ device.host|default:"ohne Adresse" }}{% endif %}
+                  · <a href="{{ device.tank.get_absolute_url }}">{{ device.tank.name }}</a>
                 </p>
               </div>
               {% if not device.is_active %}<span class="badge text-bg-secondary">inaktiv</span>{% endif %}
             </div>
+
+            {% if not device.is_connected %}
+              <p class="mb-2">
+                <span class="mad-status mad-status--{{ device.status }}">{{ device.get_status_display }}</span>
+                {% if device.status_message %}<span class="small">{{ device.status_message }}</span>{% endif %}
+              </p>
+            {% endif %}
+            {% if device.maintenance_due_on %}
+              <p class="small mb-2">
+                <span class="mad-status mad-status--{{ device.maintenance_status_value }}">
+                  Wartung {{ device.maintenance_due_on|date:"d.m.Y" }}
+                </span>
+              </p>
+            {% endif %}
 
             {% if device.uses_default_password %}
               <div class="alert alert-warning py-2 small" role="alert">
@@ -41,7 +56,7 @@
               </div>
             {% endif %}
 
-            {% if device.is_active and device.host %}
+            {% if device.is_connected and device.is_active and device.host %}
               {# Status nachladen statt beim Seitenaufbau holen: ein stummes
                  Gerät kostet damit nur diesen Platzhalter. #}
               <div hx-get="{% url 'services:device_status' device.pk %}"
@@ -57,12 +72,13 @@
 {% else %}
   <div class="card">
     <div class="card-body">
-      <p class="mb-2">Noch keine Geräte angebunden.</p>
+      <p class="mb-2">Noch kein Gerät erfasst.</p>
       <p class="text-body-secondary mb-0">
         Über <a href="{% url 'services:device_discover' %}">Geräte suchen</a> lassen sich alle
         EHEIM-Digital-Geräte im Mesh finden. Voraussetzung ist Gerätesoftware 2.0.1 oder neuer.
         Eine <a href="{% url 'services:shelly_add' %}">Shelly-Steckdose</a> wird über ihre
-        Adresse im LAN angebunden.
+        Adresse im LAN angebunden. Alles ohne Anbindung — Heizer, Beleuchtung, CO₂ —
+        lässt sich <a href="{% url 'services:device_add' %}">von Hand erfassen</a>.
       </p>
     </div>
   </div>

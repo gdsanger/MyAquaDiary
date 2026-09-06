@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
+from tanks.models import Event as TankEvent
+
 from .eheim import (
     ClassicVarioService,
     DeviceStatus,
@@ -112,6 +114,10 @@ def store_reading(device: Device, status) -> DeviceReading:
     if generation and device.generation != generation:
         device.generation = generation
         updated.append("generation")
+    # Der Fehlercode gehört nicht nur in den Messwert: über den Status am Gerät
+    # wird daraus eine Warnung am Becken, ohne dass die auswertende Stelle die
+    # Messwerte kennen muss.
+    updated += device.update_status_from(reading)
     device.save(update_fields=updated)
     return reading
 
@@ -123,6 +129,8 @@ def probe(device: Device) -> ProbeResult:
     Logzeile und einem Fehlertext, nicht zu einer Fehlerseite oder einem
     abgebrochenen Command.
     """
+    if not device.is_connected:
+        return ProbeResult(error="Das Gerät ist nicht angebunden und wird nur dokumentiert.")
     if not device.is_active:
         return ProbeResult(error="Das Gerät ist deaktiviert.")
     try:
@@ -164,6 +172,8 @@ def execute(device: Device, action: str, params: dict | None = None, *, user=Non
     fehlt im Nachhinein genau die Zeile, die man sucht.
     """
     params = params or {}
+    if not device.is_connected:
+        return CommandResult(False, "Für dieses Gerät gibt es keine Steuerung.")
     if not device.is_active:
         return CommandResult(False, "Das Gerät ist deaktiviert.")
 
@@ -307,13 +317,14 @@ def change_password(device: Device, password: str, *, user=None) -> CommandResul
 
 def record_event(device: Device, *, action: str, title: str, description: str = "", user=None,
                  succeeded: bool = True) -> DeviceEvent:
-    """Schreibt das Geräte-Ereignis.
+    """Schreibt das Geräte-Ereignis — und dasselbe noch einmal am Becken.
 
-    Einzige Stelle, an der das Protokoll entsteht: sobald das Becken-Modell im
-    Epic liegt, kommt hier zusätzlich ein ``tanks.Event`` der Kategorie
-    *Technik* dazu, ohne dass ein Aufrufer sich ändert.
+    Einzige Stelle, an der das Protokoll entsteht. Was an der Technik passiert,
+    gehört in die Beckenhistorie: wer eine Woche später eine Trübung sucht,
+    sieht dort, dass am Vorabend der Filter umgestellt wurde. Fehlgeschlagene
+    Versuche stehen mit dabei — gerade sie erklären hinterher etwas.
     """
-    return DeviceEvent.objects.create(
+    event = DeviceEvent.objects.create(
         device=device,
         user=user if getattr(user, "is_authenticated", False) else None,
         action=action[:40],
@@ -321,6 +332,17 @@ def record_event(device: Device, *, action: str, title: str, description: str = 
         description=description,
         succeeded=succeeded,
     )
+    TankEvent.objects.create(
+        tank_id=device.tank_id,
+        category=TankEvent.Category.EQUIPMENT,
+        title=title[:160],
+        # Der Gerätename steht im Titel nicht immer („Filter eingeschaltet"),
+        # am Becken hängen aber mehrere Geräte.
+        description=" · ".join(part for part in (device.name, description) if part),
+        occurred_at=event.occurred_at,
+        created_by=event.user,
+    )
+    return event
 
 
 # --------------------------------------------------------------------------

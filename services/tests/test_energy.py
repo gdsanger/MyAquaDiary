@@ -16,7 +16,7 @@ class EnergyTestCase(TestCase):
         self.user = get_user_model().objects.create_user(
             username="max", email="max@example.com", password="geheim-123"
         )
-        self.device = make_plug(self.user, name="Licht", tank_label="Becken 1")
+        self.device = make_plug(self.user, name="Licht", tank_name="Becken 1")
 
     def add_reading(self, watt_hours, *, days_ago=0, hours_ago=0, device=None):
         return DeviceReading.objects.create(
@@ -91,7 +91,7 @@ class ComparisonTests(EnergyTestCase):
     def setUp(self):
         super().setUp()
         self.heater = make_plug(
-            self.user, name="Heizung", tank_label="Becken 2", host="192.168.1.61"
+            self.user, name="Heizung", tank_name="Becken 2", host="192.168.1.61"
         )
 
     def test_consumption_is_compared_per_tank(self):
@@ -107,7 +107,7 @@ class ComparisonTests(EnergyTestCase):
         self.assertEqual(usages[1].kwh, Decimal("0.400"))
 
     def test_devices_of_one_tank_are_added_up(self):
-        second = make_plug(self.user, name="Filter", tank_label="Becken 1", host="192.168.1.62")
+        second = make_plug(self.user, name="Filter", tank_name="Becken 1", host="192.168.1.62")
         self.add_reading(1000, hours_ago=2)
         self.add_reading(1400, hours_ago=1)
         self.add_reading(500, hours_ago=2, device=second)

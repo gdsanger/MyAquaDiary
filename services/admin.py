@@ -151,13 +151,13 @@ class DeviceAdmin(admin.ModelAdmin):
     die Geräteseiten, nicht über den Admin."""
 
     form = DeviceForm
-    list_display = ["name", "owner", "kind", "tank_label", "host", "mac_address", "firmware",
+    list_display = ["name", "owner", "tank", "kind", "host", "mac_address", "firmware",
                     "is_active", "last_seen"]
     list_filter = ["kind", "is_active"]
-    search_fields = ["name", "mac_address", "host", "tank_label"]
+    search_fields = ["name", "mac_address", "host", "tank__name"]
     readonly_fields = ["last_seen", "created_at", "password_status"]
     fieldsets = [
-        (None, {"fields": ["owner", "name", "kind", "tank_label", "is_active"]}),
+        (None, {"fields": ["owner", "name", "kind", "tank", "is_active"]}),
         ("Netz", {"fields": ["host", "mac_address", "firmware", "generation"]}),
         (
             "Zugang",
@@ -165,6 +165,14 @@ class DeviceAdmin(admin.ModelAdmin):
                 "fields": ["username", "password", "password_status"],
                 "description": "Werksseitig api / admin. Das Passwort liegt verschlüsselt in der "
                 "Datenbank und wird nie angezeigt.",
+            },
+        ),
+        (
+            "Gerät",
+            {
+                "fields": ["manufacturer", "model_name", "installed_on",
+                           "maintenance_interval_days", "last_maintenance_on"],
+                "description": "Angaben, die jedes Gerät hat — auch eines ohne Anbindung.",
             },
         ),
         ("Verwaltung", {"fields": ["last_seen", "created_at"]}),
@@ -180,8 +188,10 @@ class DeviceAdmin(admin.ModelAdmin):
 
     def get_form(self, request, obj=None, **kwargs):
         # Der Besitzer gehört zum Modell, nicht zum Benutzerformular der App.
-        kwargs["fields"] = ["owner", "name", "kind", "tank_label", "is_active", "host",
-                            "mac_address", "firmware", "generation", "username", "password"]
+        kwargs["fields"] = ["owner", "name", "kind", "tank", "is_active", "host",
+                            "mac_address", "firmware", "generation", "username", "password",
+                            "manufacturer", "model_name", "installed_on",
+                            "maintenance_interval_days", "last_maintenance_on"]
         return super().get_form(request, obj, **kwargs)
 
 

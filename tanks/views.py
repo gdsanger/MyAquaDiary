@@ -108,7 +108,9 @@ def tab_context(tank, tab):
     if tab == "termine":
         return {"tasks": tank.tasks.order_by("-is_active", "due_on")}
     if tab == "geraete":
-        return {"devices": tank.devices.all()}
+        # ``devices`` sind die Geräte aus services.Device — dieselben, die der
+        # Bereich /geraete/ zeigt. Ein zweites Gerätemodell gibt es nicht.
+        return {"devices": tank.devices.order_by("kind", "name")}
     if tab == "galerie":
         return {"photos": tank.photos.all()}
     return {}
