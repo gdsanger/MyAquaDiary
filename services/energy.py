@@ -105,6 +105,8 @@ class Usage:
     label: str
     kwh: Decimal
     devices: list = field(default_factory=list)
+    #: Gesetzt, wenn die Gruppe ein Becken ist — für den Link in der Auswertung.
+    tank: object = None
 
     @property
     def cost(self) -> Decimal:
@@ -185,23 +187,25 @@ def usage_by_tank(user, period: str, start: datetime.date | None = None) -> list
     """Verbrauch je Becken im gewählten Zeitraum, absteigend sortiert.
 
     Der eigentliche Nutzen der Anbindung: was kostet welches Becken im Monat.
-    Gruppiert wird über :attr:`services.models.Device.tank_name` — die einzige
-    Stelle, die sich ändert, sobald das Becken ein Fremdschlüssel ist.
+    Gruppiert wird über die Beckenkennung, nicht über den Namen — sonst
+    entstünde aus einem Tippfehler oder einer Umbenennung stillschweigend eine
+    zweite Gruppe.
     """
     start = start or bucket_start(timezone.now(), period)
-    grouped: dict[str, list] = {}
-    for device in metered_devices(user):
-        grouped.setdefault(device.tank_name, []).append(
+    grouped: dict[int, list] = {}
+    for device in metered_devices(user).select_related("tank"):
+        grouped.setdefault(device.tank_id, []).append(
             (device, device_consumption(device, period, start))
         )
 
     usages = [
         Usage(
-            label=tank,
+            label=entries[0][0].tank.name,
             kwh=_quantize(sum((kwh for _device, kwh in entries), Decimal(0))),
             devices=[device for device, _kwh in entries],
+            tank=entries[0][0].tank,
         )
-        for tank, entries in grouped.items()
+        for entries in grouped.values()
     ]
     return _sorted(usages)
 

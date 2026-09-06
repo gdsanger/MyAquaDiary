@@ -45,7 +45,7 @@
           <tbody>
             {% for usage in tanks %}
               <tr>
-                <td>{{ usage.label }}</td>
+                <td><a href="{{ usage.tank.get_absolute_url }}">{{ usage.label }}</a></td>
                 <td class="text-end">{{ usage.kwh }} kWh</td>
                 <td class="text-end">{{ usage.cost }} €</td>
                 <td class="small text-body-secondary">{{ usage.device_names }}</td>
@@ -91,7 +91,7 @@
               <tr>
                 {% with device=usage.devices.0 %}
                   <td><a href="{% url 'services:device_detail' device.pk %}">{{ usage.label }}</a></td>
-                  <td>{{ device.tank_name }}</td>
+                  <td>{{ device.tank.name }}</td>
                 {% endwith %}
                 <td class="text-end">{{ usage.kwh }} kWh</td>
                 <td class="text-end">{{ usage.cost }} €</td>
