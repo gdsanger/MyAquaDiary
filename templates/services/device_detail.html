@@ -51,8 +51,7 @@
       <div class="card-body">
         <h2 class="h5 card-title">Status</h2>
         {% if not device.is_connected %}
-          {# Ohne Anbindung ist der Status eine Handeingabe — es gibt nichts
-             abzufragen, und ein Ladeplatzhalter würde etwas anderes behaupten. #}
+         
           <p class="mb-1">
             <span class="mad-status mad-status--{{ device.status }}">{{ device.get_status_display }}</span>
           </p>
