@@ -54,24 +54,52 @@ class CatalogPermission(models.Model):
 
 class SpeciesQuerySet(models.QuerySet):
     def search(self, term):
-        """Freitextsuche über wissenschaftlichen und deutschen Namen."""
+        """Freitextsuche über wissenschaftlichen und deutschen Namen.
+
+        Die Sortenbezeichnung gehört dazu: wer „Electric Blue“ sucht, sucht
+        nicht nach *Mikrogeophagus ramirezi*, sondern nach genau dieser Form.
+        """
         term = (term or "").strip()
         if not term:
             return self
         return self.filter(
             models.Q(scientific_name__icontains=term)
             | models.Q(common_name__icontains=term)
+            | models.Q(variant__icontains=term)
             | models.Q(summary__icontains=term)
         )
+
+    def wild_forms(self):
+        """Nur Stammformen — Zuchtformen bleiben außen vor."""
+        return self.filter(is_cultivated_form=False)
 
     def with_images(self):
         return self.prefetch_related("images")
 
 
 class Species(models.Model):
-    """Gemeinsamer Steckbrief-Rumpf von Pflanzen- und Tierarten."""
+    """Gemeinsamer Steckbrief-Rumpf von Pflanzen- und Tierarten.
 
-    scientific_name = models.CharField("wissenschaftlicher Name", max_length=150, unique=True)
+    Der wissenschaftliche Name allein ist nicht die Identität eines
+    Steckbriefs: Wild- und Zuchtform derselben Art unterscheiden sich in
+    Robustheit, Lebenserwartung und Verhalten so deutlich, dass ein
+    gemeinsamer Steckbrief für beide falsch wäre. Die Identität ist deshalb
+    ``scientific_name`` **plus** ``variant``.
+    """
+
+    scientific_name = models.CharField("wissenschaftlicher Name", max_length=150)
+    variant = models.CharField(
+        "Sorte / Zuchtform",
+        max_length=80,
+        blank=True,
+        help_text="Sortenbezeichnung wie 'Flamingo', 'Red Ruby', 'Electric Blue'. "
+        "Leer lassen bei der Stammform.",
+    )
+    is_cultivated_form = models.BooleanField(
+        "Zuchtform",
+        default=False,
+        help_text="Durch Selektion entstanden, nicht in der Natur vorkommend.",
+    )
     common_name = models.CharField("deutscher Name", max_length=150, blank=True)
     slug = models.SlugField("Slug", max_length=160, unique=True)
     summary = models.CharField("Kurzbeschreibung", max_length=250, blank=True)
@@ -102,14 +130,32 @@ class Species(models.Model):
 
     class Meta:
         abstract = True
-        ordering = [Lower("scientific_name")]
+        # Die Stammform (``variant=""``) steht vor ihren Zuchtformen.
+        ordering = [Lower("scientific_name"), Lower("variant")]
+        constraints = [
+            # Statt ``unique`` am Namen: erst Name und Sorte zusammen sind
+            # eindeutig. Case-insensitiv, damit 'Electric Blue' und
+            # 'electric blue' nicht zweimal nebeneinander stehen. Der Name
+            # trägt App und Modell, weil beide Kataloge dieselbe Bedingung
+            # erben und Constraint-Namen projektweit eindeutig sein müssen.
+            models.UniqueConstraint(
+                Lower("scientific_name"),
+                Lower("variant"),
+                name="%(app_label)s_%(class)s_unique_variant",
+                violation_error_message=(
+                    "Diese Art gibt es mit dieser Sorte bereits im Katalog."
+                ),
+            )
+        ]
 
     def __str__(self):
         return self.display_name
 
     @property
     def display_name(self):
-        return self.common_name or self.scientific_name
+        """Anzeigename samt Sorte: *Zwergbuntbarsch* 'Electric Blue'."""
+        base = self.common_name or self.scientific_name
+        return f"{base} '{self.variant}'" if self.variant else base
 
     @property
     def primary_image(self):
