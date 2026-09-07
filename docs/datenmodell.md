@@ -115,6 +115,7 @@ unit                 kann leer sein (pH)
 decimals             Nachkommastellen der Anzeige
 default_min          globale Vorgabe, vom Becken überschreibbar
 default_max
+detection_limit      Nachweisgrenze · leer, wenn der Parameter keine hat (pH, Temperatur, KH)
 is_key_parameter     erscheint im Verlaufsdiagramm des Dashboards
 sort_order           Reihenfolge — nicht „position“
 ```
@@ -179,14 +180,17 @@ nicht wegräumen.
 ```
 tank                 FK Tank · CASCADE
 parameter            FK Parameter · PROTECT
-value                Decimal(8,3) · Pflicht — siehe Lücke 1 (kein „n. n.“)
+value                Decimal(8,3) · NULL bei „n. n.“ (below_detection)
+below_detection      Bool · „nicht nachweisbar“ · genau eines von value/below_detection
 measured_at          Zeitpunkt
 note                 CharField(200)
 created_by           FK User · SET_NULL
 ```
 
-Index: `(tank, parameter, -measured_at)`. Abgeleitet: `display_value`,
-`target_range()`, `status()`.
+Index: `(tank, parameter, -measured_at)`. `CheckConstraint`
+`measurement_value_xor_below_detection`: entweder `value` **oder**
+`below_detection`, nie beides. Abgeleitet: `display_value` (bei n.n. „n.n.“),
+`target_range()`, `status()` (n.n. über `classify_below_detection`).
 
 ### `tanks.Event`
 
@@ -662,7 +666,7 @@ in Prompts, Items und Code auftaucht; rechts, was es tatsächlich gibt.
 | `Tank.depth_cm` | `Tank.width_cm`; `depth_cm` gibt es nur an `SubstrateLayer` und meint dort die Mächtigkeit einer Schicht |
 | `Tank.model_name` | gibt es nicht — `model_name` steht an `services.Device` |
 | `Parameter.position` | `Parameter.sort_order` |
-| `Parameter.supports_below_detection` | gibt es nicht → Lücke 1 |
+| `Parameter.supports_below_detection` | `Parameter.detection_limit` — die Nachweisgrenze selbst, nicht nur ein Schalter (#1243) |
 | `TankParameterTarget.target` | gibt es nicht — nur `minimum` / `maximum` |
 | `Event.breeding`, `Event.water_changed_l` | gibt es nicht |
 | `TankAnimalMovement`, `Stocking.status`, `Stocking.origin` | gibt es nicht — Abgang ist `removed_on` |
@@ -681,17 +685,17 @@ dieser Referenz behauptet.
 Fehlende Funktion, keine Namensfragen. Der Stand der Bewertung, damit dieselbe
 Frage nicht dreimal aufgemacht wird.
 
-### 1. „n. n.“ ist nicht erfassbar — offen, eigenes Item
+### 1. „n. n.“ ist nicht erfassbar — erledigt (#1243)
 
-`Parameter` hat kein `supports_below_detection`, `Measurement.value` ist
-Pflicht. Nitrit unterhalb der Nachweisgrenze — der wichtigste Wert der
-Einfahrphase — lässt sich nicht als solcher festhalten. Als `0` zu speichern
-ist fachlich falsch: „nicht nachweisbar“ heißt „unter der Nachweisgrenze“,
-nicht „null“.
-
-Nicht nebenbei zu erledigen: Betroffen sind Modell und Migration, die
-Statuslogik (`classify_value`), die Diagramme, die MCP-Serialisierung und die
-Erfassungsmaske.
+`Parameter.detection_limit` hält die Nachweisgrenze (leer bei pH, Temperatur,
+KH). `Measurement.value` darf `NULL` sein, dann steht `Measurement.below_detection`
+auf wahr — eine `CheckConstraint` und `Measurement.clean()` erzwingen genau
+eines von beidem, und n.n. nur bei Parametern mit Nachweisgrenze. Angezeigt
+wird „n.n.“ (nicht `0`, nicht leer), das Diagramm setzt dafür einen eigenen
+Marker unter die Grundlinie, `classify_below_detection` bewertet den
+Zielabgleich (bei reiner Obergrenze in Ordnung, unter einer Untergrenze zu
+niedrig), und die MCP-Schicht führt `below_detection` in Ein- und Ausgabe.
+Bestandsdaten wurden **nicht** umgedeutet: ein altes `0` bleibt `0`.
 
 ### 2. Zuchtformen sind nicht unterscheidbar — erledigt (#1244)
 
