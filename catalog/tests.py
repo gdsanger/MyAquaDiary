@@ -2,6 +2,7 @@ import tempfile
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
+from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -146,6 +147,96 @@ class AnimalCatalogTests(TestCase):
         self.assertEqual(list(response.context["own_tanks"]), [])
 
 
+class SpeciesVariantTests(TestCase):
+    """Stammform und Zuchtform sind zwei Steckbriefe, nicht einer.
+
+    *Mikrogeophagus ramirezi* ist das Musterbeispiel: die Wildform betreibt
+    Brutpflege und wird mehrere Jahre alt, 'Electric Blue' ist hochgezüchtet,
+    kurzlebig und infektanfällig. Ein gemeinsamer Eintrag müsste beides
+    behaupten.
+    """
+
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.wild = create_animal(
+            "Mikrogeophagus ramirezi",
+            slug="mikrogeophagus-ramirezi",
+            common_name="Schmetterlingsbuntbarsch",
+        )
+        self.blue = create_animal(
+            "Mikrogeophagus ramirezi",
+            slug="mikrogeophagus-ramirezi-electric-blue",
+            common_name="Schmetterlingsbuntbarsch",
+            variant="Electric Blue",
+            is_cultivated_form=True,
+        )
+
+    def test_one_scientific_name_carries_several_forms(self):
+        self.assertEqual(
+            AnimalSpecies.objects.filter(scientific_name="Mikrogeophagus ramirezi").count(), 2
+        )
+
+    def test_the_same_form_twice_is_refused_regardless_of_case(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            create_animal(
+                "mikrogeophagus ramirezi",
+                slug="noch-einer",
+                variant="electric blue",
+                is_cultivated_form=True,
+            )
+
+    def test_the_stem_form_is_the_entry_without_a_variant(self):
+        # Zweimal „ohne Sorte“ ist derselbe Eintrag — das bleibt ausgeschlossen.
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            create_animal("Mikrogeophagus ramirezi", slug="dublette")
+
+    def test_the_display_name_carries_the_variant(self):
+        self.assertEqual(str(self.wild), "Schmetterlingsbuntbarsch")
+        self.assertEqual(str(self.blue), "Schmetterlingsbuntbarsch 'Electric Blue'")
+
+    def test_a_species_without_a_common_name_falls_back_to_the_scientific_one(self):
+        species = create_plant(
+            "Alternanthera reineckii",
+            slug="alternanthera-reineckii-red-ruby",
+            common_name="",
+            variant="Red Ruby",
+        )
+        self.assertEqual(str(species), "Alternanthera reineckii 'Red Ruby'")
+
+    def test_search_finds_a_species_by_its_variant(self):
+        response = self.client.get(reverse("catalog:animal-list"), {"q": "Electric"})
+        self.assertEqual(
+            [species.pk for species in response.context["species_list"]], [self.blue.pk]
+        )
+
+    def test_only_stem_forms_can_be_asked_for(self):
+        response = self.client.get(reverse("catalog:animal-list"), {"nur_stammformen": "1"})
+        self.assertEqual(
+            [species.pk for species in response.context["species_list"]], [self.wild.pk]
+        )
+        self.assertTrue(response.context["filters"]["wild_only"])
+
+    def test_without_the_filter_both_forms_are_listed(self):
+        response = self.client.get(reverse("catalog:animal-list"))
+        self.assertEqual(response.context["result_count"], 2)
+        self.assertFalse(response.context["filters"]["wild_only"])
+
+    def test_the_list_marks_a_cultivated_form(self):
+        response = self.client.get(reverse("catalog:animal-grid"), {"q": "Electric"})
+        self.assertContains(response, "Zuchtform")
+        self.assertContains(response, "&#x27;Electric Blue&#x27;")
+
+    def test_the_list_does_not_mark_the_stem_form(self):
+        response = self.client.get(reverse("catalog:animal-grid"), {"nur_stammformen": "1"})
+        self.assertNotContains(response, "Zuchtform")
+
+    def test_the_detail_page_names_the_form(self):
+        response = self.client.get(self.blue.get_absolute_url())
+        self.assertContains(response, "Sorte 'Electric Blue'")
+        self.assertContains(response, "Zuchtform")
+
+
 def grant_catalog_edit(user):
     """Gibt dem Benutzer das Pflegerecht aus catalog.CatalogPermission."""
     user.user_permissions.add(Permission.objects.get(codename="can_edit_catalog"))
@@ -252,6 +343,46 @@ class SpeciesWriteTests(TestCase):
         species.refresh_from_db()
         self.assertEqual(species.common_name, "Neu")
         self.assertEqual(species.slug, "cryptocoryne-wendtii")
+
+    def test_the_address_of_a_cultivar_carries_the_variant(self):
+        self.client.post(
+            reverse("catalog:plant-create"),
+            self.plant_payload(scientific_name="Cryptocoryne wendtii"),
+        )
+        self.client.post(
+            reverse("catalog:plant-create"),
+            self.plant_payload(
+                scientific_name="Cryptocoryne wendtii",
+                variant="Flamingo",
+                is_cultivated_form="on",
+            ),
+        )
+        self.assertEqual(
+            sorted(PlantSpecies.objects.values_list("slug", flat=True)),
+            ["cryptocoryne-wendtii", "cryptocoryne-wendtii-flamingo"],
+        )
+
+    def test_the_same_species_and_variant_is_refused_by_the_form(self):
+        create_plant(
+            "Hygrophila polysperma",
+            slug="hygrophila-polysperma-sunset",
+            variant="Sunset",
+            is_cultivated_form=True,
+        )
+        response = self.client.post(
+            reverse("catalog:plant-create"),
+            self.plant_payload(scientific_name="hygrophila polysperma", variant="sunset"),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(PlantSpecies.objects.count(), 1)
+        self.assertContains(response, "bereits im Katalog")
+
+    def test_quotes_around_the_variant_are_not_stored(self):
+        self.client.post(
+            reverse("catalog:plant-create"),
+            self.plant_payload(variant="'Flamingo'"),
+        )
+        self.assertEqual(PlantSpecies.objects.get().variant, "Flamingo")
 
     def test_an_animal_species_is_created(self):
         self.client.post(

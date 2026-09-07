@@ -1,4 +1,11 @@
 {% comment %}Steckbriefzeilen, die Pflanzen und Tiere teilen.{% endcomment %}
+{% if species.variant or species.is_cultivated_form %}
+  <dt>Form</dt>
+  <dd>
+    {% if species.variant %}Sorte '{{ species.variant }}'{% else %}Stammform{% endif %}
+    {% if species.is_cultivated_form %}<span class="mad-status">Zuchtform</span>{% endif %}
+  </dd>
+{% endif %}
 <dt>Wassertyp</dt>
 <dd><span class="mad-watertype mad-watertype--{{ species.water_type }}">{{ species.get_water_type_display }}</span></dd>
 <dt>Anspruch</dt>

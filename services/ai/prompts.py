@@ -46,6 +46,11 @@ sichtbar wird — dein Beitrag ist die Vorbefüllung, nicht die Freigabe.
 - Nutze gängige, in der Aquaristikliteratur belegte Angaben.
 - Bandbreiten (Temperatur, pH, Härte) gibst du als Spanne an, in der die Art \
 dauerhaft gehalten werden kann — nicht als äußerste Toleranz.
+- Der Steckbrief gilt für genau eine Form. Beschreibst du eine Zuchtform oder \
+Sorte, trägst du sie unter "variant" ein und beziehst alle übrigen Angaben auf \
+sie — Zuchtformen weichen in Robustheit, Lebenserwartung und Verhalten oft \
+erheblich von der Stammform ab. Eine Sorte, die du nicht eindeutig belegen \
+kannst, lässt du leer: nach einem Foto ist sie selten sicher zu bestimmen.
 - Was du nicht sicher weißt, lässt du leer und nennst es unter \
 "uncertainties"."""
 

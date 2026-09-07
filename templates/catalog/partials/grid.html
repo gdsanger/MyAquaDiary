@@ -20,7 +20,7 @@ Container die Zielkennung.
             <h2 class="mad-card__title mb-1">
               <a href="{{ species.get_absolute_url }}">{{ species.display_name }}</a>
             </h2>
-            <p class="mad-list__meta mb-2"><i>{{ species.scientific_name }}</i></p>
+            <p class="mad-list__meta mb-2">{% include "catalog/partials/scientific_name.html" with species=species only %}</p>
             {% if species.summary %}
               <p class="mad-muted">{{ species.summary }}</p>
             {% endif %}
@@ -28,6 +28,8 @@ Container die Zielkennung.
               <span class="mad-watertype mad-watertype--{{ species.water_type }}">{{ species.get_water_type_display }}</span>
               {# Anspruch bewusst neutral: gruen/orange/rot bleiben dem Zielbereich vorbehalten. #}
               <span class="mad-status">Anspruch: {{ species.get_difficulty_display }}</span>
+              {# Nur die Kennzeichnung, keine Wertung — die gehoert in den Steckbrief. #}
+              {% if species.is_cultivated_form %}<span class="mad-status">Zuchtform</span>{% endif %}
             </div>
           </div>
         </article>

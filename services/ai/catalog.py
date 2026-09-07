@@ -22,8 +22,11 @@ logger = logging.getLogger(__name__)
 
 #: Vorschlagsart -> Katalogmodell.
 MODELS = {"animal": "CatalogAnimal", "plant": "CatalogPlant"}
-#: Feld, das die Sortenbezeichnung trägt — im Katalog je Modell anders benannt.
-VARIANT_FIELDS = {"animal": "variety", "plant": "cultivar"}
+#: Feld, das die Sortenbezeichnung trägt. In beiden Katalogmodellen dasselbe:
+#: ``variant`` (siehe ``catalog.Species``). Botanisch wären ``cultivar`` und
+#: ``variety`` getrennt sauberer — zwei Namen für dieselbe Sache brächten hier
+#: aber einen zweiten Codepfad je Art ein.
+VARIANT_FIELD = "variant"
 #: So viele Treffer zeigt die Bestimmungsseite je Kandidat.
 MATCH_LIMIT = 3
 
@@ -127,10 +130,11 @@ def publish(suggestion) -> str:
     if not payload.get("scientific_name"):
         return ""
 
-    variant_field = VARIANT_FIELDS[suggestion.kind]
+    # Gesucht wird wie die Datenbank prüft: Name und Sorte gemeinsam, beides
+    # ohne Rücksicht auf Groß- und Kleinschreibung.
     lookup = {
         "scientific_name__iexact": payload["scientific_name"],
-        variant_field: payload.get(variant_field, ""),
+        f"{VARIANT_FIELD}__iexact": payload.get(VARIANT_FIELD, ""),
     }
     try:
         existing = model.objects.filter(**lookup).first()

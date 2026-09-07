@@ -42,6 +42,9 @@ class SpeciesFilterMixin(LoginRequiredMixin):
             "water_type": params.get("wassertyp", ""),
             "difficulty": params.get("anspruch", ""),
             "extra": params.get("filter", ""),
+            # Nur die Stammformen — wer nach robustem Besatz sucht, will die
+            # Zuchtformen nicht dazwischen haben.
+            "wild_only": params.get("nur_stammformen", "") == "1",
         }
 
     def get_species(self, filters):
@@ -50,6 +53,8 @@ class SpeciesFilterMixin(LoginRequiredMixin):
             queryset = queryset.filter(water_type=filters["water_type"])
         if filters["difficulty"] in Difficulty.values:
             queryset = queryset.filter(difficulty=filters["difficulty"])
+        if filters["wild_only"]:
+            queryset = queryset.wild_forms()
         valid_extra = [value for value, _ in self.extra_filter_choices]
         if self.extra_filter_field and filters["extra"] in valid_extra:
             queryset = queryset.filter(**{self.extra_filter_field: filters["extra"]})

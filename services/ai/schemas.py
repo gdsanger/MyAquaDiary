@@ -79,6 +79,10 @@ ANIMAL_PROFILE_SCHEMA = _object(
     {
         "scientific_name": _string("Wissenschaftlicher Name."),
         "common_name": _string("Deutscher Name, sonst leer."),
+        "variant": _string(
+            "Zuchtform oder Sorte, z. B. Electric Blue. Nur wenn die Form eindeutig "
+            "belegt ist; im Zweifel leer und unter uncertainties nennen."
+        ),
         "group": _string("Tiergruppe.", ANIMAL_GROUPS),
         "family": _string("Familie, sonst leer."),
         "origin": _string("Herkunftsgebiet, sonst leer."),
@@ -110,6 +114,10 @@ PLANT_PROFILE_SCHEMA = _object(
     {
         "scientific_name": _string("Wissenschaftlicher Name."),
         "common_name": _string("Deutscher Name, sonst leer."),
+        "variant": _string(
+            "Sorte, z. B. Flamingo oder Red Ruby. Nur wenn die Sorte eindeutig belegt "
+            "ist; im Zweifel leer und unter uncertainties nennen."
+        ),
         "family": _string("Familie, sonst leer."),
         "origin": _string("Herkunftsgebiet, sonst leer."),
         "growth_form": _string("Wuchsform.", GROWTH_FORMS),

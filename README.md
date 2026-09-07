@@ -261,6 +261,36 @@ Pflege-Schaltflächen nicht, und die zugehörigen Adressen antworten mit 403.
 Vergeben wird es im Admin unter *Benutzer → Berechtigungen*
 („Darf den Katalog pflegen“) oder über eine Gruppe.
 
+### Sorten und Zuchtformen
+
+Ein wissenschaftlicher Name trägt nicht einen Steckbrief, sondern so viele, wie
+es Formen gibt. *Mikrogeophagus ramirezi* zeigt, warum: die Wildform betreibt
+vollständige Brutpflege und hält bei passenden Werten mehrere Jahre, die
+Zuchtform 'Electric Blue' ist kurzlebig, infektanfällig und hat die Brutpflege
+vielfach verloren. Ein gemeinsamer Eintrag müsste beides behaupten — wer danach
+ein Zuchtpaar aussucht, entscheidet auf falscher Grundlage. Bei Pflanzen gilt
+dasselbe in schwächerer Form (*Cryptocoryne wendtii* gegen 'Flamingo').
+
+Zwei Felder an `PlantSpecies` und `AnimalSpecies`, in beiden Modellen gleich
+benannt:
+
+| Feld | Bedeutung |
+|---|---|
+| `variant` | Sortenbezeichnung — 'Flamingo', 'Red Ruby', 'Electric Blue'. Leer bei der Stammform |
+| `is_cultivated_form` | Durch Selektion entstanden, in der Natur nicht vorkommend |
+
+Eindeutig ist nicht der Name allein, sondern `scientific_name` + `variant`,
+case-insensitiv über eine `UniqueConstraint` (`…_unique_variant`). Damit stehen
+Stammform und 'Electric Blue' nebeneinander, ein zweites 'Electric Blue' bleibt
+ausgeschlossen. Der Slug nimmt die Sorte auf, sonst kollidierten die Adressen.
+
+In der Oberfläche steht die Sorte im Anzeigenamen
+(*Schmetterlingsbuntbarsch* 'Electric Blue'), Zuchtformen tragen in Raster und
+Steckbrief die Kennzeichnung „Zuchtform“. Die Suche greift auch auf die
+Sortenbezeichnung, und der Filter *nur Stammformen* blendet die Zuchtformen
+aus. Bewertet wird in der Oberfläche nichts: was eine Zuchtform in der Haltung
+bedeutet, gehört in `description` und `summary`, wo es begründet werden kann.
+
 ## Mailversand (Microsoft Graph)
 
 Ausgehende Mail läuft über die Microsoft Graph API, authentifiziert per
@@ -596,6 +626,13 @@ Der Katalog wird über `apps.get_model` aufgelöst statt importiert (siehe
 `services/ai/catalog.py`): solange `catalog.CatalogAnimal` und
 `catalog.CatalogPlant` im Epic fehlen, bleibt der Abgleich leer und eine
 Bestätigung merkt sich den Entwurf, statt zu scheitern.
+
+Ein Steckbrief-Entwurf gilt für genau eine Form: das Feld `variant` trägt die
+Sorte, und die Übernahme sucht über wissenschaftlichen Namen **und** Sorte, wie
+der Katalog es prüft ([Sorten und Zuchtformen](#sorten-und-zuchtformen)). Der
+System-Prompt verlangt dabei Zurückhaltung — 'Red Ruby' von einer anderen roten
+*Alternanthera* zu unterscheiden ist auf einem Foto oft nicht möglich, und eine
+geratene Sorte ist schlechter als ein leeres Feld.
 
 Bei Messwerten ist Zurückhaltung eingebaut: der System-Prompt verbietet die
 Diagnose ausdrücklich, es wird eingeordnet und auf Auffälligkeiten hingewiesen.

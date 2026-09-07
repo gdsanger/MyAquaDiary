@@ -6,7 +6,7 @@
 <div class="mad-page-header">
   <div>
     <h1 class="mad-page-title">{{ species.display_name }}</h1>
-    <p class="mad-page-subtitle"><i>{{ species.scientific_name }}</i></p>
+    <p class="mad-page-subtitle">{% include "catalog/partials/scientific_name.html" with species=species only %}</p>
   </div>
   <div class="mad-actions">
     <a href="{% url 'catalog:plant-list' %}" class="btn btn-outline-secondary btn-sm">Zurück zum Katalog</a>

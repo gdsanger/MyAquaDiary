@@ -6,7 +6,7 @@
 <div class="mad-page-header">
   <div>
     <h1 class="mad-page-title">{{ title }}</h1>
-    {% if species %}<p class="mad-page-subtitle"><i>{{ species.scientific_name }}</i></p>{% endif %}
+    {% if species %}<p class="mad-page-subtitle">{% include "catalog/partials/scientific_name.html" with species=species only %}</p>{% endif %}
   </div>
   <a class="btn btn-outline-secondary btn-sm"
      href="{% if species %}{{ species.get_absolute_url }}{% else %}{{ list_url }}{% endif %}">Abbrechen</a>
