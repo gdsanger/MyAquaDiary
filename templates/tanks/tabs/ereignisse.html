@@ -1,9 +1,14 @@
 <section class="mad-card">
   <div class="mad-card__header">
     <h2 class="mad-card__title">Ereignisse</h2>
-    <a class="btn btn-primary btn-sm" href="{% url 'tanks:event-create' tank.slug %}"
-       hx-get="{% url 'tanks:event-create' tank.slug %}"
-       hx-target="#tab-area" hx-swap="outerHTML">Ereignis erfassen</a>
+    <div class="mad-actions">
+      <a class="btn btn-primary btn-sm" href="{% url 'tanks:observation-create' tank.slug %}"
+         hx-get="{% url 'tanks:observation-create' tank.slug %}"
+         hx-target="#tab-area" hx-swap="outerHTML">Beobachtung erfassen</a>
+      <a class="btn btn-outline-secondary btn-sm" href="{% url 'tanks:event-create' tank.slug %}"
+         hx-get="{% url 'tanks:event-create' tank.slug %}"
+         hx-target="#tab-area" hx-swap="outerHTML">Ereignis erfassen</a>
+    </div>
   </div>
   <ul class="mad-list">
     {% for event in events %}
@@ -14,6 +19,22 @@
             <p class="mad-list__meta">{{ event.occurred_at|date:"d.m.Y H:i" }}</p>
             {% if event.description %}
               <p class="mad-list__meta">{{ event.description|linebreaksbr }}</p>
+            {% endif %}
+            {% if event.photos.all %}
+              {% comment %}
+              Die Vorschau führt auf das Bild selbst — der Reiter „Galerie“
+              zeigt dasselbe Foto samt Zuordnung.
+              {% endcomment %}
+              <ul class="mad-thumbs">
+                {% for photo in event.photos.all %}
+                  <li>
+                    <a href="{{ photo.image.url }}">
+                      <img src="{{ photo.image.url }}" loading="lazy"
+                           alt="{{ photo.caption|default:event.title }}">
+                    </a>
+                  </li>
+                {% endfor %}
+              </ul>
             {% endif %}
           </div>
           <span class="mad-status mad-status--info">{{ event.get_category_display }}</span>

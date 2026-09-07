@@ -26,6 +26,11 @@ from .models import (
 )
 
 
+#: So viele Vorschaubilder trägt ein Eintrag der Aktivitätsleiste höchstens.
+#: Mehr passt in der Dashboard-Kachel nicht neben den Text.
+ACTIVITY_PREVIEW_PHOTOS = 4
+
+
 def target_map(tanks):
     """``{(tank_id, parameter_id): TankParameterTarget}`` für eine Beckenmenge."""
     targets = TankParameterTarget.objects.filter(tank__in=tanks).select_related("parameter")
@@ -177,7 +182,13 @@ def warnings(user, limit=None):
 
 
 def recent_activity(user, limit=12, days=90):
-    """Messungen, Ereignisse und Fotos aller Becken in einer Zeitleiste."""
+    """Messungen, Ereignisse und Fotos aller Becken in einer Zeitleiste.
+
+    Ein Ereignis mit Fotos ist **ein** Eintrag: die Bilder hängen daran und
+    erscheinen als Vorschau, nicht als eigene Zeilen. Sonst schöbe eine
+    Beobachtung mit fünf Bildern alles andere aus der Kachel. Einzeln stehen
+    hier nur Fotos ohne Ereignis — die aus der Galerie.
+    """
     since = timezone.now() - timedelta(days=days)
     tanks = list(Tank.objects.for_user(user))
     if not tanks:
@@ -198,15 +209,19 @@ def recent_activity(user, limit=12, days=90):
                 "timestamp": measurement.measured_at,
                 "title": f"{measurement.parameter.name}: {measurement.display_value}",
                 "tank": measurement.tank,
+                "photos": [],
+                "photo_count": 0,
             }
         )
 
     events = (
         Event.objects.filter(tank__in=tanks, occurred_at__gte=since)
         .select_related("tank")
+        .prefetch_related("photos")
         .order_by("-occurred_at")[:limit]
     )
     for event in events:
+        photos = list(event.photos.all())
         entries.append(
             {
                 "kind": "event",
@@ -214,11 +229,13 @@ def recent_activity(user, limit=12, days=90):
                 "timestamp": event.occurred_at,
                 "title": event.title,
                 "tank": event.tank,
+                "photos": photos[:ACTIVITY_PREVIEW_PHOTOS],
+                "photo_count": len(photos),
             }
         )
 
     photos = (
-        TankPhoto.objects.filter(tank__in=tanks, created_at__gte=since)
+        TankPhoto.objects.filter(tank__in=tanks, created_at__gte=since, event__isnull=True)
         .select_related("tank")
         .order_by("-created_at")[:limit]
     )
@@ -230,6 +247,8 @@ def recent_activity(user, limit=12, days=90):
                 "timestamp": photo.created_at,
                 "title": photo.caption or "Neues Foto",
                 "tank": photo.tank,
+                "photos": [photo],
+                "photo_count": 1,
             }
         )
 
