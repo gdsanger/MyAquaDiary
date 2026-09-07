@@ -29,7 +29,7 @@ docker compose exec web python manage.py createsuperuser
 | `config` | Settings (`base`/`development`/`production`), URL-Routing |
 | `core` | Custom User-Model, Mixins, Utils |
 | `catalog` | Pflanzen- und Tier-Katalog (userübergreifend) |
-| `tanks` | Becken, Messreihen, Ereignisse, Termine, Besatz, Bepflanzung, Fotos |
+| `tanks` | Becken, Messreihen, Ereignisse, Termine, Besatz, Bepflanzung, Einrichtung, Fotos |
 | `dashboard` | KPIs, fällige Termine |
 | `services` | Geräte am Becken samt Anbindung (Eheim, Shelly), Graph-API, KI, MCP; Verbrauchsauswertung |
 
@@ -58,6 +58,7 @@ Wo Historie dranhängt, wird nicht gelöscht:
 |---|---|
 | Becken mit erfassten Daten | Auflösen (`dissolved_on`), Historie bleibt lesbar |
 | Besatz | Abgang buchen (`removed_on`) |
+| Hardscape | Als entfernt markieren (`removed_on`) — erklärt Verläufe von früher |
 | Termin | Deaktivieren — die Quittierungen bleiben |
 
 Löschen bleibt der Fehleingabe vorbehalten und verlangt immer einen
@@ -93,6 +94,61 @@ stehen nur Ereignisse desselben Beckens.
 In der Zeitleiste bleibt ein Ereignis mit Fotos **ein** Eintrag mit
 Bildvorschau. Sonst schöbe eine Beobachtung mit fünf Bildern alles andere aus
 der Dashboard-Kachel. Einzeln stehen dort nur Fotos ohne Ereignis.
+
+### Einrichtung: Bodengrund und Hardscape
+
+Was im Becken liegt, steht im Reiter *Einrichtung* — nicht im Notizfeld und
+nicht bei den Geräten. Ein Filter hat Betriebszustand, Verbrauch und
+Wartungsintervall; eine Bodengrundschicht hat eine Mächtigkeit und ein
+Verfallsdatum. Das sind verschiedene Dinge, und deshalb sind es zwei Modelle in
+`tanks/models.py`:
+
+| Modell | Was es festhält |
+|---|---|
+| `SubstrateLayer` | Eine Schicht: Art, Produkt, Körnung, Mächtigkeit, `position` (0 = unten), Standzeit |
+| `HardscapeItem` | Wurzel, Stein, Botanik, Rückwand, Höhle — mit `affects_water` und `water_effect` |
+
+Zwei Eigenschaften machen die strukturierte Erfassung erst lohnend:
+
+**Bodengrund ist geschichtet.** „2 cm Nährstoffdepot, darüber 4 cm Sand" ist
+eine Reihenfolge mit Mächtigkeiten und kein Satz. Nur so ergibt sich die
+Gesamthöhe (`Tank.substrate_depth_cm`), und nur so lässt sich die **Standzeit
+eines Depots** von drei bis sechs Monaten überhaupt führen: läuft sie ab,
+kippt ein Becken gern über N- oder K-Mangel in die Algen.
+
+**Hardscape verändert die Wasserwerte.** Moorkienwurzel und Erlenzapfen geben
+Huminstoffe ab und drücken den pH, kalkhaltiges Gestein hebt KH und Leitwert.
+`affects_water` ist deshalb ein eigenes Merkmal und **keine Ableitung aus
+`kind`**: ob ein Stein auslaugt, hängt vom Gestein ab und nicht von der
+Kategorie.
+
+Der Stapel wird von oben nach unten gezeigt — so, wie man in ein Becken
+hineinschaut; gespeichert ist er aufsteigend mit 0 als unterster Schicht.
+Umsortiert wird mit den Pfeilen (`SubstrateLayer.move()`, nummeriert den Stapel
+dabei lückenlos durch), und weil eine Reihenfolge Daten sind, ist das ein POST —
+ohne Rückfrage allerdings, denn der Gegenpfeil nimmt den Schritt zurück.
+
+#### Termine werden angeboten, nicht angelegt
+
+Aus einem Nährstoffdepot (vier Monate) und aus Botanik (sechs Wochen) lässt
+sich ein Termin ableiten. Angelegt wird er trotzdem nicht von selbst: nach dem
+Erfassen erscheint ein **vorbelegtes Terminformular**, das der Benutzer
+bestätigt, ändert oder wegklickt. Nachträglich führt die Zeilenaktion
+*Erinnerung* zum selben Formular.
+
+Ein selbsttätig erscheinender Termin, den niemand wollte, untergräbt das
+Vertrauen in die Terminliste — und damit den Nutzen aller anderen Termine
+darin. Die Vorgaben stehen als `NUTRIENT_DEPOT_DAYS` und `BOTANICALS_DAYS` in
+`tanks/models.py` und sind im Formular überschreibbar; die Spanne hängt an
+Produkt und Zehrung und ist keine Konstante der Natur.
+
+Auf der Beckenübersicht steht die Einrichtung als eine Zeile
+(`Tank.setup_summary`): „6 cm Bodengrund · 3 Wurzeln · 5 Steine".
+
+Über MCP kommt beides mit `get_tank`, und in die KI-Auswertung fließt es über
+`tanks.selectors.tank_facts()` in den Prompt (`TankFacts.substrate`,
+`TankFacts.hardscape`). Ohne diese Angaben fehlt dem Modell die naheliegendste
+Erklärung für eine Wertveränderung.
 
 ### Bildvarianten
 
@@ -682,7 +738,7 @@ Clients schicken keinen, und gegen die richtet sich die Prüfung nicht.
 | Lesend | Zweck |
 |---|---|
 | `list_tanks` | Becken des Nutzers mit Stammdaten |
-| `get_tank` | Detail inkl. Technik, Zielbereichen, Besatz, Bepflanzung |
+| `get_tank` | Detail inkl. Zielbereichen, Besatz, Bepflanzung, Einrichtung (Bodengrund, Hardscape) |
 | `list_measurements` | Messreihen, Zeitraum- und Parameterfilter |
 | `get_measurement` | Einzelne Messreihe inkl. berechnetem CO2 und Zielabgleich |
 | `list_events` | Ereignisse, Kategorie- und Zeitraumfilter |
