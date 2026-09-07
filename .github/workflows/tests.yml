@@ -1,0 +1,61 @@
+# Django-Testlauf für jeden Push und jeden Pull Request.
+#
+# Der Lauf braucht eine echte PostgreSQL-Datenbank: die Anwendung ist auf
+# Postgres festgelegt (config/settings/base.py), und die Tests der MCP-Schicht
+# laufen bewusst gegen die echten Modelle mit echten Abfragen — gegen SQLite
+# oder gegen Attrappen geprüft, wäre genau der Fehler nicht aufgefallen, der
+# #1236 ausgelöst hat.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  django:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: myaquadiary
+          POSTGRES_USER: myaquadiary
+          POSTGRES_PASSWORD: myaquadiary
+        ports:
+          - 5432:5432
+        # Ohne Healthcheck startet der Testlauf, bevor die Datenbank
+        # Verbindungen annimmt, und scheitert sporadisch beim Anlegen.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.development
+      DJANGO_SECRET_KEY: nur-fuer-den-testlauf
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+      POSTGRES_DB: myaquadiary
+      POSTGRES_USER: myaquadiary
+      POSTGRES_PASSWORD: myaquadiary
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: 5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements/*.txt
+
+      - name: Abhängigkeiten installieren
+        run: pip install -r requirements/development.txt
+
+      - name: Tests
+        # --noinput, weil eine abgebrochene Testdatenbank sonst eine Rückfrage
+        # auslöst, die im nicht-interaktiven Lauf als EOFError endet.
+        run: python manage.py test --noinput

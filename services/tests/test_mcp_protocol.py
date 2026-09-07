@@ -10,8 +10,8 @@ from services.mcp.exceptions import RateLimited, ToolError
 from services.mcp.runner import Context
 from services.models import MCPToken
 
-from .mcp_stubs import DataModelTestCase, StubTank
 from .test_mcp_tokens import make_user
+from .test_mcp_tools import ToolTestCase
 
 
 def request(method, message_id=1, **params):
@@ -66,13 +66,10 @@ class RegistryTests(TestCase):
         self.assertIn("drop_database", str(caught.exception))
 
 
-class ProtocolTests(DataModelTestCase):
+class ProtocolTests(ToolTestCase):
     def setUp(self):
         cache.clear()
-        self.user = make_user()
-        self.token, _ = MCPToken.issue(self.user, "Claude Desktop", allow_write=True)
-        self.context = Context(token=self.token, user=self.user)
-        self.tank = StubTank.objects.create(owner=self.user, name="Südamerika-Becken")
+        super().setUp()
 
     def handle(self, payload):
         return protocol.handle_message(self.context, payload)

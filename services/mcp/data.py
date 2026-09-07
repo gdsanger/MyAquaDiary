@@ -10,12 +10,15 @@ gesucht, nicht über eine freie ``pk``-Abfrage. Ein Werkzeug, das eine
 gehören; eine fremde Kennung sieht für den Client aus wie eine unbekannte. Wäre
 das anders, wäre jeder Token ein Generalschlüssel über alle Benutzer.
 
-**Auflösung der Modelle.** Becken und Katalog liegen in einem anderen Schritt
-des Epics. Damit der MCP-Server schon vorher vollständig ist, werden sie über
+**Auflösung der Modelle.** Die Modelle werden über
 :func:`django.apps.apps.get_model` aufgelöst statt importiert — genau wie in
-:mod:`services.ai.catalog`. Fehlen sie noch, meldet jedes Werkzeug sauber
-„Datenmodell nicht verfügbar“ statt beim Import zu scheitern; sobald sie da
-sind, greift derselbe Code ohne weitere Änderung.
+:mod:`services.ai.catalog`. Fehlt eines in einer Installation, meldet das
+Werkzeug sauber „Datenmodell nicht verfügbar“ statt beim Import zu scheitern.
+
+Diese Tabelle ist die einzige Stelle, an der die MCP-Schicht Modellnamen kennt.
+Sie muss zu ``tanks/models.py`` und ``catalog/models.py`` passen und zu nichts
+sonst — insbesondere nicht zu den Feldnamen aus dem Entwurf der Agira-Items,
+gegen die diese Schicht ursprünglich geschrieben war (#1236).
 """
 
 from django.apps import apps
@@ -27,15 +30,14 @@ from .exceptions import DataModelUnavailable, NotFound
 MODELS = {
     "tank": ("tanks", "Tank"),
     "parameter": ("tanks", "Parameter"),
+    "parameter_target": ("tanks", "TankParameterTarget"),
     "measurement": ("tanks", "Measurement"),
-    "measurement_value": ("tanks", "MeasurementValue"),
     "event": ("tanks", "Event"),
-    "schedule": ("tanks", "MaintenanceSchedule"),
-    "tank_animal": ("tanks", "TankAnimal"),
-    "tank_animal_movement": ("tanks", "TankAnimalMovement"),
-    "tank_plant": ("tanks", "TankPlant"),
-    "catalog_animal": ("catalog", "CatalogAnimal"),
-    "catalog_plant": ("catalog", "CatalogPlant"),
+    "task": ("tanks", "CareTask"),
+    "stocking": ("tanks", "Stocking"),
+    "planting": ("tanks", "Planting"),
+    "catalog_animal": ("catalog", "AnimalSpecies"),
+    "catalog_plant": ("catalog", "PlantSpecies"),
 }
 
 #: Art eines Katalogeintrags -> Kurzname des Modells.
@@ -88,9 +90,17 @@ def tanks(user):
     return model("tank").objects.for_user(user)
 
 
-def tank(user, tank_id: int):
-    """Ein eigenes Becken oder :class:`NotFound`."""
-    found = tanks(user).filter(pk=tank_id).first()
+def tank(user, tank_id: int, *, prefetch=()):
+    """Ein eigenes Becken oder :class:`NotFound`.
+
+    ``prefetch`` reicht Pfade an ``prefetch_related`` durch — für die
+    Detailansicht, die Zielbereiche, Besatz und Bepflanzung ohnehin alle
+    braucht.
+    """
+    queryset = tanks(user)
+    if prefetch:
+        queryset = queryset.prefetch_related(*prefetch)
+    found = queryset.filter(pk=tank_id).first()
     if found is None:
         raise NotFound(NOT_FOUND)
     return found
@@ -102,7 +112,8 @@ def _owned(alias: str, user):
 
 
 def measurements(user):
-    return _owned("measurement", user).select_related("tank")
+    """Messwerte — je Zeile ein Wert einer Messgröße, nicht eine Messreihe."""
+    return _owned("measurement", user).select_related("tank", "parameter")
 
 
 def measurement(user, measurement_id: int):
@@ -116,30 +127,45 @@ def events(user):
     return _owned("event", user).select_related("tank")
 
 
-def schedules(user):
-    return _owned("schedule", user).select_related("tank")
+def tasks(user):
+    return _owned("task", user).select_related("tank")
 
 
-def schedule(user, schedule_id: int):
-    found = schedules(user).filter(pk=schedule_id).first()
+def task(user, task_id: int):
+    found = tasks(user).filter(pk=task_id).first()
     if found is None:
         raise NotFound(NOT_FOUND)
     return found
 
 
-def tank_animals(user):
-    return _owned("tank_animal", user).select_related("tank", "animal")
+def stockings(user):
+    return _owned("stocking", user).select_related("tank", "species")
 
 
-def tank_animal(user, tank_animal_id: int):
-    found = tank_animals(user).filter(pk=tank_animal_id).first()
+def stocking(user, stocking_id: int):
+    found = stockings(user).filter(pk=stocking_id).first()
     if found is None:
         raise NotFound(NOT_FOUND)
     return found
 
 
-def tank_plants(user):
-    return _owned("tank_plant", user).select_related("tank", "plant")
+def plantings(user):
+    return _owned("planting", user).select_related("tank", "species")
+
+
+def parameter_targets(user, tank_ids):
+    """Zielbereiche mehrerer Becken auf einmal — ``{tank_id: {parameter_id: Ziel}}``.
+
+    Ohne diese Vorabladung fragt jeder Messwert seinen Zielbereich einzeln ab;
+    bei 200 Treffern sind das 200 Abfragen.
+    """
+    found: dict[int, dict[int, object]] = {}
+    if not tank_ids:
+        return found
+    rows = model("parameter_target").objects.filter(tank_id__in=set(tank_ids))
+    for row in rows:
+        found.setdefault(row.tank_id, {})[row.parameter_id] = row
+    return found
 
 
 # --------------------------------------------------------------------------

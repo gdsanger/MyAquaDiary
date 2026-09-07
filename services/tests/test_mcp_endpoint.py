@@ -23,7 +23,7 @@ from services.mcp.runner import Context
 from services.mcp.views import stream
 from services.models import MCPToken
 
-from .mcp_stubs import DataModelTestCase, StubTank
+from .test_mcp_tools import make_tank
 from .test_mcp_tokens import make_user
 
 #: Der MCP-Endpunkt hat einen eigenen URL-Baum — genau wie im Betrieb.
@@ -218,14 +218,14 @@ class SessionRegistryTests(TestCase):
 
 
 @MCP_URLS
-class MessageTests(DataModelTestCase):
+class MessageTests(TestCase):
     def setUp(self):
         sessions._sessions.clear()
         self.user = make_user()
         self.token, self.key = MCPToken.issue(self.user, "Claude Desktop", allow_write=True)
         self.session = sessions.open_session(self.token)
         self.url = f"{reverse('mcp:messages')}?session={self.session.id}"
-        StubTank.objects.create(owner=self.user, name="Südamerika-Becken")
+        make_tank(self.user)
 
     def post(self, payload, url=None, **extra):
         return self.client.post(
@@ -303,14 +303,14 @@ class MessageTests(DataModelTestCase):
 
 
 @MCP_URLS
-class StreamableHttpTests(DataModelTestCase):
+class StreamableHttpTests(TestCase):
     """``POST /mcp/`` — eine Nachricht rein, die Antwort direkt zurück."""
 
     def setUp(self):
         self.user = make_user()
         self.token, self.key = MCPToken.issue(self.user, "Claude Desktop", allow_write=True)
         self.url = reverse("mcp:endpoint")
-        StubTank.objects.create(owner=self.user, name="Südamerika-Becken")
+        make_tank(self.user)
 
     def post(self, payload, url=None, **extra):
         return self.client.post(
