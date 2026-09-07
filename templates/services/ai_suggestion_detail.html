@@ -35,7 +35,7 @@
   <div class="alert alert-info" role="alert">
     Im Katalog gibt es bereits:
     {% for match in matches %}
-      <strong>{{ match.label }}</strong> ({{ match.status_label }}){% if not forloop.last %}, {% endif %}
+      <a href="{{ match.url }}"><strong>{{ match.label }}</strong></a> ({{ match.status_label }}){% if not forloop.last %}, {% endif %}
     {% endfor %}
   </div>
 {% endif %}
@@ -93,7 +93,7 @@
         {% if suggestion.catalog_ref %}
           Im Katalog abgelegt ({{ suggestion.catalog_ref }}).
         {% else %}
-          Der Katalog ist noch nicht angebunden — der Entwurf wandert dorthin, sobald es ihn gibt.
+          Nicht in den Katalog übernommen — der Steckbrief ist dort von Hand anzulegen.
         {% endif %}
       </p>
     </div>

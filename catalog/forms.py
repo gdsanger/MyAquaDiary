@@ -6,11 +6,10 @@ Temperaturbereich in einem Steckbrief steht sonst allen im Weg.
 """
 
 from django import forms
-from django.utils.text import slugify
 
 from core.forms import BootstrapMixin, MultipleImageField
 
-from .models import AnimalSpecies, PlantSpecies
+from .models import AnimalSpecies, PlantSpecies, normalize_variant, unique_slug
 
 #: Steckbrieffelder, die sich Pflanzen und Tiere teilen.
 SHARED_FIELDS = [
@@ -51,13 +50,7 @@ class SpeciesForm(BootstrapMixin, forms.ModelForm):
         widgets = {"description": forms.Textarea(attrs={"rows": 4})}
 
     def clean_variant(self):
-        """Die Anführungszeichen setzt die Anzeige, nicht der Erfasser.
-
-        Sonst stünde 'Flamingo' einmal mit und einmal ohne Hochkomma in der
-        Datenbank — und die Eindeutigkeit über Name und Sorte hinge daran,
-        wie jemand getippt hat.
-        """
-        return self.cleaned_data.get("variant", "").strip().strip("'\"‚‘’„“").strip()
+        return normalize_variant(self.cleaned_data.get("variant", ""))
 
     def clean(self):
         cleaned = super().clean()
@@ -76,18 +69,15 @@ class SpeciesForm(BootstrapMixin, forms.ModelForm):
         return species
 
     def _unique_slug(self, species):
-        base = slugify(f"{species.scientific_name} {species.variant}".strip())[:150] or "art"
-        model = type(species)
-        taken = set(
-            model.objects.exclude(pk=species.pk).values_list("slug", flat=True)
-        )
-        if base not in taken:
-            return base
-        for suffix in range(2, 1000):
-            candidate = f"{base}-{suffix}"
-            if candidate not in taken:
-                return candidate
-        raise forms.ValidationError("Für diesen Namen ist keine freie Adresse mehr zu finden.")
+        try:
+            return unique_slug(
+                type(species),
+                species.scientific_name,
+                species.variant,
+                exclude_pk=species.pk,
+            )
+        except ValueError as exc:
+            raise forms.ValidationError(str(exc)) from exc
 
 
 class PlantSpeciesForm(SpeciesForm):

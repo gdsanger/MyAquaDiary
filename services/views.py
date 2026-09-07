@@ -56,13 +56,14 @@ CHART_READINGS = 200
 #: So viele Protokollzeilen zeigt die Detailseite.
 EVENT_ROWS = 20
 
-#: Beschriftungen der Steckbrief-Felder. Die Schlüssel sind die Feldnamen des
-#: Katalogs (siehe services.ai.schemas), damit ein bestätigter Entwurf ohne
-#: Übersetzung dorthin wandert.
+#: Beschriftungen der Steckbrief-Felder. Die Schlüssel sind die Feldnamen aus
+#: services.ai.schemas — sie stehen so im Entwurf und werden erst beim
+#: Übernehmen in den Katalog übersetzt.
 _SHARED_LABELS = {
     "scientific_name": "Wissenschaftlicher Name",
     "common_name": "Deutscher Name",
     "variant": "Sorte / Zuchtform",
+    "is_cultivated_form": "Zuchtform",
     "family": "Familie",
     "origin": "Herkunft",
     "difficulty": "Anspruch",
@@ -972,10 +973,11 @@ def ai_suggestion_decide(request, pk, decision):
     if suggestion.catalog_ref:
         messages.success(request, f"{suggestion.label} ist im Katalog.")
     else:
-        messages.success(
+        # Der Entwurf bleibt stehen; wer den Grund sucht, findet ihn im Log.
+        messages.warning(
             request,
-            f"{suggestion.label} bestätigt. Der Katalog ist noch nicht angebunden — "
-            "der Entwurf steht bereit und wandert dorthin, sobald es ihn gibt.",
+            f"{suggestion.label} bestätigt, ließ sich aber nicht in den Katalog "
+            "übernehmen. Bitte den Steckbrief dort von Hand anlegen.",
         )
     return redirect("services:ai_suggestion_detail", pk=suggestion.pk)
 
@@ -988,10 +990,17 @@ def _profile_rows(suggestion: AISuggestion):
     """
     labels = PROFILE_LABELS.get(suggestion.kind, {})
     return [
-        (labels.get(key, key), value)
+        (labels.get(key, key), _profile_value(value))
         for key, value in (suggestion.payload or {}).items()
         if value not in (None, "", [])
     ]
+
+
+def _profile_value(value):
+    """Ja/Nein statt True/False — die Zeile liest ein Mensch."""
+    if isinstance(value, bool):
+        return "Ja" if value else "Nein"
+    return value
 
 
 # --------------------------------------------------------------------------

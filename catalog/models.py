@@ -3,9 +3,43 @@
 from django.db import models
 from django.db.models.functions import Lower
 from django.urls import reverse
+from django.utils.text import slugify
 
 from core.enums import Difficulty, WaterType
 from core.images import ImageVariantsMixin
+
+
+def normalize_variant(value):
+    """Eine Sortenbezeichnung ohne die Anführungszeichen der Anzeige.
+
+    Die setzt :attr:`Species.display_name`, nicht der Erfasser — und auch nicht
+    die KI. Sonst stünde 'Flamingo' einmal mit und einmal ohne Hochkomma in der
+    Datenbank, und die Eindeutigkeit über Name und Sorte hinge daran, wie
+    jemand getippt hat.
+    """
+    return (value or "").strip().strip("'\"‚‘’„“").strip()
+
+
+def unique_slug(model, scientific_name, variant="", *, exclude_pk=None):
+    """Eine freie Adresse für einen Steckbrief — aus Name und Sorte.
+
+    Der Slug ist die Adresse des Steckbriefs und keine Angabe, über die jemand
+    nachdenken soll. Ohne die Sorte kollidierten Stamm- und Zuchtform derselben
+    Art. Hier und nicht im Formular, weil auch die Übernahme eines
+    KI-Entwurfs (:mod:`services.ai.catalog`) einen Slug braucht — zwei
+    Ableitungen ergäben zwei Adressschemata für dieselbe Art.
+
+    :raises ValueError: wenn zu diesem Namen keine freie Adresse mehr übrig ist.
+    """
+    base = slugify(f"{scientific_name} {variant}".strip())[:150] or "art"
+    taken = set(model.objects.exclude(pk=exclude_pk).values_list("slug", flat=True))
+    if base not in taken:
+        return base
+    for suffix in range(2, 1000):
+        candidate = f"{base}-{suffix}"
+        if candidate not in taken:
+            return candidate
+    raise ValueError("Für diesen Namen ist keine freie Adresse mehr zu finden.")
 
 
 def plant_image_path(instance, filename):

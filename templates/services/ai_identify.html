@@ -63,7 +63,7 @@
               <p class="small mb-2">
                 Im Katalog:
                 {% for match in candidate.matches %}
-                  <span class="badge text-bg-light">{{ match.label }} · {{ match.status_label }}</span>
+                  <a class="badge text-bg-light text-decoration-none" href="{{ match.url }}">{{ match.label }} · {{ match.status_label }}</a>
                 {% endfor %}
               </p>
             {% else %}
