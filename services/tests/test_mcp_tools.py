@@ -656,6 +656,30 @@ class CreateMeasurementTests(ToolTestCase):
 
         self.assertFalse(Measurement.objects.exists())
 
+    def test_below_detection_is_stored_as_such_and_not_as_zero(self):
+        result = self.call(
+            "create_measurement",
+            tank_id=self.tank.pk,
+            values=[{"parameter": "no2", "below_detection": True}],
+        )
+
+        row = Measurement.objects.get(tank=self.tank)
+        self.assertIsNone(row.value)
+        self.assertTrue(row.below_detection)
+        self.assertEqual(result["measurements"][0]["display_value"], "n.n.")
+        self.assertIsNone(result["measurements"][0]["value"])
+        self.assertTrue(result["measurements"][0]["below_detection"])
+
+    def test_below_detection_needs_a_parameter_with_a_detection_limit(self):
+        with self.assertRaises(ToolError):
+            self.call(
+                "create_measurement",
+                tank_id=self.tank.pk,
+                values=[{"parameter": "ph", "below_detection": True}],
+            )
+
+        self.assertFalse(Measurement.objects.exists())
+
 
 class CreateEventTests(ToolTestCase):
     def test_it_creates_an_event(self):

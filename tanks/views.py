@@ -563,8 +563,9 @@ class MeasurementCreateView(TankFragmentView):
             body_template="tanks/partials/form_modal.html",
             form=form,
             modal_submit="Erfassen",
-            modal_hint="Nicht nachweisbare Werte als „n.n.“ eintragen. "
-            "Leere Felder werden nicht gespeichert.",
+            modal_hint="Nicht nachweisbare Werte als „n.n.“ eintragen oder den "
+            "Schalter „nicht nachweisbar“ setzen. Leere Felder werden nicht "
+            "gespeichert.",
         )
 
 

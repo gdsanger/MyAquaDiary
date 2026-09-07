@@ -39,6 +39,7 @@ from tanks.models import (
     Tank,
     TankParameterTarget,
     TankPhoto,
+    classify_below_detection,
     classify_value,
 )
 from tanks.views import TAB_KEYS
@@ -198,6 +199,11 @@ class TankDetailViewTests(TestCase):
         self.assertContains(response, "mad-status--critical")
         self.assertContains(response, "bis 0,10 mg/l")
 
+    def test_measurement_tab_shows_nn_not_zero(self):
+        create_measurement(self.tank, "no2", below_detection=True)
+        response = self.client.get(f"{self.tank.get_absolute_url()}?reiter=messwerte")
+        self.assertContains(response, "n.n.")
+
 
 class ChartTests(TestCase):
     def setUp(self):
@@ -242,6 +248,79 @@ class ChartTests(TestCase):
         self.assertIsNotNone(series["band"])
         self.assertGreater(series["band"]["height"], 0)
         self.assertEqual(series["target_label"], "6,5–7,5")
+
+    def test_below_detection_is_no_point_at_zero_but_its_own_marker(self):
+        no2 = Parameter.objects.get(key="no2")
+        create_measurement(self.tank, "no2", days_ago=2, below_detection=True)
+        create_measurement(self.tank, "no2", "0.05", days_ago=1)
+        series = parameter_series(self.tank, no2)
+        # Die Zahl steht als Punkt, das n.n. als eigener Marker — kein Punkt bei 0.
+        self.assertEqual(len(series["points"]), 1)
+        self.assertEqual(len(series["nn_points"]), 1)
+
+    def test_a_series_of_only_nn_still_renders(self):
+        no2 = Parameter.objects.get(key="no2")
+        create_measurement(self.tank, "no2", below_detection=True)
+        series = parameter_series(self.tank, no2)
+        self.assertIsNotNone(series)
+        self.assertEqual(series["points"], [])
+        self.assertEqual(len(series["nn_points"]), 1)
+        self.assertIn("n.n.", series["summary"])
+
+
+class MeasurementModelTests(TestCase):
+    def setUp(self):
+        self.user = create_user()
+        self.tank = create_tank(self.user)
+
+    def test_below_detection_carries_no_value(self):
+        measurement = create_measurement(self.tank, "no2", below_detection=True)
+        self.assertIsNone(measurement.value)
+        self.assertEqual(measurement.display_value, "n.n.")
+
+    def test_a_value_and_below_detection_together_are_invalid(self):
+        measurement = Measurement(
+            tank=self.tank,
+            parameter=Parameter.objects.get(key="no2"),
+            value=Decimal("0.05"),
+            below_detection=True,
+            measured_at=timezone.now(),
+        )
+        with self.assertRaises(ValidationError):
+            measurement.full_clean()
+
+    def test_neither_a_value_nor_below_detection_is_invalid(self):
+        measurement = Measurement(
+            tank=self.tank,
+            parameter=Parameter.objects.get(key="no2"),
+            measured_at=timezone.now(),
+        )
+        with self.assertRaises(ValidationError):
+            measurement.full_clean()
+
+    def test_below_detection_needs_a_parameter_with_a_detection_limit(self):
+        measurement = Measurement(
+            tank=self.tank,
+            parameter=Parameter.objects.get(key="ph"),
+            below_detection=True,
+            measured_at=timezone.now(),
+        )
+        with self.assertRaises(ValidationError):
+            measurement.full_clean()
+
+    def test_nn_counts_as_in_order_for_a_pollutant_with_only_an_upper_limit(self):
+        # Nitrit: nur eine Obergrenze — n.n. hält sie zwangsläufig ein.
+        measurement = create_measurement(self.tank, "no2", below_detection=True)
+        self.assertEqual(measurement.status(), Status.OK)
+
+    def test_nn_below_a_target_minimum_is_flagged_as_low(self):
+        # Phosphat als Nährstoff hat eine Untergrenze; die Nachweisgrenze liegt
+        # darunter, n.n. ist damit erkennbar zu niedrig.
+        measurement = create_measurement(self.tank, "po4", below_detection=True)
+        self.assertIn(measurement.status(), (Status.WARN, Status.CRITICAL))
+
+    def test_classify_below_detection_without_a_target_is_unknown(self):
+        self.assertEqual(classify_below_detection(None, None), Status.UNKNOWN)
 
 
 class TankScopeTests(TestCase):
@@ -463,8 +542,47 @@ class MeasurementWriteTests(TestCase):
                 "note": "Tröpfchentest",
             },
         )
-        values = {m.parameter.key: m.value for m in self.tank.measurements.all()}
-        self.assertEqual(values, {"ph": Decimal("7.200"), "no2": Decimal("0.000")})
+        by_key = {m.parameter.key: m for m in self.tank.measurements.all()}
+        self.assertEqual(by_key["ph"].value, Decimal("7.200"))
+        self.assertFalse(by_key["ph"].below_detection)
+        # „n.n.“ wird nicht als 0 abgelegt, sondern als „nicht nachweisbar“.
+        self.assertIsNone(by_key["no2"].value)
+        self.assertTrue(by_key["no2"].below_detection)
+
+    def test_nn_via_the_switch_is_below_detection(self):
+        self.client.post(
+            self.url,
+            {
+                "measured_at": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
+                f"{self.field(self.no2)}_nn": "on",
+            },
+        )
+        measurement = self.tank.measurements.get()
+        self.assertIsNone(measurement.value)
+        self.assertTrue(measurement.below_detection)
+
+    def test_a_value_and_nn_together_are_rejected(self):
+        response = self.client.post(
+            self.url,
+            {
+                "measured_at": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
+                self.field(self.no2): "0,05",
+                f"{self.field(self.no2)}_nn": "on",
+            },
+        )
+        self.assertFalse(self.tank.measurements.exists())
+        self.assertContains(response, "nicht beides")
+
+    def test_nn_without_a_detection_limit_is_rejected(self):
+        response = self.client.post(
+            self.url,
+            {
+                "measured_at": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
+                self.field(self.ph): "n.n.",
+            },
+        )
+        self.assertFalse(self.tank.measurements.exists())
+        self.assertContains(response, "keine Nachweisgrenze")
 
     def test_historic_timestamps_are_kept(self):
         moment = timezone.localtime() - timedelta(days=30)

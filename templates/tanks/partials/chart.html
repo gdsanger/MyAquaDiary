@@ -28,6 +28,18 @@ Farben stehen im Stylesheet (.mad-chart__*), nicht hier.
       <circle class="mad-chart__point mad-chart__point--{{ point.status }}"
               cx="{{ point.x }}" cy="{{ point.y }}" r="2.5"></circle>
     {% endfor %}
+    {% comment %}
+    Nicht nachweisbar: kein Punkt bei 0, sondern ein offenes Kreuz knapp unter
+    der Grundlinie. „Unter der Nachweisgrenze“ steht so sichtbar „unter der
+    Achse“ und ist nicht von einer gemessenen Null zu verwechseln.
+    {% endcomment %}
+    {% for point in chart.nn_points %}
+      <g class="mad-chart__nn" transform="translate({{ point.x }} {{ chart.nn_marker_y }})">
+        <title>nicht nachweisbar</title>
+        <line x1="-2" y1="-2" x2="2" y2="2"></line>
+        <line x1="-2" y1="2" x2="2" y2="-2"></line>
+      </g>
+    {% endfor %}
     <text class="mad-chart__label" x="0" y="{{ chart.view_height }}" dy="-4">{{ chart.first_label }}</text>
     <text class="mad-chart__label" x="{{ chart.view_width }}" y="{{ chart.view_height }}" dy="-4"
           text-anchor="end">{{ chart.last_label }}</text>
@@ -35,5 +47,6 @@ Farben stehen im Stylesheet (.mad-chart__*), nicht hier.
   {% endlocalize %}
   <p class="mad-chart-legend mb-0">
     <span class="mad-status mad-status--ok">Zielbereich {{ chart.target_label }}</span>
+    {% if chart.nn_points %}<span class="mad-chart-legend__nn">✕ nicht nachweisbar</span>{% endif %}
   </p>
 </figure>

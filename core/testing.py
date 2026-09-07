@@ -42,12 +42,14 @@ def tank_named(owner, name="Becken 1"):
     return existing or create_tank(owner, name=name)
 
 
-def create_measurement(tank, parameter_key="ph", value="7.0", days_ago=0):
+def create_measurement(tank, parameter_key="ph", value="7.0", days_ago=0, below_detection=False):
     parameter = Parameter.objects.get(key=parameter_key)
     return Measurement.objects.create(
         tank=tank,
         parameter=parameter,
-        value=Decimal(value),
+        # „n.n.“ trägt keinen Zahlenwert: entweder eine Zahl oder below_detection.
+        value=None if below_detection else Decimal(value),
+        below_detection=below_detection,
         measured_at=timezone.now() - timedelta(days=days_ago),
     )
 

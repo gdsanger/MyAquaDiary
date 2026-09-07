@@ -281,6 +281,18 @@ class Parameter(ValueFormatMixin, models.Model):
     decimals = models.PositiveSmallIntegerField("Nachkommastellen", default=1)
     default_min = models.DecimalField("Zielbereich min", max_digits=8, decimal_places=3, null=True, blank=True)
     default_max = models.DecimalField("Zielbereich max", max_digits=8, decimal_places=3, null=True, blank=True)
+    # Die Nachweisgrenze eines Tröpfchentests: alles darunter meldet der Test
+    # als „nicht nachweisbar“. Sie dokumentiert zugleich, *welcher* Grenze ein
+    # n.n. entspricht — wer den Testkoffer wechselt, sieht den Unterschied im
+    # Verlauf. Leer bei Größen ohne Nachweisgrenze (pH, Temperatur, KH).
+    detection_limit = models.DecimalField(
+        "Nachweisgrenze",
+        max_digits=8,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text="Leer lassen, wenn der Parameter keine hat (pH, Temperatur, KH).",
+    )
     is_key_parameter = models.BooleanField(
         "Leitparameter", default=False, help_text="Wird im Verlaufsdiagramm auf dem Dashboard gezeigt."
     )
@@ -293,6 +305,11 @@ class Parameter(ValueFormatMixin, models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def has_detection_limit(self):
+        """Kennt dieser Parameter eine Nachweisgrenze — darf es hier ein n.n. geben?"""
+        return self.detection_limit is not None
 
 
 class TankParameterTarget(models.Model):
@@ -382,6 +399,29 @@ def classify_value(value, minimum, maximum):
     return Status.WARN if deviation <= tolerance else Status.CRITICAL
 
 
+def classify_below_detection(minimum, maximum, detection_limit=None):
+    """Statuslogik für einen nicht nachweisbaren Wert („n.n.“).
+
+    „n.n.“ heißt: der wahre Wert liegt irgendwo zwischen null und der
+    Nachweisgrenze — eine Zahl gibt es nicht, und deshalb greift
+    :func:`classify_value` nicht.
+
+    Für die Schadstoffe, um die es geht (Nitrit, Ammonium, Nitrat), kennt der
+    Zielbereich nur eine Obergrenze; die ist unter der Nachweisgrenze
+    zwangsläufig eingehalten, und n.n. ist **in Ordnung**. Wo ein Becken eine
+    Untergrenze braucht (Phosphat als Pflanzennährstoff) und die Nachweisgrenze
+    darunter liegt, ist der Wert dagegen erkennbar zu niedrig — bewertet wird
+    dann die Nachweisgrenze als der höchstmögliche Wert.
+    """
+    if minimum is None and maximum is None:
+        return Status.UNKNOWN
+    if minimum is not None and (detection_limit is None or detection_limit < minimum):
+        return classify_value(
+            detection_limit if detection_limit is not None else Decimal(0), minimum, maximum
+        )
+    return Status.OK
+
+
 class MeasurementQuerySet(models.QuerySet):
     def for_user(self, user):
         return self.filter(tank__owner=user)
@@ -390,7 +430,15 @@ class MeasurementQuerySet(models.QuerySet):
 class Measurement(models.Model):
     tank = models.ForeignKey(Tank, related_name="measurements", on_delete=models.CASCADE)
     parameter = models.ForeignKey(Parameter, related_name="measurements", on_delete=models.PROTECT)
-    value = models.DecimalField("Wert", max_digits=8, decimal_places=3)
+    # ``null``, weil ein Wert unterhalb der Nachweisgrenze keine Zahl ist: „n.n.“
+    # steht in ``below_detection``, nicht als 0 im Wert. 0 und n.n. sähen im
+    # Verlauf sonst gleich aus, und ein Mittelwert würde falsch.
+    value = models.DecimalField("Wert", max_digits=8, decimal_places=3, null=True, blank=True)
+    below_detection = models.BooleanField(
+        "nicht nachweisbar",
+        default=False,
+        help_text="Der Test hat unterhalb seiner Nachweisgrenze nichts angezeigt.",
+    )
     measured_at = models.DateTimeField("Gemessen am")
     note = models.CharField("Notiz", max_length=200, blank=True)
     created_by = models.ForeignKey(
@@ -404,12 +452,48 @@ class Measurement(models.Model):
         verbose_name = "Messwert"
         verbose_name_plural = "Messwerte"
         indexes = [models.Index(fields=["tank", "parameter", "-measured_at"])]
+        constraints = [
+            # Entweder eine Zahl oder n.n. — nie beides, nie keines. Die Regel
+            # steht zusätzlich in ``clean()`` (mit lesbaren Meldungen); hier
+            # sichert sie auch Schreibwege ab, die an der Validierung vorbeigehen.
+            models.CheckConstraint(
+                check=Q(value__isnull=False, below_detection=False)
+                | Q(value__isnull=True, below_detection=True),
+                name="measurement_value_xor_below_detection",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.parameter}: {self.display_value}"
 
+    def clean(self):
+        """Genau eines von Wert und n.n. — und n.n. nur mit Nachweisgrenze."""
+        super().clean()
+        has_value = self.value is not None
+        if has_value and self.below_detection:
+            raise ValidationError(
+                "Ein Messwert ist entweder eine Zahl oder „nicht nachweisbar“ — nicht beides."
+            )
+        if not has_value and not self.below_detection:
+            raise ValidationError(
+                {"value": "Bitte einen Wert eintragen oder „nicht nachweisbar“ wählen."}
+            )
+        if self.below_detection and self.parameter_id and not self.parameter.has_detection_limit:
+            raise ValidationError(
+                {
+                    "below_detection": (
+                        f"{self.parameter.name} hat keine Nachweisgrenze; "
+                        "„nicht nachweisbar“ ist hier nicht vorgesehen."
+                    )
+                }
+            )
+
     @property
     def display_value(self):
+        # „n.n.“ statt einer Zahl: nicht 0 (das wäre eine gemessene Abwesenheit)
+        # und nicht leer (das sähe aus wie „nie gemessen“).
+        if self.below_detection:
+            return "n.n."
         return f"{self.parameter.format_value(self.value)} {self.parameter.unit}".strip()
 
     def target_range(self, targets=None):
@@ -432,6 +516,8 @@ class Measurement(models.Model):
 
     def status(self, targets=None):
         minimum, maximum = self.target_range(targets)
+        if self.below_detection:
+            return classify_below_detection(minimum, maximum, self.parameter.detection_limit)
         return classify_value(self.value, minimum, maximum)
 
     @property

@@ -814,6 +814,17 @@ img {
 .mad-chart__point--warn { fill: var(--mad-status-warn); }
 .mad-chart__point--critical { fill: var(--mad-status-critical); }
 
+/* n.n.-Marker: ein Kreuz unter der Grundlinie, keine Fläche wie ein Messpunkt. */
+.mad-chart__nn line {
+  stroke: var(--mad-text-muted);
+  stroke-width: 1;
+  stroke-linecap: round;
+}
+
+.mad-chart-legend__nn {
+  color: var(--mad-text-muted);
+}
+
 .mad-chart__label {
   fill: var(--mad-text-muted);
   font-size: 10px;
