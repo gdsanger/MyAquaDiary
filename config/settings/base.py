@@ -158,6 +158,11 @@ SHELLY_TIMEOUT = env.int("SHELLY_TIMEOUT", default=5)
 # Anzeigehilfe: gespeichert werden Kilowattstunden, keine Beträge.
 ENERGY_PRICE_PER_KWH = env("ENERGY_PRICE_PER_KWH", default="0.35")
 
+# Wie weit ein KH- und ein pH-Wert auseinanderliegen dürfen, damit CO₂ aus
+# ihnen gerechnet wird. Sechs Stunden decken einen Testdurchgang ab, auch wenn
+# er in zwei Schritten erfasst wird; der Wert von gestern gehört nicht dazu.
+CO2_PAIR_WINDOW_HOURS = env.int("CO2_PAIR_WINDOW_HOURS", default=6)
+
 # Startwerte für die AIConfig-Singleton (Anthropic Claude). Ohne API-Key sind
 # sämtliche KI-Funktionen ausgeblendet, die Anwendung läuft normal weiter.
 # Ein im Admin gepflegter Datensatz hat Vorrang.
