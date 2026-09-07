@@ -13,7 +13,13 @@ from django.utils import timezone
 from core.enums import Status
 
 from . import derived, selectors
-from .models import Measurement, Parameter, TankParameterTarget, classify_value
+from .models import (
+    Measurement,
+    Parameter,
+    TankParameterTarget,
+    classify_below_detection,
+    classify_value,
+)
 
 #: Koordinatensystem des SVG. Die Darstellung skaliert über ``viewBox``,
 #: deshalb sind das keine Pixel, sondern Einheiten.
@@ -74,6 +80,20 @@ def derived_series(parameter, values, minimum, maximum):
     return _series(parameter, sorted(values, key=lambda item: item.measured_at), minimum, maximum)
 
 
+def _below_detection(measurement):
+    """Ist dieser Wert ein n.n.? Gerechnete Werte kennen das Merkmal nicht."""
+    return getattr(measurement, "below_detection", False)
+
+
+def _status_of(parameter, measurement, minimum, maximum):
+    """Status eines Punkts — n.n. wird anders bewertet als eine Zahl."""
+    if _below_detection(measurement):
+        return classify_below_detection(
+            minimum, maximum, getattr(parameter, "detection_limit", None)
+        )
+    return classify_value(measurement.value, minimum, maximum)
+
+
 def _series(parameter, measurements, minimum, maximum):
     """Der gemeinsame Rechenweg für gemessene und gerechnete Reihen.
 
@@ -81,15 +101,26 @@ def _series(parameter, measurements, minimum, maximum):
     ``value``, ``measured_at`` und ``display_value`` — mehr braucht das
     Diagramm nicht, und deshalb passt ein ``DerivedValue`` genauso hinein wie
     ein ``Measurement``.
+
+    Nicht nachweisbare Werte tragen keinen Zahlenwert; sie stehen nicht als
+    Punkt bei 0 in der Kurve (das sähe aus wie eine gemessene Null), sondern als
+    eigener Marker an der Grundlinie. Die Linie verbindet nur die gemessenen
+    Zahlen.
     """
     if not measurements:
         return None
 
-    bounds = [float(m.value) for m in measurements]
+    numeric = [m for m in measurements if not _below_detection(m) and m.value is not None]
+    bounds = [float(m.value) for m in numeric]
     if minimum is not None:
         bounds.append(float(minimum))
     if maximum is not None:
         bounds.append(float(maximum))
+    if not bounds:
+        # Nur n.n.-Werte und kein Zielbereich: eine kleine Spanne bis zur
+        # Nachweisgrenze, damit die Grundlinie überhaupt eine Höhe hat.
+        limit = getattr(parameter, "detection_limit", None)
+        bounds = [0.0, float(limit) if limit else 1.0]
 
     lo, hi = min(bounds), max(bounds)
     margin = (hi - lo) * 0.15 or max(abs(hi) * 0.1, 0.5)
@@ -99,12 +130,18 @@ def _series(parameter, measurements, minimum, maximum):
     t_lo, t_hi = times[0], times[-1]
 
     points = []
+    nn_points = []
     for measurement, timestamp in zip(measurements, times):
+        x = round(_x(timestamp, t_lo, t_hi), 2)
+        status = _status_of(parameter, measurement, minimum, maximum)
+        if _below_detection(measurement):
+            nn_points.append({"x": x, "status": status, "measured_at": measurement.measured_at})
+            continue
         points.append(
             {
-                "x": round(_x(timestamp, t_lo, t_hi), 2),
+                "x": x,
                 "y": round(_y(float(measurement.value), lo, hi), 2),
-                "status": classify_value(measurement.value, minimum, maximum),
+                "status": status,
                 "value": measurement.value,
                 "measured_at": measurement.measured_at,
             }
@@ -117,7 +154,8 @@ def _series(parameter, measurements, minimum, maximum):
         band = {"y": round(y_top, 2), "height": round(max(y_bottom - y_top, 1), 2)}
 
     latest = measurements[-1]
-    latest_status = classify_value(latest.value, minimum, maximum)
+    latest_status = _status_of(parameter, latest, minimum, maximum)
+    baseline_y = round(VIEW_HEIGHT - PAD_BOTTOM, 2)
 
     return {
         "parameter": parameter,
@@ -125,9 +163,13 @@ def _series(parameter, measurements, minimum, maximum):
         # wie jede andere.
         "is_derived": getattr(parameter, "is_derived", False),
         "points": points,
+        # n.n.-Marker sitzen leicht unterhalb der Grundlinie: „unter der
+        # Nachweisgrenze“ liest sich als „unter der Achse“.
+        "nn_points": nn_points,
+        "nn_marker_y": round(baseline_y + 5, 2),
         "polyline": " ".join(f"{p['x']},{p['y']}" for p in points),
         "band": band,
-        "baseline_y": round(VIEW_HEIGHT - PAD_BOTTOM, 2),
+        "baseline_y": baseline_y,
         "latest": latest,
         "latest_status": latest_status,
         "minimum": minimum,
@@ -149,11 +191,12 @@ def _summary(parameter, measurements, latest, status):
         Status.CRITICAL: "deutlich außerhalb des Zielbereichs",
         Status.UNKNOWN: "ohne hinterlegten Zielbereich",
     }[status]
-    unit = f" {parameter.unit}" if parameter.unit else ""
     noun = "berechnete Werte" if getattr(parameter, "is_derived", False) else "Messwerte"
+    # ``display_value`` trägt Einheit bzw. „n.n.“ — so steht im Fließtext für
+    # Screenreader dasselbe wie in der Kachel.
     return (
         f"Verlauf {parameter.name}: {len(measurements)} {noun}, zuletzt "
-        f"{parameter.format_value(latest.value)}{unit} am "
+        f"{latest.display_value} am "
         f"{latest.measured_at:%d.%m.%Y} — {label}."
     )
 

@@ -7,7 +7,6 @@ für die Eindeutigkeit eines Zielbereichs).
 """
 
 from datetime import timedelta
-from decimal import Decimal
 
 from django import forms
 from django.utils import timezone
@@ -36,6 +35,12 @@ from .models import (
 #: Eingaben, die „nicht nachweisbar" bedeuten. Kleinschreibung und ohne
 #: Leerzeichen verglichen, damit „N. N." genauso durchgeht wie „n.n.".
 NOT_DETECTED_INPUTS = {"n.n.", "n.n", "nn", "nichtnachweisbar", "n.d.", "nd"}
+
+#: Rückgabe von :class:`MeasurementValueField` für ein „n.n.": kein Zahlenwert,
+#: sondern die Aussage „unterhalb der Nachweisgrenze". Die Formulare setzen es
+#: in ``below_detection`` um; ``None`` bliebe von einem leeren Feld nicht zu
+#: unterscheiden.
+BELOW_DETECTION = object()
 
 #: Zeitpunkte dürfen so weit in der Zukunft liegen — Spielraum für eine
 #: falsch gestellte Uhr, aber kein Freibrief für Tippfehler im Jahr.
@@ -73,9 +78,11 @@ class MeasurementValueField(forms.DecimalField):
     """Messwert — nimmt „n.n." und ein deutsches Dezimalkomma entgegen.
 
     „nicht nachweisbar" ist bei Tröpfchentests die übliche Angabe für alles
-    unterhalb der Nachweisgrenze. Gespeichert wird dafür 0: nur als Zahl lässt
-    sich der Wert im Verlauf zeichnen und gegen einen Zielbereich prüfen — und
-    0 ist die Aussage, die der Test tatsächlich macht.
+    unterhalb der Nachweisgrenze. Getippt wird es als :data:`BELOW_DETECTION`
+    zurückgegeben, **nicht** als 0: 0 wäre eine gemessene Abwesenheit, n.n. ist
+    „unter dem, was dieser Test auflöst". Die Formulare tragen es in
+    ``Measurement.below_detection`` ein. Neben dem Feld steht dafür zusätzlich
+    ein Schalter (siehe :class:`MeasurementSeriesForm`).
 
     Das Widget ist bewusst ein Textfeld: in ein ``type="number"`` ließe sich
     „n.n." gar nicht erst eintippen.
@@ -90,11 +97,15 @@ class MeasurementValueField(forms.DecimalField):
         self.widget.attrs.setdefault("inputmode", "decimal")
         self.widget.attrs.setdefault("placeholder", "z. B. 7,2 oder n.n.")
 
+    def clean(self, value):
+        # „n.n." kurzschließen, bevor Zahl-Validierung greift: die Aussage ist
+        # keine Zahl und würde jede Prüfung auf Ziffern reißen.
+        if isinstance(value, str) and value.strip().lower().replace(" ", "") in NOT_DETECTED_INPUTS:
+            return BELOW_DETECTION
+        return super().clean(value)
+
     def to_python(self, value):
         if isinstance(value, str):
-            compact = value.strip().lower().replace(" ", "")
-            if compact in NOT_DETECTED_INPUTS:
-                return Decimal("0")
             value = value.strip().replace(",", ".")
         return super().to_python(value)
 
@@ -203,6 +214,7 @@ class MeasurementSeriesForm(BootstrapMixin, forms.Form):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.parameters = list(Parameter.objects.all())
+        order = ["measured_at"]
         for parameter in self.parameters:
             label = f"{parameter.name} ({parameter.unit})" if parameter.unit else parameter.name
             field = MeasurementValueField(label=label, required=False)
@@ -210,21 +222,65 @@ class MeasurementSeriesForm(BootstrapMixin, forms.Form):
             # BootstrapMixin — ihre Klasse muss deshalb von Hand gesetzt werden.
             field.widget.attrs.setdefault("class", "form-control")
             self.fields[self.field_name(parameter)] = field
-        # Zeitpunkt nach oben, Notiz nach unten, die Werte dazwischen.
-        self.order_fields(["measured_at", *[self.field_name(p) for p in self.parameters], "note"])
+            order.append(self.field_name(parameter))
+            # Der Schalter „n.n." steht nur bei Parametern mit Nachweisgrenze:
+            # bei pH oder Temperatur gibt es keine, und ein n.n. ergäbe dort
+            # keinen Sinn.
+            if parameter.has_detection_limit:
+                self.fields[self.nn_field_name(parameter)] = forms.BooleanField(
+                    label=f"{parameter.name}: nicht nachweisbar", required=False
+                )
+                order.append(self.nn_field_name(parameter))
+        # Zeitpunkt nach oben, Notiz nach unten, die Werte (mit ihrem Schalter)
+        # dazwischen.
+        self.order_fields([*order, "note"])
 
     @staticmethod
     def field_name(parameter):
         return f"parameter_{parameter.pk}"
 
+    @staticmethod
+    def nn_field_name(parameter):
+        return f"parameter_{parameter.pk}_nn"
+
     def clean_measured_at(self):
         return _check_not_in_future(self.cleaned_data["measured_at"], "Der Messzeitpunkt")
 
+    def _reading(self, parameter):
+        """``(Wert, n.n.)`` eines Parameters — die Zahl oder ``None`` und ob n.n.
+
+        Der Wert kommt entweder als Zahl aus dem Feld, als getipptes „n.n."
+        (:data:`BELOW_DETECTION`) oder über den Schalter daneben.
+        """
+        raw = self.cleaned_data.get(self.field_name(parameter))
+        below = raw is BELOW_DETECTION or bool(
+            self.cleaned_data.get(self.nn_field_name(parameter))
+        )
+        value = raw if raw not in (None, BELOW_DETECTION) else None
+        return value, below
+
     def clean(self):
         cleaned = super().clean()
-        if not any(
-            cleaned.get(self.field_name(parameter)) is not None for parameter in self.parameters
-        ):
+        has_reading = False
+        for parameter in self.parameters:
+            value, below = self._reading(parameter)
+            if value is not None and below:
+                self.add_error(
+                    self.field_name(parameter),
+                    "Entweder ein Wert oder „nicht nachweisbar“ — nicht beides.",
+                )
+            # „n.n." getippt bei einem Parameter ohne Nachweisgrenze (pH, KH):
+            # der Schalter fehlt dort, aber im Textfeld ließe es sich eintippen.
+            elif below and not parameter.has_detection_limit:
+                self.add_error(
+                    self.field_name(parameter),
+                    f"{parameter.name} hat keine Nachweisgrenze; „nicht nachweisbar“ "
+                    "ist hier nicht vorgesehen.",
+                )
+                below = False
+            if value is not None or below:
+                has_reading = True
+        if not has_reading:
             raise forms.ValidationError("Bitte mindestens einen Wert eintragen.")
         return cleaned
 
@@ -232,14 +288,15 @@ class MeasurementSeriesForm(BootstrapMixin, forms.Form):
         """Legt je ausgefülltem Parameter einen Messwert an."""
         created = []
         for parameter in self.parameters:
-            value = self.cleaned_data.get(self.field_name(parameter))
-            if value is None:
+            value, below = self._reading(parameter)
+            if value is None and not below:
                 continue
             created.append(
                 Measurement(
                     tank=tank,
                     parameter=parameter,
                     value=value,
+                    below_detection=below,
                     measured_at=self.cleaned_data["measured_at"],
                     note=self.cleaned_data.get("note", ""),
                     created_by=user,
@@ -249,17 +306,32 @@ class MeasurementSeriesForm(BootstrapMixin, forms.Form):
 
 
 class MeasurementForm(BootstrapMixin, forms.ModelForm):
-    """Ein einzelner Messwert — für Korrekturen an der Messreihe."""
+    """Ein einzelner Messwert — für Korrekturen an der Messreihe.
 
-    value = MeasurementValueField(label="Wert")
+    „n.n." lässt sich ins Wertfeld tippen oder über den Schalter setzen. Ob der
+    Parameter überhaupt eine Nachweisgrenze hat, prüft ``Measurement.clean()`` —
+    hier ist die Messgröße frei wählbar, anders als in der Messreihe.
+    """
+
+    value = MeasurementValueField(label="Wert", required=False)
     measured_at = DateTimeField(label="Gemessen am", initial=timezone.now)
 
     class Meta:
         model = Measurement
-        fields = ["parameter", "value", "measured_at", "note"]
+        fields = ["parameter", "value", "below_detection", "measured_at", "note"]
 
     def clean_measured_at(self):
         return _check_not_in_future(self.cleaned_data["measured_at"], "Der Messzeitpunkt")
+
+    def clean(self):
+        cleaned = super().clean()
+        # Getipptes „n.n." in den Schalter überführen, bevor das Modell den Wert
+        # zugewiesen bekommt — ``BELOW_DETECTION`` ist keine Zahl, die ein
+        # ``DecimalField`` speichern könnte.
+        if cleaned.get("value") is BELOW_DETECTION:
+            cleaned["value"] = None
+            cleaned["below_detection"] = True
+        return cleaned
 
 
 class EventForm(BootstrapMixin, forms.ModelForm):
