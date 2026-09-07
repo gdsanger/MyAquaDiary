@@ -14,10 +14,22 @@
                  loading="lazy">
             <figcaption class="mad-list__meta mt-1">
               {{ photo.taken_on|date:"d.m.Y" }}{% if photo.caption %} · {{ photo.caption }}{% endif %}
+              {% if photo.event %}
+                {% comment %}
+                Verweis auf den Reiter „Ereignisse“ — dort steht das Foto am
+                Eintrag, zu dem es gehört.
+                {% endcomment %}
+                <br>
+                <a href="{{ tank.get_absolute_url }}?reiter=ereignisse"
+                   hx-get="{% url 'tanks:tab' tank.slug 'ereignisse' %}"
+                   hx-target="#tab-area" hx-swap="outerHTML">
+                  {{ photo.event.get_category_display }}: {{ photo.event.title }}
+                </a>
+              {% endif %}
             </figcaption>
             {% url 'tanks:photo-update' tank.slug photo.pk as edit_url %}
             {% url 'tanks:photo-delete' tank.slug photo.pk as delete_url %}
-            {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=delete_url edit_label="Unterschrift" %}
+            {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=delete_url %}
           </figure>
         {% endfor %}
       </div>

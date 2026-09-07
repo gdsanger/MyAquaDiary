@@ -121,9 +121,10 @@ def create_measurement(context, arguments):
 @tool(
     "create_event",
     "Legt ein Ereignis am Becken an: Wasserwechsel, Pflege, Technikänderung, "
-    "Beobachtung, Problem, Nachwuchs. Bei einem Wasserwechsel gehört die "
+    "Beobachtung, Vorfall. Bei einem Wasserwechsel gehört die "
     "gewechselte Menge in water_changed_l — der Prozentsatz wird daraus "
-    "berechnet.",
+    "berechnet. Bilder nimmt diese Schnittstelle nicht entgegen; sie entstehen "
+    "in der Oberfläche.",
     writes=True,
     schema={
         "type": "object",
@@ -133,7 +134,7 @@ def create_measurement(context, arguments):
             "category": {
                 "type": "string",
                 "description": "Kategorie, z. B. water_change, maintenance, observation. "
-                "Ohne Angabe: other.",
+                "Ohne Angabe: other. Ein unbekannter Wert wird zu other.",
             },
             "occurred_at": {
                 "type": "string",

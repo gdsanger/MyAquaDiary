@@ -15,6 +15,7 @@ from django.utils.text import slugify
 
 from catalog.models import AnimalSpecies, PlantSpecies
 from core.forms import BootstrapMixin, DateField, DateTimeField, MultipleImageField
+from core.images import taken_at
 
 from .models import (
     CareTask,
@@ -42,6 +43,26 @@ def _check_not_in_future(value, label):
     if value is not None and value > timezone.now() + FUTURE_TOLERANCE:
         raise forms.ValidationError(f"{label} liegt in der Zukunft.")
     return value
+
+
+def _shots_of(images):
+    """``[(Bild, Aufnahmezeitpunkt oder None)]`` für eine Auswahl.
+
+    Der Zeitpunkt kommt aus dem EXIF-Block und ist die Ortszeit der Kamera;
+    umgerechnet wird er deshalb nicht. Eine falsch gestellte Kamerauhr soll
+    aber kein Foto in der Zukunft erzeugen — was nach ``FUTURE_TOLERANCE``
+    liegt, gilt als unbrauchbar.
+    """
+    horizon = timezone.localtime() + FUTURE_TOLERANCE
+    shots = []
+    for image in images:
+        stamp = taken_at(image)
+        if stamp is not None:
+            stamp = timezone.make_aware(stamp, timezone.get_current_timezone())
+            if stamp > horizon:
+                stamp = None
+        shots.append((image, stamp))
+    return shots
 
 
 class MeasurementValueField(forms.DecimalField):
@@ -238,15 +259,76 @@ class MeasurementForm(BootstrapMixin, forms.ModelForm):
 
 
 class EventForm(BootstrapMixin, forms.ModelForm):
-    occurred_at = DateTimeField(label="Zeitpunkt", initial=timezone.now)
+    """Ereignis — auf Wunsch samt Bildern.
+
+    Die Bilder hängen am Ereignis und nicht bloß am Becken: wer eine
+    Beobachtung festhält, macht ein Foto und schreibt zwei Sätze dazu. Das ist
+    ein Vorgang und nicht drei (Ereignis anlegen, Galerie öffnen, zuordnen).
+    Ein Behandlungsverlauf oder ein Vorfall gewinnt genauso daran.
+
+    Der Zeitpunkt ist deshalb optional: liegt er in den Bildern, muss ihn
+    niemand abtippen.
+    """
+
+    occurred_at = DateTimeField(
+        label="Zeitpunkt",
+        required=False,
+        help_text="Ohne Angabe: der Aufnahmezeitpunkt der Bilder, sonst jetzt.",
+    )
+    images = MultipleImageField(
+        label="Bilder",
+        required=False,
+        help_text="Mehrfachauswahl möglich. Das Aufnahmedatum kommt aus dem Bild.",
+    )
 
     class Meta:
         model = Event
         fields = ["occurred_at", "category", "title", "description"]
         widgets = {"description": forms.Textarea(attrs={"rows": 3})}
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        #: ``[(Bild, Aufnahmezeitpunkt)]`` — einmal aus dem EXIF gelesen und
+        #: zweimal gebraucht: für den Zeitpunkt des Ereignisses und für
+        #: ``taken_on`` je Foto.
+        self.shots = []
+        # Auf dem Telefon zählt die Reihenfolge: was passiert ist, dann die
+        # Bilder. Der Zeitpunkt steht zuletzt — er ist optional und leitet sich
+        # meist aus den Bildern ab.
+        self.order_fields(["title", "category", "description", "images", "occurred_at"])
+
     def clean_occurred_at(self):
-        return _check_not_in_future(self.cleaned_data["occurred_at"], "Der Zeitpunkt")
+        return _check_not_in_future(self.cleaned_data.get("occurred_at"), "Der Zeitpunkt")
+
+    def clean_images(self):
+        images = self.cleaned_data["images"]
+        self.shots = _shots_of(images)
+        return images
+
+    def clean(self):
+        cleaned = super().clean()
+        if not cleaned.get("occurred_at"):
+            stamps = [stamp for _, stamp in self.shots if stamp is not None]
+            cleaned["occurred_at"] = min(stamps) if stamps else timezone.now()
+        return cleaned
+
+    def save_photos(self, event):
+        """Legt die hochgeladenen Bilder als Fotos am Ereignis an.
+
+        Getrennt von ``save()``, weil das Becken erst die Ansicht setzt
+        (:class:`tanks.views.TankScopedMixin`) — vorher gibt es nichts, woran
+        ein Foto hängen könnte.
+        """
+        fallback = timezone.localtime(event.occurred_at).date()
+        return [
+            TankPhoto.objects.create(
+                tank=event.tank,
+                event=event,
+                image=image,
+                taken_on=timezone.localtime(stamp).date() if stamp else fallback,
+            )
+            for image, stamp in self.shots
+        ]
 
 
 class StockingForm(BootstrapMixin, forms.ModelForm):
@@ -363,12 +445,19 @@ class PhotoUploadForm(BootstrapMixin, forms.Form):
     Fotos entstehen serienweise; sie einzeln hochzuladen wäre der Bedienung
     nicht angemessen. Bildunterschrift und Aufnahmedatum gelten deshalb für
     die ganze Auswahl und lassen sich danach je Bild ändern.
+
+    Das Aufnahmedatum ist dabei nur die Vorgabe für Bilder ohne EXIF: was das
+    Bild selbst mitbringt, ist genauer als eine Angabe für die ganze Auswahl.
     """
 
     images = MultipleImageField(
         label="Bilder", help_text="Mehrfachauswahl möglich."
     )
-    taken_on = DateField(label="Aufgenommen am", initial=timezone.localdate)
+    taken_on = DateField(
+        label="Aufgenommen am",
+        required=False,
+        help_text="Ohne Angabe: der Aufnahmezeitpunkt aus dem Bild, sonst heute.",
+    )
     caption = forms.CharField(
         label="Bildunterschrift",
         max_length=200,
@@ -377,28 +466,56 @@ class PhotoUploadForm(BootstrapMixin, forms.Form):
     )
 
     def clean_taken_on(self):
-        value = self.cleaned_data["taken_on"]
-        if value > timezone.localdate():
+        value = self.cleaned_data.get("taken_on")
+        if value is not None and value > timezone.localdate():
             raise forms.ValidationError("Das Aufnahmedatum liegt in der Zukunft.")
         return value
 
     def save(self, tank):
+        fallback = self.cleaned_data.get("taken_on") or timezone.localdate()
         return [
             TankPhoto.objects.create(
                 tank=tank,
                 image=image,
                 caption=self.cleaned_data.get("caption", ""),
-                taken_on=self.cleaned_data["taken_on"],
+                taken_on=timezone.localtime(stamp).date() if stamp else fallback,
             )
-            for image in self.cleaned_data["images"]
+            for image, stamp in _shots_of(self.cleaned_data["images"])
         ]
 
 
+class EventChoiceField(forms.ModelChoiceField):
+    """Ereignisauswahl mit Datum davor — zwei „Trübung“ sind sonst gleich."""
+
+    def label_from_instance(self, obj):
+        return f"{timezone.localtime(obj.occurred_at):%d.%m.%Y} · {obj.title}"
+
+
 class PhotoForm(BootstrapMixin, forms.ModelForm):
-    """Bildunterschrift und Aufnahmedatum eines Fotos."""
+    """Bildunterschrift, Aufnahmedatum und Zuordnung eines Fotos.
+
+    Über das Ereignisfeld findet ein bereits hochgeladenes Foto nachträglich zu
+    der Beobachtung, zu der es gehört — ohne es erneut hochladen zu müssen.
+    """
 
     taken_on = DateField(label="Aufgenommen am")
+    event = EventChoiceField(
+        label="Ereignis",
+        queryset=Event.objects.none(),
+        required=False,
+        empty_label="— keinem Ereignis zugeordnet —",
+        help_text="Das Foto erscheint dann auch am Ereignis.",
+    )
 
     class Meta:
         model = TankPhoto
-        fields = ["caption", "taken_on"]
+        fields = ["caption", "taken_on", "event"]
+
+    def __init__(self, *args, tank=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tank = tank if tank is not None else getattr(self.instance, "tank", None)
+        # Zur Auswahl stehen nur Ereignisse desselben Beckens: ein Foto aus
+        # Becken A gehört zu keinem Ereignis aus Becken B — und die Ansicht
+        # prüft die Zugehörigkeit des Beckens, nicht die jedes Ereignisses.
+        if self.tank is not None:
+            self.fields["event"].queryset = Event.objects.filter(tank=self.tank)

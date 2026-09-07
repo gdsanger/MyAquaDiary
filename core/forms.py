@@ -96,9 +96,20 @@ class MultipleImageField(forms.ImageField):
     deshalb jede ausgewählte Datei einzeln durch die Bildprüfung geschickt;
     zurück kommt eine Liste. Ein defektes Bild in der Auswahl bricht den
     ganzen Upload ab — lieber gar nichts anlegen als die halbe Auswahl.
+
+    Auch ohne Auswahl kommt eine Liste zurück (dann eine leere): ein optionales
+    Bildfeld — etwa am Ereignisformular — soll den Aufrufer nicht zwingen,
+    ``None`` und „nichts ausgewählt“ zu unterscheiden.
     """
 
     widget = MultipleFileInput
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Auf dem Telefon öffnet das die Auswahl zwischen Kamera und Galerie.
+        # Bewusst ohne ``capture``: das erzwingt die Kamera und schließt damit
+        # die Mehrfachauswahl aus.
+        self.widget.attrs.setdefault("accept", "image/*")
 
     def clean(self, data, initial=None):
         check = super().clean
@@ -106,5 +117,6 @@ class MultipleImageField(forms.ImageField):
             data = [] if data in self.empty_values else [data]
         if not data:
             # Ohne Auswahl entscheidet die reguläre Pflichtfeldprüfung.
-            return check(None, initial)
+            check(None, initial)
+            return []
         return [check(item, initial) for item in data]

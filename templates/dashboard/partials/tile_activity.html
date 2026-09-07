@@ -16,7 +16,22 @@
             <p class="mad-list__meta">
               <span class="mad-tank-dot" aria-hidden="true"></span>{{ entry.tank.name }}
               · {{ entry.kind_label }} · {{ entry.timestamp|date:"d.m.Y H:i" }}
+              {% if entry.photo_count > 1 %} · {{ entry.photo_count }} Fotos{% endif %}
             </p>
+            {% if entry.photos %}
+              {% comment %}
+              Ein Ereignis mit Bildern bleibt eine Zeile: die Fotos stehen als
+              Vorschau darin und nicht als eigene Einträge.
+              {% endcomment %}
+              <ul class="mad-thumbs">
+                {% for photo in entry.photos %}
+                  <li>
+                    <img src="{{ photo.image.url }}" loading="lazy"
+                         alt="{{ photo.caption|default:entry.title }}">
+                  </li>
+                {% endfor %}
+              </ul>
+            {% endif %}
           </div>
         </div>
       </li>

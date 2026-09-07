@@ -10,6 +10,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Count, Max, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
@@ -345,6 +346,10 @@ class Event(models.Model):
         # selbst schaltet (siehe services.devices.record_event).
         EQUIPMENT = "equipment", "Technik"
         INCIDENT = "incident", "Vorfall"
+        # Was am Becken auffällt, ohne dass jemand eingegriffen hat: neue
+        # Blätter, Balzverhalten, eine Trübung. Ein eigenes Modell wäre
+        # dasselbe Ereignis mit denselben Feldern unter anderem Namen.
+        OBSERVATION = "observation", "Beobachtung"
         OTHER = "other", "Sonstiges"
 
     tank = models.ForeignKey(Tank, related_name="events", on_delete=models.CASCADE)
@@ -535,6 +540,17 @@ class TaskCompletion(models.Model):
 
 class TankPhoto(models.Model):
     tank = models.ForeignKey(Tank, related_name="photos", on_delete=models.CASCADE)
+    # ``SET_NULL``, nicht ``CASCADE``: wer ein Ereignis löscht, will nicht die
+    # Fotos mitlöschen. Sie bleiben in der Galerie und verlieren nur ihre
+    # Zuordnung.
+    event = models.ForeignKey(
+        Event,
+        related_name="photos",
+        verbose_name="Ereignis",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
     image = models.ImageField("Bild", upload_to=tank_photo_path)
     caption = models.CharField("Bildunterschrift", max_length=200, blank=True)
     taken_on = models.DateField("Aufgenommen am")
@@ -547,6 +563,16 @@ class TankPhoto(models.Model):
 
     def __str__(self):
         return self.caption or f"Foto {self.taken_on}"
+
+    def clean(self):
+        """Foto und Ereignis gehören zum selben Becken.
+
+        Die Oberfläche stellt nur passende Ereignisse zur Auswahl; im Admin
+        gibt es diese Einschränkung nicht, und ein Becken lässt sich am Foto
+        nachträglich umhängen. Die Regel steht deshalb am Modell.
+        """
+        if self.event_id and self.event.tank_id != self.tank_id:
+            raise ValidationError({"event": "Das Ereignis gehört zu einem anderen Becken."})
 
 
 def species_in_own_tanks(user, *, animal=None, plant=None):

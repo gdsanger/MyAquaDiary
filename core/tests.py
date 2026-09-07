@@ -1,6 +1,11 @@
+from datetime import datetime
+
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, override_settings
 
 from core.crypto import DecryptionError, decrypt, encrypt
+from core.images import taken_at
+from core.testing import image_upload, photo_upload
 
 
 class CryptoTests(SimpleTestCase):
@@ -172,3 +177,24 @@ class TemplateColourTests(SimpleTestCase):
             with self.subTest(template=path.relative_to(TEMPLATE_DIR).as_posix()):
                 self.assertIsNone(HEX_PATTERN.search(content))
                 self.assertIsNone(COLOR_FUNCTION_PATTERN.search(content))
+
+
+class ExifTests(SimpleTestCase):
+    """Aufnahmezeitpunkt aus dem Bild — und was passiert, wenn keiner drinsteht."""
+
+    def test_the_shot_time_is_read(self):
+        moment = datetime(2026, 5, 1, 18, 30, 0)
+        self.assertEqual(taken_at(photo_upload(taken_at=moment)), moment)
+
+    def test_an_image_without_exif_has_no_shot_time(self):
+        self.assertIsNone(taken_at(image_upload()))
+
+    def test_the_file_stays_readable_afterwards(self):
+        """Das Bild wandert danach in den Speicher — der Zeiger muss vorn stehen."""
+        upload = photo_upload(taken_at=datetime(2026, 5, 1, 18, 30, 0))
+        taken_at(upload)
+        self.assertTrue(upload.read())
+
+    def test_something_that_is_not_an_image_is_no_error(self):
+        broken = SimpleUploadedFile("kein-bild.jpg", b"nur text", content_type="image/jpeg")
+        self.assertIsNone(taken_at(broken))

@@ -32,6 +32,11 @@ urlpatterns = [
     # Ereignisse
     path("<slug:slug>/ereignisse/neu/", views.EventCreateView.as_view(), name="event-create"),
     path(
+        "<slug:slug>/ereignisse/beobachtung/",
+        views.EventObservationCreateView.as_view(),
+        name="observation-create",
+    ),
+    path(
         "<slug:slug>/ereignisse/<int:pk>/bearbeiten/",
         views.EventUpdateView.as_view(),
         name="event-update",
