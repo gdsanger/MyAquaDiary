@@ -16,8 +16,8 @@ from django.views.generic import TemplateView, View
 
 from core.views import NavSectionMixin
 
-from . import selectors
-from .charts import key_parameter_charts
+from . import derived, selectors
+from .charts import derived_charts, key_parameter_charts
 from .forms import (
     CareTaskForm,
     EventForm,
@@ -31,6 +31,7 @@ from .forms import (
     StockingForm,
     StockingRemovalForm,
     SubstrateLayerForm,
+    TankDerivedTargetForm,
     TankDissolveForm,
     TankForm,
     TankParameterTargetForm,
@@ -44,6 +45,7 @@ from .models import (
     Stocking,
     SubstrateLayer,
     Tank,
+    TankDerivedTarget,
     TankParameterTarget,
     TankPhoto,
     format_cm,
@@ -94,6 +96,29 @@ def _get_tank(request, slug):
     return get_object_or_404(Tank.objects.for_user(request.user), slug=slug)
 
 
+def derived_target_rows(tank):
+    """Die abgeleiteten Größen mit ihrem geltenden Zielbereich.
+
+    Anders als bei den gemessenen Größen steht hier **immer** eine Zeile: die
+    Vorgabe liegt im Code und nicht in einer Parameter-Tabelle, in der man sie
+    nachschlagen könnte. ``target`` ist die beckeneigene Überschreibung, sofern
+    es eine gibt — nur dann lässt sich zurücksetzen.
+    """
+    overrides = {row.key: row for row in tank.derived_targets.all()}
+    rows = []
+    for key, parameter in derived.DERIVED_PARAMETERS.items():
+        target = overrides.get(key)
+        minimum, maximum = derived.target_range(parameter, target)
+        rows.append(
+            {
+                "parameter": parameter,
+                "target": target,
+                "range_label": parameter.format_range(minimum, maximum),
+            }
+        )
+    return rows
+
+
 def tab_context(tank, tab):
     """Daten der gewählten Registerkarte — nur die, die sie wirklich braucht."""
     if tab == "uebersicht":
@@ -104,13 +129,15 @@ def tab_context(tank, tab):
             "targets": tank.parameter_targets.select_related("parameter").order_by(
                 "parameter__sort_order", "parameter__name"
             ),
+            "derived_targets": derived_target_rows(tank),
             "target_form": TankParameterTargetForm(tank=tank),
         }
     if tab == "messwerte":
-        measurements = selectors.tank_measurements(tank, limit=MEASUREMENT_PAGE_SIZE)
         return {
-            "measurements": measurements,
-            "charts": key_parameter_charts(tank),
+            # Gemessene und gerechnete Zeilen in einer Liste — getrennt
+            # untereinander stünde CO₂ ohne den pH daneben, aus dem es kommt.
+            "measurements": selectors.tank_measurement_rows(tank, limit=MEASUREMENT_PAGE_SIZE),
+            "charts": [*key_parameter_charts(tank), *derived_charts(tank)],
             "page_size": MEASUREMENT_PAGE_SIZE,
         }
     if tab == "ereignisse":
@@ -959,6 +986,102 @@ class TargetDeleteView(TankObjectConfirmView):
 
     def describe(self, obj):
         return f"{obj.parameter.name}: {obj.parameter.format_range(obj.minimum, obj.maximum)}"
+
+
+class DerivedTargetMixin:
+    """Gemeinsames für die Zielbereiche der gerechneten Größen.
+
+    Angesprochen werden sie über den Schlüssel aus der Adresse und nicht über
+    eine Kennung: die Zeile in ``TankDerivedTarget`` entsteht erst, wenn jemand
+    die Vorgabe überschreibt, und bis dahin gibt es keine ``pk``, die man
+    verlinken könnte.
+    """
+
+    model = TankDerivedTarget
+    tab = "uebersicht"
+
+    @property
+    def parameter(self):
+        found = derived.DERIVED_PARAMETERS.get(self.kwargs["key"])
+        if found is None:
+            raise Http404("Diese berechnete Größe gibt es nicht.")
+        return found
+
+    def get_target(self):
+        return self.get_queryset().filter(key=self.parameter.key).first()
+
+
+class DerivedTargetUpdateView(DerivedTargetMixin, TankFragmentView):
+    """Zielbereich einer gerechneten Größe festlegen oder ändern."""
+
+    def form(self, data=None):
+        instance = self.get_target()
+        if instance is None:
+            # Vorbelegt mit der geltenden Vorgabe: wer 15–25 auf 12–20 ändern
+            # will, soll nicht zwei leere Felder vorfinden.
+            instance = TankDerivedTarget(
+                tank=self.tank,
+                key=self.parameter.key,
+                minimum=self.parameter.default_min,
+                maximum=self.parameter.default_max,
+            )
+        return TankDerivedTargetForm(data, instance=instance)
+
+    def form_context(self, form):
+        return self.modal(
+            title=f"Zielbereich {self.parameter.name}",
+            action=reverse(
+                "tanks:derived-target-update", args=[self.tank.slug, self.parameter.key]
+            ),
+            body_template="tanks/partials/form_modal.html",
+            form=form,
+            modal_submit="Speichern",
+            modal_hint=f"{self.parameter.name} wird aus "
+            f"{self.parameter.formula} gerechnet und nicht gemessen. "
+            f"Ohne eigenen Zielbereich gilt "
+            f"{self.parameter.format_range(self.parameter.default_min, self.parameter.default_max)}.",
+        )
+
+    def get(self, request, **kwargs):
+        return self.render_tab(self.form_context(self.form()))
+
+    def post(self, request, **kwargs):
+        form = self.form(request.POST)
+        if not form.is_valid():
+            return self.render_tab(self.form_context(form))
+        form.save()
+        return self.done("Gespeichert.")
+
+
+class DerivedTargetResetView(DerivedTargetMixin, TankFragmentView):
+    """Eigenen Zielbereich verwerfen — danach gilt wieder die Vorgabe."""
+
+    def get_action(self):
+        return reverse("tanks:derived-target-reset", args=[self.tank.slug, self.parameter.key])
+
+    def get(self, request, **kwargs):
+        target = self.get_target()
+        if target is None:
+            raise Http404("Für diese Größe ist kein eigener Zielbereich hinterlegt.")
+        default = self.parameter.format_range(
+            self.parameter.default_min, self.parameter.default_max
+        )
+        return self.render_tab(
+            self.modal(
+                title=f"Zielbereich {self.parameter.name} zurücksetzen",
+                action=self.get_action(),
+                body_template="tanks/partials/confirm_modal.html",
+                modal_question=f"Danach gilt wieder die Vorgabe {default}.",
+                modal_subject=f"{self.parameter.name}: {target.range_label}",
+                modal_submit="Zurücksetzen",
+            )
+        )
+
+    def post(self, request, **kwargs):
+        target = self.get_target()
+        if target is not None:
+            target.delete()
+        return self.done("Zurückgesetzt.")
 
 
 # --- Fotos ----------------------------------------------------------------

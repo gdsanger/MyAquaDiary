@@ -40,9 +40,17 @@
           <li>
             <div class="mad-list__row">
               <div class="mad-list__main">
-                <p class="mad-list__title">{{ measurement.parameter.name }}</p>
+                <p class="mad-list__title">
+                  {{ measurement.parameter.name }}
+                  {% if measurement.is_derived %}<span class="mad-derived">berechnet</span>{% endif %}
+                </p>
                 <p class="mad-list__meta">
                   Ziel {{ measurement.target_label }} · {{ measurement.measured_at|date:"d.m.Y" }}
+                  {% comment %}
+                  Bei einer gerechneten Zeile ist der Zeitpunkt der des Paares,
+                  aus dem sie stammt — deshalb steht dahinter, welches das war.
+                  {% endcomment %}
+                  {% if measurement.is_derived %}<br>{{ measurement.source_label }}{% endif %}
                 </p>
               </div>
               <span class="mad-value mad-value--{{ measurement.status_code }}">{{ measurement.display_value }}</span>
@@ -78,6 +86,32 @@
           </li>
         {% empty %}
           <li class="mad-empty">Kein eigener Zielbereich — es gelten die Standardwerte der Parameter.</li>
+        {% endfor %}
+        {% comment %}
+        Die berechneten Größen stehen immer hier: ihre Vorgabe steckt im Code
+        und nicht in der Parameterliste, in der man sie sonst nachschlagen
+        könnte. Zurücksetzen gibt es nur, wo etwas überschrieben wurde.
+        {% endcomment %}
+        {% for row in derived_targets %}
+          <li>
+            <div class="mad-list__row">
+              <div class="mad-list__main">
+                <p class="mad-list__title">
+                  {{ row.parameter.name }}<span class="mad-derived">berechnet</span>
+                </p>
+                <p class="mad-list__meta">
+                  Ziel {{ row.range_label }}{% if not row.target %} · Vorgabe{% endif %}
+                </p>
+              </div>
+              {% url 'tanks:derived-target-update' tank.slug row.parameter.key as edit_url %}
+              {% if row.target %}
+                {% url 'tanks:derived-target-reset' tank.slug row.parameter.key as reset_url %}
+                {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=reset_url second_label="Zurücksetzen" %}
+              {% else %}
+                {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url="" %}
+              {% endif %}
+            </div>
+          </li>
         {% endfor %}
       </ul>
       <div class="mad-card__body">

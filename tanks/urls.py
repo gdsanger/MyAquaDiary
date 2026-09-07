@@ -141,6 +141,18 @@ urlpatterns = [
         views.TargetDeleteView.as_view(),
         name="target-delete",
     ),
+    # Zielbereiche berechneter Größen: über den Schlüssel, nicht über eine
+    # Kennung — den Datensatz gibt es erst, wenn die Vorgabe überschrieben wird.
+    path(
+        "<slug:slug>/zielbereiche/berechnet/<slug:key>/",
+        views.DerivedTargetUpdateView.as_view(),
+        name="derived-target-update",
+    ),
+    path(
+        "<slug:slug>/zielbereiche/berechnet/<slug:key>/zuruecksetzen/",
+        views.DerivedTargetResetView.as_view(),
+        name="derived-target-reset",
+    ),
     # Fotos
     path("<slug:slug>/fotos/neu/", views.PhotoCreateView.as_view(), name="photo-create"),
     path("<slug:slug>/fotos/<int:pk>/", views.PhotoDetailView.as_view(), name="photo-detail"),

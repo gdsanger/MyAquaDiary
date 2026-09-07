@@ -36,16 +36,28 @@
         {% for measurement in measurements %}
           <tr>
             <td>{{ measurement.measured_at|date:"d.m.Y H:i" }}</td>
-            <td>{{ measurement.parameter.name }}</td>
+            <td>
+              {{ measurement.parameter.name }}
+              {% comment %}
+              Gerechnete Zeilen tragen die Kennzeichnung und keine Aktionen: es
+              gibt nichts zu bearbeiten und nichts zu löschen. Wer den Wert
+              ändern will, korrigiert KH oder pH.
+              {% endcomment %}
+              {% if measurement.is_derived %}<span class="mad-derived">berechnet</span>{% endif %}
+            </td>
             <td class="mad-table__num mad-value mad-value--{{ measurement.status_code }}">
               {{ measurement.display_value }}
             </td>
             <td class="mad-muted">{{ measurement.target_label }}</td>
             <td><span class="mad-status mad-status--{{ measurement.status_code }}">{{ measurement.status_label }}</span></td>
             <td>
-              {% url 'tanks:measurement-update' tank.slug measurement.pk as edit_url %}
-              {% url 'tanks:measurement-delete' tank.slug measurement.pk as delete_url %}
-              {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=delete_url %}
+              {% if measurement.is_derived %}
+                <span class="mad-muted">{{ measurement.source_label }}</span>
+              {% else %}
+                {% url 'tanks:measurement-update' tank.slug measurement.pk as edit_url %}
+                {% url 'tanks:measurement-delete' tank.slug measurement.pk as delete_url %}
+                {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=delete_url %}
+              {% endif %}
             </td>
           </tr>
         {% empty %}

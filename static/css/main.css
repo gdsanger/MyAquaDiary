@@ -348,6 +348,25 @@ img {
   color: var(--mad-primary-strong);
 }
 
+/*
+ * Kennzeichnung einer gerechneten Groesse (CO2 aus KH und pH). Gestrichelter
+ * Rand statt Statusfarbe: die Zeile hat daneben schon einen Status, und zwei
+ * eingefaerbte Flaechen nebeneinander sagen weniger als eine. Ausgegraut
+ * gehoert sie nicht — sie ist so gueltig wie ein Messwert, nur nicht gemessen.
+ */
+.mad-derived {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.45rem;
+  border: 1px dashed var(--mad-border-strong);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--mad-text-muted);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
 /* Wertdarstellung mit Statusfarbe, ohne Badge-Flaeche. */
 .mad-value--ok { color: var(--mad-status-ok-text); }
 .mad-value--warn { color: var(--mad-status-warn-text); }

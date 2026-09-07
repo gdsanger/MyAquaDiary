@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from core.enums import Status
 
+from . import derived, selectors
 from .models import Measurement, Parameter, TankParameterTarget, classify_value
 
 #: Koordinatensystem des SVG. Die Darstellung skaliert über ``viewBox``,
@@ -52,15 +53,37 @@ def parameter_series(tank, parameter, days=DEFAULT_DAYS, target=None):
             tank=tank, parameter=parameter, measured_at__gte=since
         ).order_by("measured_at")
     )
-    if not measurements:
-        return None
-
     if target is None:
         target = TankParameterTarget.objects.filter(tank=tank, parameter=parameter).first()
     if target is not None:
         minimum, maximum = target.minimum, target.maximum
     else:
         minimum, maximum = parameter.default_min, parameter.default_max
+    return _series(parameter, measurements, minimum, maximum)
+
+
+def derived_series(parameter, values, minimum, maximum):
+    """Datenreihe einer gerechneten Größe.
+
+    Sie sieht im SVG aus wie jede andere; unterschieden wird sie über
+    ``is_derived`` in der Beschriftung. Die Werte kommen fertig gerechnet aus
+    :mod:`tanks.selectors` — hier wird nichts noch einmal gepaart.
+    """
+    # Aufsteigend, wie das Diagramm zeichnet; die Auswertung liefert die
+    # neuesten zuerst.
+    return _series(parameter, sorted(values, key=lambda item: item.measured_at), minimum, maximum)
+
+
+def _series(parameter, measurements, minimum, maximum):
+    """Der gemeinsame Rechenweg für gemessene und gerechnete Reihen.
+
+    ``measurements`` ist aufsteigend nach ``measured_at`` sortiert und trägt
+    ``value``, ``measured_at`` und ``display_value`` — mehr braucht das
+    Diagramm nicht, und deshalb passt ein ``DerivedValue`` genauso hinein wie
+    ein ``Measurement``.
+    """
+    if not measurements:
+        return None
 
     bounds = [float(m.value) for m in measurements]
     if minimum is not None:
@@ -98,6 +121,9 @@ def parameter_series(tank, parameter, days=DEFAULT_DAYS, target=None):
 
     return {
         "parameter": parameter,
+        # Die Beschriftung sagt, woher die Kurve kommt; gezeichnet wird sie
+        # wie jede andere.
+        "is_derived": getattr(parameter, "is_derived", False),
         "points": points,
         "polyline": " ".join(f"{p['x']},{p['y']}" for p in points),
         "band": band,
@@ -124,8 +150,9 @@ def _summary(parameter, measurements, latest, status):
         Status.UNKNOWN: "ohne hinterlegten Zielbereich",
     }[status]
     unit = f" {parameter.unit}" if parameter.unit else ""
+    noun = "berechnete Werte" if getattr(parameter, "is_derived", False) else "Messwerte"
     return (
-        f"Verlauf {parameter.name}: {len(measurements)} Messwerte, zuletzt "
+        f"Verlauf {parameter.name}: {len(measurements)} {noun}, zuletzt "
         f"{parameter.format_value(latest.value)}{unit} am "
         f"{latest.measured_at:%d.%m.%Y} — {label}."
     )
@@ -143,4 +170,28 @@ def key_parameter_charts(tank, limit=3, days=DEFAULT_DAYS):
             charts.append(series)
         if len(charts) >= limit:
             break
+    return charts
+
+
+def derived_charts(tank, days=DEFAULT_DAYS):
+    """Verlaufsdiagramme der gerechneten Größen eines Beckens.
+
+    Nicht Teil von :func:`key_parameter_charts`: dessen Zahl ist begrenzt, und
+    CO₂ soll dort keinen Leitparameter verdrängen. Wo keine Paare zustande
+    kommen, entsteht auch kein Diagramm.
+    """
+    if tank is None:
+        return []
+    since = timezone.now() - timedelta(days=days)
+    targets = selectors.derived_target_map([tank])
+    by_key = {}
+    for value in selectors.derived_values(tank, since=since):
+        by_key.setdefault(value.parameter.key, []).append(value)
+
+    charts = []
+    for key, parameter in derived.DERIVED_PARAMETERS.items():
+        minimum, maximum = derived.target_range(parameter, targets.get((tank.pk, key)))
+        series = derived_series(parameter, by_key.get(key, []), minimum, maximum)
+        if series is not None:
+            charts.append(series)
     return charts

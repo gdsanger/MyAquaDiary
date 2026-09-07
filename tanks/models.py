@@ -25,6 +25,9 @@ from core.images import (
     cover_preview_path,
     cover_thumb_path,
 )
+from core.values import ValueFormatMixin
+
+from . import derived
 
 #: Anzahl Farbkennungen für Becken (siehe ``.mad-tank-accent-*`` im Stylesheet).
 TANK_ACCENT_COUNT = 8
@@ -264,8 +267,13 @@ class Tank(CoverImageMixin, models.Model):
         return " · ".join(parts)
 
 
-class Parameter(models.Model):
-    """Wasserparameter (pH, NO₂, …) samt Standard-Zielbereich."""
+class Parameter(ValueFormatMixin, models.Model):
+    """Wasserparameter (pH, NO₂, …) samt Standard-Zielbereich.
+
+    Nur **gemessene** Größen stehen hier. Was gerechnet wird, hat bewusst
+    keinen Eintrag — sonst böte das Erfassungsformular es zum Eintippen an
+    (siehe :mod:`tanks.derived`).
+    """
 
     key = models.SlugField("Schlüssel", max_length=30, unique=True)
     name = models.CharField("Name", max_length=60)
@@ -285,22 +293,6 @@ class Parameter(models.Model):
 
     def __str__(self):
         return self.name
-
-    def format_value(self, value):
-        if value is None:
-            return "—"
-        return f"{value:.{self.decimals}f}".replace(".", ",")
-
-    def format_range(self, minimum, maximum):
-        """Zielbereich als Text, z. B. „6,5–7,5 pH" oder „bis 0,2 mg/l"."""
-        unit = f" {self.unit}" if self.unit else ""
-        if minimum is None and maximum is None:
-            return "—"
-        if minimum is not None and maximum is not None:
-            return f"{self.format_value(minimum)}–{self.format_value(maximum)}{unit}"
-        if minimum is not None:
-            return f"ab {self.format_value(minimum)}{unit}"
-        return f"bis {self.format_value(maximum)}{unit}"
 
 
 class TankParameterTarget(models.Model):
@@ -324,6 +316,44 @@ class TankParameterTarget(models.Model):
     @property
     def range_label(self):
         """Zielbereich als Text — Templates rufen keine Methoden mit Argumenten."""
+        return self.parameter.format_range(self.minimum, self.maximum)
+
+
+class TankDerivedTarget(models.Model):
+    """Beckenspezifischer Zielbereich einer abgeleiteten Größe (CO₂).
+
+    Warum nicht :class:`TankParameterTarget`: dessen Zielbereich hängt an
+    einem ``Parameter``, und genau den bekommt eine gerechnete Größe nicht
+    (#1240). Angesprochen wird sie deshalb über ihren Schlüssel; welche es
+    gibt, steht in :mod:`tanks.derived`.
+
+    Die Vorgabe (CO₂: 15–25 mg/l) steht nicht in dieser Tabelle, sondern am
+    Parameter im Code. Eine Zeile hier gibt es nur, wo jemand sie überschrieben
+    hat — wie bei den gemessenen Größen auch.
+    """
+
+    tank = models.ForeignKey(Tank, related_name="derived_targets", on_delete=models.CASCADE)
+    key = models.SlugField("Größe", max_length=30, choices=derived.CHOICES)
+    minimum = models.DecimalField("min", max_digits=8, decimal_places=3, null=True, blank=True)
+    maximum = models.DecimalField("max", max_digits=8, decimal_places=3, null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["tank", "key"], name="unique_derived_target_per_tank"),
+        ]
+        verbose_name = "Zielbereich (berechnet)"
+        verbose_name_plural = "Zielbereiche (berechnet)"
+
+    def __str__(self):
+        return f"{self.tank} · {self.parameter}"
+
+    @property
+    def parameter(self):
+        """Die abgeleitete Größe — ein Objekt aus dem Code, kein Datensatz."""
+        return derived.DERIVED_PARAMETERS[self.key]
+
+    @property
+    def range_label(self):
         return self.parameter.format_range(self.minimum, self.maximum)
 
 

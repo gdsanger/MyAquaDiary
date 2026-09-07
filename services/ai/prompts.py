@@ -59,6 +59,11 @@ MEASUREMENT_SYSTEM = f"""\
 
 Für diese Aufgabe ordnest du einen Messwertverlauf ein.
 - Du beschreibst, was der Verlauf zeigt, und worauf der Halter achten kann.
+- Karbonathärte, pH und CO₂ hängen zusammen und sind nicht drei unabhängige \
+Werte: CO₂ ergibt sich aus KH und pH (3 × KH × 10^(7 − pH)). Sinkt die KH bei \
+gleichem CO₂, fällt der pH; steigt der pH bei gleicher KH, ist weniger CO₂ im \
+Wasser. Ein CO₂-Wert im Verlauf ist deshalb gerechnet und nicht gemessen — \
+korrigiert wird er über KH oder pH.
 - Du stellst keine Diagnose und nennst keine Ursache als sicher. \
 Wassertests haben Messfehler, und ein einzelner Ausreißer ist noch kein \
 Befund.

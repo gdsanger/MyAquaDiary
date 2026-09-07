@@ -14,6 +14,7 @@ from core.enums import STATUS_SEVERITY, Status
 from services.ai.prompts import TankFacts
 from services.models import Device
 
+from . import derived
 from .models import (
     UPCOMING_DAYS,
     CareTask,
@@ -21,6 +22,7 @@ from .models import (
     Measurement,
     Stocking,
     Tank,
+    TankDerivedTarget,
     TankParameterTarget,
     TankPhoto,
     classify_value,
@@ -70,10 +72,74 @@ def annotate_status(measurements, targets):
     return measurements
 
 
+def derived_target_map(tanks):
+    """``{(tank_id, key): TankDerivedTarget}`` für eine Beckenmenge."""
+    targets = TankDerivedTarget.objects.filter(tank__in=tanks)
+    return {(t.tank_id, t.key): t for t in targets}
+
+
+def annotate_derived_status(values, targets):
+    """Statusabgleich für gerechnete Werte — dasselbe wie ``annotate_status``.
+
+    Getrennt, weil der Zielbereich aus einer anderen Tabelle kommt und die
+    Vorgabe im Code steht statt am Parameterdatensatz; die Auswertung selbst
+    ist dieselbe ``classify_value``, damit eine gerechnete Zeile nicht nach
+    anderen Regeln orange wird als eine gemessene.
+    """
+    for value in values:
+        target = targets.get((value.tank_id, value.parameter.key))
+        minimum, maximum = derived.target_range(value.parameter, target)
+        value.target_minimum = minimum
+        value.target_maximum = maximum
+        value.target_label = value.parameter.format_range(minimum, maximum)
+        value.status_code = classify_value(value.value, minimum, maximum)
+        value.status_label = Status(value.status_code).label
+    return values
+
+
+def derived_values(tank, since=None):
+    """Gerechnete Werte eines Beckens, neueste zuerst — bislang nur CO₂.
+
+    ``since`` grenzt die **Ausgabe** ein; die Messwerte werden um das
+    Paarungsfenster weiter zurück geladen, damit ein Paar am Rand nicht
+    auseinanderfällt: die KH von 23:30 gehört zum pH von 00:15, auch wenn nur
+    der zweite in den Zeitraum fällt.
+    """
+    window = derived.pairing_window()
+    rows = Measurement.objects.filter(tank=tank, parameter__key__in=derived.CO2.sources)
+    if since is not None:
+        rows = rows.filter(measured_at__gte=since - window)
+    rows = list(rows.select_related("parameter", "tank").order_by("measured_at"))
+
+    by_key = {key: [row for row in rows if row.parameter.key == key] for key in derived.CO2.sources}
+    values = derived.co2_values(by_key["kh"], by_key["ph"], window)
+    if since is not None:
+        values = [value for value in values if value.measured_at >= since]
+    return annotate_derived_status(values, derived_target_map([tank]))
+
+
+def latest_derived(tank):
+    """Der jüngste gerechnete Wert je abgeleiteter Größe — oder gar keiner.
+
+    Ohne passendes Gegenstück im Fenster entsteht kein Wert, und dann steht
+    hier nichts. Auf den KH-Wert von vorletzter Woche wird nicht
+    zurückgegriffen.
+    """
+    latest = {}
+    for value in derived_values(tank):
+        latest.setdefault(value.parameter.key, value)
+    return list(latest.values())
+
+
 def tank_measurement_overview(tank):
-    """Jüngster Messwert je Parameter eines Beckens, inklusive Status."""
+    """Jüngster Wert je Größe eines Beckens, inklusive Status.
+
+    Die gerechneten Größen stehen hinter den gemessenen — sie sind die
+    Folgerung, nicht der Befund.
+    """
     tanks = [tank]
-    return annotate_status(latest_measurements(tanks), target_map(tanks))
+    measurements = annotate_status(latest_measurements(tanks), target_map(tanks))
+    return [*measurements, *latest_derived(tank)]
 
 
 def tank_measurements(tank, limit=50):
@@ -84,6 +150,20 @@ def tank_measurements(tank, limit=50):
         .order_by("-measured_at")[:limit]
     )
     return annotate_status(measurements, target_map([tank]))
+
+
+def tank_measurement_rows(tank, limit=50):
+    """Messwerte und gerechnete Zeilen in einer Liste, neueste zuerst.
+
+    Gerechnet wird nur über den Zeitraum, den die Liste ohnehin zeigt: eine
+    CO₂-Zeile unterhalb des ältesten sichtbaren Messwerts hätte niemanden mehr
+    zu erklären.
+    """
+    measurements = tank_measurements(tank, limit=limit)
+    if not measurements:
+        return measurements
+    values = derived_values(tank, since=measurements[-1].measured_at)
+    return sorted([*measurements, *values], key=lambda row: row.measured_at, reverse=True)
 
 
 def substrate_lines(tank):

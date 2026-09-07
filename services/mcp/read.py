@@ -14,6 +14,8 @@ from datetime import timedelta
 
 from django.utils import timezone
 
+from tanks import derived
+
 from . import data, serialize
 from .registry import tool
 
@@ -100,6 +102,7 @@ def get_tank(context, arguments):
         arguments.integer("tank_id", required=True),
         prefetch=(
             "parameter_targets__parameter",
+            "derived_targets",
             "stockings__species",
             "plantings__species",
             "substrate_layers",
@@ -120,7 +123,10 @@ def get_tank(context, arguments):
     "Messgröße mit einem Wert; gleichzeitig erfasste Werte teilen sich den "
     "Zeitpunkt. Mit parameter lässt sich auf eine Messgröße einschränken "
     "(z. B. ph, kh, no3). Jeder Wert kommt mit dem Abgleich gegen den "
-    "Zielbereich des Beckens (status: ok, warn, critical, unknown).",
+    "Zielbereich des Beckens (status: ok, warn, critical, unknown). "
+    "Unter derived stehen berechnete Größen zum selben Zeitraum: CO₂ aus "
+    "Karbonathärte und pH, mit den Messwerten, aus denen es stammt. Ein "
+    "berechneter Wert hat keine measurement_id — gespeichert wird er nicht.",
     schema={
         "type": "object",
         "properties": {
@@ -128,7 +134,7 @@ def get_tank(context, arguments):
             "parameter": {
                 "type": "string",
                 "description": "Kürzel einer Messgröße: temperatur, ph, no2, no3, "
-                "nh4, kh, gh, po4, leitwert.",
+                "nh4, kh, gh, po4, leitwert. Für die berechnete Größe: co2.",
             },
             **_PERIOD_SCHEMA,
         },
@@ -138,21 +144,38 @@ def list_measurements(context, arguments):
     queryset = _tank_filter(context, arguments, data.measurements(context.user))
     queryset = _period_filter(arguments, queryset, "measured_at")
     parameter = arguments.text("parameter")
-    if parameter:
-        queryset = queryset.filter(parameter__key=parameter)
-    rows = list(queryset[: arguments.limit()])
+    limit = arguments.limit()
+
+    # Gerechnet wird über die ungekürzte Menge und erst danach gekürzt: aus den
+    # 50 neuesten Zeilen entstünden willkürliche Paare, sobald der Schnitt
+    # zwischen eine KH und ihren pH fällt.
+    derived_rows = []
+    if not parameter or parameter == derived.CO2.key:
+        derived_rows = data.derived_values(queryset)[:limit]
+
+    if parameter == derived.CO2.key:
+        # co2 ist keine Messgröße; danach zu filtern liefert keine Messwerte.
+        rows = []
+    else:
+        if parameter:
+            queryset = queryset.filter(parameter__key=parameter)
+        rows = list(queryset[:limit])
+
     targets = data.parameter_targets(context.user, [row.tank_id for row in rows])
     return {
         "measurements": [
             serialize.measurement(row, targets=targets.get(row.tank_id, {})) for row in rows
-        ]
+        ],
+        "derived": [serialize.derived_measurement(row) for row in derived_rows],
     }
 
 
 @tool(
     "get_measurement",
     "Ein einzelner Messwert mit dem Abgleich gegen den Zielbereich des Beckens "
-    "(status: ok, warn, critical, unknown).",
+    "(status: ok, warn, critical, unknown). Bei einem KH- oder pH-Wert steht "
+    "unter derived das CO₂, das sich mit ihm rechnen lässt — leer, wenn im "
+    "Zeitfenster kein passender Partnerwert liegt.",
     schema={
         "type": "object",
         "properties": {
@@ -165,7 +188,33 @@ def get_measurement(context, arguments):
     measurement = data.measurement(
         context.user, arguments.integer("measurement_id", required=True)
     )
-    return serialize.measurement(measurement)
+    found = serialize.measurement(measurement)
+    found["derived"] = [
+        serialize.derived_measurement(value)
+        for value in _derived_for(context, measurement)
+        # Nur die Paare, an denen dieser Wert beteiligt ist: die übrigen
+        # gehören zu anderen Messungen desselben Beckens.
+        if measurement.pk in {source.pk for source in value.sources}
+    ]
+    return found
+
+
+def _derived_for(context, measurement):
+    """Die gerechneten Werte rund um einen Messwert.
+
+    Geladen wird nur, was im Paarungsfenster liegt — für einen einzelnen
+    Messwert die ganze Beckenhistorie zu paaren wäre Verschwendung.
+    """
+    if measurement.parameter.key not in derived.CO2.sources:
+        return []
+    window = derived.pairing_window()
+    neighbours = data.measurements(context.user).filter(
+        tank_id=measurement.tank_id,
+        parameter__key__in=derived.CO2.sources,
+        measured_at__gte=measurement.measured_at - window,
+        measured_at__lte=measurement.measured_at + window,
+    )
+    return data.derived_values(neighbours)
 
 
 # --------------------------------------------------------------------------

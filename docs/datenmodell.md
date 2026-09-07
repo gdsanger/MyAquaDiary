@@ -104,8 +104,9 @@ Schichtmächtigkeiten), `setup_summary`.
 
 ### `tanks.Parameter`
 
-Eine Messgröße (pH, NO₂, …) mit globalem Vorgabebereich. Kein Benutzerbezug:
-Die Liste gilt für alle.
+Eine **gemessene** Größe (pH, NO₂, …) mit globalem Vorgabebereich. Kein
+Benutzerbezug: Die Liste gilt für alle. Was gerechnet wird, steht bewusst nicht
+hier — siehe [Abgeleitete Größen](#abgeleitete-grossen-kein-modell).
 
 ```
 key                  unique · Schlüssel, unter dem MCP und Diagramme den Parameter ansprechen
@@ -130,6 +131,43 @@ parameter            FK Parameter · CASCADE
 minimum
 maximum
 ```
+
+### `tanks.TankDerivedTarget`
+
+Beckenspezifischer Zielbereich einer **abgeleiteten** Größe. Angesprochen über
+den Schlüssel und nicht über einen `Parameter`, denn den bekommt eine
+gerechnete Größe nicht (#1240). Die Vorgabe (CO₂: 15–25 mg/l) steht nicht in
+dieser Tabelle, sondern im Code — eine Zeile gibt es nur, wo jemand
+überschrieben hat.
+
+```
+tank                 FK Tank · CASCADE · mit key zusammen eindeutig
+key                  Schlüssel der abgeleiteten Größe, z. B. „co2“
+minimum
+maximum
+```
+
+### Abgeleitete Größen — kein Modell
+
+CO₂ hat weder eine Tabelle noch einen `Parameter`-Eintrag. Es wird bei jeder
+Anzeige aus Karbonathärte und pH gerechnet:
+
+    CO₂ [mg/l] = 3 × KH [°dH] × 10^(7 − pH)
+
+Beschrieben ist die Größe in `tanks/derived.py` als `DerivedParameter`; die
+gerechneten Werte reist ein `DerivedValue` durch die Anwendung, das dieselben
+Namen trägt wie ein `Measurement` (`value`, `measured_at`, `display_value`) —
+bis auf die Kennung, die es nicht gibt, und `is_derived`.
+
+Zwei Gründe für diesen Zuschnitt: Ein gespeicherter Wert bliebe stehen, wenn
+KH oder pH nachträglich korrigiert werden, und sähe dabei aus wie eine
+Messung. Ein `Parameter`-Eintrag wiederum stünde im Erfassungsformular und
+ließe sich von Hand eintippen.
+
+Weil das Datenmodell **einen Wert je Zeile** speichert, gibt es keinen
+Datensatz, an dem KH und pH gemeinsam hängen. Gepaart wird deshalb über
+zeitliche Nähe (`CO2_PAIR_WINDOW_HOURS`, Vorgabe 6 h); ohne Partner im Fenster
+entsteht kein Wert.
 
 ### `tanks.Measurement`
 

@@ -10,6 +10,7 @@ from .models import (
     Stocking,
     SubstrateLayer,
     Tank,
+    TankDerivedTarget,
     TankParameterTarget,
     TankPhoto,
     TaskCompletion,
@@ -19,6 +20,17 @@ from .models import (
 class TankParameterTargetInline(admin.TabularInline):
     model = TankParameterTarget
     extra = 1
+
+
+class TankDerivedTargetInline(admin.TabularInline):
+    """Zielbereiche der gerechneten Größen — es gibt nur den Bereich zu pflegen.
+
+    Der Wert selbst steht nirgends: CO₂ wird bei jeder Anzeige aus KH und pH
+    gerechnet (siehe ``tanks/derived.py``).
+    """
+
+    model = TankDerivedTarget
+    extra = 0
 
 
 class SubstrateLayerInline(admin.TabularInline):
@@ -48,6 +60,7 @@ class TankAdmin(admin.ModelAdmin):
     prepopulated_fields = {"slug": ["name"]}
     inlines = [
         TankParameterTargetInline,
+        TankDerivedTargetInline,
         SubstrateLayerInline,
         HardscapeItemInline,
         TankPhotoInline,

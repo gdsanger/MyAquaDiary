@@ -27,6 +27,7 @@ from decimal import Decimal
 from django.utils import timezone
 
 from core.enums import Status
+from tanks import derived as derived_module
 
 
 def number(value):
@@ -90,11 +91,18 @@ def tank_detail(instance) -> dict:
     keinen Betriebszustand, sondern eine Standzeit und eine Wirkung auf die
     Wasserwerte. Genau die wird gebraucht, wenn ein Verlauf erklärt werden soll.
     """
+    overrides = {row.key: row for row in instance.derived_targets.all()}
     detail = tank(instance)
     detail.update(
         {
             "notes": instance.notes,
             "parameter_targets": [target(item) for item in instance.parameter_targets.all()],
+            # Immer vollständig: was gerechnet wird, hat keinen Katalogeintrag,
+            # in dem die Vorgabe stünde.
+            "derived_targets": [
+                derived_target(parameter, overrides.get(key))
+                for key, parameter in derived_module.DERIVED_PARAMETERS.items()
+            ],
             "animals": [stocking(item) for item in instance.stockings.all()],
             "plants": [planting(item) for item in instance.plantings.all()],
             # Von unten nach oben, wie der Bodengrund eingefüllt wurde.
@@ -114,6 +122,26 @@ def target(instance) -> dict:
         "minimum": number(instance.minimum),
         "maximum": number(instance.maximum),
         "range_label": instance.range_label,
+    }
+
+
+def derived_target(parameter, instance=None) -> dict:
+    """Zielbereich einer gerechneten Größe.
+
+    Anders als bei den gemessenen Größen steht hier auch dann etwas, wenn
+    nichts überschrieben wurde: die Vorgabe liegt im Code und nicht in einer
+    Tabelle, die ein Modell nachschlagen könnte. ``is_default`` sagt, welcher
+    der beiden Fälle vorliegt.
+    """
+    minimum, maximum = derived_module.target_range(parameter, instance)
+    return {
+        "parameter": parameter.key,
+        "parameter_label": parameter.name,
+        "unit": parameter.unit,
+        "minimum": number(minimum),
+        "maximum": number(maximum),
+        "range_label": parameter.format_range(minimum, maximum),
+        "is_default": instance is None,
     }
 
 
@@ -150,6 +178,47 @@ def measurement(instance, *, targets=None) -> dict:
         "target_minimum": number(minimum),
         "target_maximum": number(maximum),
         "note": instance.note,
+    }
+
+
+def derived_measurement(instance) -> dict:
+    """Ein gerechneter Wert (CO₂) samt den Messwerten, aus denen er stammt.
+
+    **Ohne ``measurement_id``**, und das ist keine Auslassung: den Wert gibt es
+    in der Datenbank nicht. Er entsteht bei jeder Abfrage neu aus KH und pH und
+    zieht deshalb mit, wenn einer der beiden korrigiert wird. Ein Werkzeug, das
+    ihn ändern oder abrufen könnte, gibt es folglich auch nicht.
+
+    ``formula`` und ``sources`` stehen dabei, damit ein Modell die Zahl
+    nachvollziehen kann, statt sie für eine Messung zu halten — und damit es
+    sieht, wie weit die beiden Messwerte auseinanderliegen.
+    """
+    status, status_label = _status(instance.status_code)
+    return {
+        "tank_id": instance.tank_id,
+        "tank": instance.tank.name,
+        # Der spätere der beiden Zeitpunkte: erst dann ist das Paar vollständig.
+        "measured_at": moment(instance.measured_at),
+        "parameter": instance.parameter.key,
+        "parameter_label": instance.parameter.name,
+        "unit": instance.parameter.unit,
+        "value": number(instance.value),
+        "display_value": instance.display_value,
+        "status": status,
+        "status_label": status_label,
+        "target_minimum": number(instance.target_minimum),
+        "target_maximum": number(instance.target_maximum),
+        "is_derived": True,
+        "formula": instance.parameter.formula,
+        "sources": [
+            {
+                "measurement_id": source.pk,
+                "parameter": source.parameter.key,
+                "value": number(source.value),
+                "measured_at": moment(source.measured_at),
+            }
+            for source in instance.sources
+        ],
     }
 
 
