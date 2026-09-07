@@ -112,10 +112,19 @@
   <div class="col-12 col-lg-6">
     <section class="mad-card">
       <div class="mad-card__header"><h2 class="mad-card__title">Titelbild</h2></div>
-      {% if tank.cover_image %}
-        {% include "partials/image.html" with variant=tank.large alt="Titelbild "|add:tank.name class="mad-thumb" only %}
-      {% elif photo %}
-        {% include "partials/image.html" with variant=photo.large alt=photo.alt_text class="mad-thumb" only %}
+      {% comment %}
+      `.mad-cover` statt `.mad-thumb`: dieselbe 3:2-Fläche wie im Raster, aber in
+      der Breite begrenzt. Über die volle Spaltenhöhe gezogen beherrschte das
+      Bild sonst eine Seite, auf der es die Nebensache ist.
+      {% endcomment %}
+      {% if tank.cover_image or photo %}
+        <div class="mad-card__body">
+          {% if tank.cover_image %}
+            {% include "partials/image.html" with variant=tank.large alt="Titelbild "|add:tank.name class="mad-cover" only %}
+          {% else %}
+            {% include "partials/image.html" with variant=photo.large alt=photo.alt_text class="mad-cover" only %}
+          {% endif %}
+        </div>
       {% else %}
         <p class="mad-empty mb-0">Kein Bild hinterlegt.</p>
       {% endif %}

@@ -469,11 +469,27 @@ img {
 
 /* ---------------------------------------------------------- Bildflaeche */
 
+/* Seitenverhaeltnis gibt der Container vor, nicht das Bild: nur so sind Karten
+ * eines Rasters gleich hoch, egal ob hoch- oder querformatig fotografiert
+ * wurde. Beschnitten wird dabei bewusst — ein gleichmaessiges Raster ist mehr
+ * wert als die vollstaendige Bildflaeche. Wer das ganze Bild sehen will,
+ * oeffnet die Grossansicht (.mad-lightbox), dort wird nichts beschnitten.
+ *
+ * Jede dieser Regeln setzt dafuer ausdruecklich `height: auto`. Grund: die
+ * Vorlage schreibt width/height ans <img>, damit der Browser die Flaeche vor
+ * dem Laden kennt. Diese Attribute sind Presentational Hints und gelten als
+ * Autorenregel mit Spezifitaet 0 — `width: 100%` ueberschreibt den einen Hint,
+ * die Pixelhoehe des anderen bliebe ohne eigene Regel aber stehen und machte
+ * jedes aspect-ratio wirkungslos. Die Kachel waere dann so hoch wie das Bild
+ * gross ist, und damit von Bild zu Bild verschieden. */
+
 .mad-thumb {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 10;
+  height: auto;
+  aspect-ratio: 3 / 2;
   object-fit: cover;
+  object-position: center;
   background-color: var(--mad-surface-sunken);
   border-radius: var(--mad-radius) var(--mad-radius) 0 0;
 }
@@ -499,13 +515,17 @@ img {
   border-bottom: 1px solid var(--mad-border);
 }
 
-/* Titelbild auf einer Detailseite. Dasselbe Seitenverhaeltnis wie die Kachel,
- * nur begrenzt: ein Geraetefoto soll die Seite nicht ausfuellen. */
+/* Titelbild in einer Kachel oder auf einer Detailseite. Dasselbe
+ * Seitenverhaeltnis wie das Raster, nur in der Breite begrenzt — daraus ergibt
+ * sich die begrenzte Hoehe: ein Becken- oder Geraetefoto soll die Spalte
+ * schmuecken, nicht die Seite ausfuellen. */
 .mad-cover {
   display: block;
   width: min(100%, 22rem);
-  aspect-ratio: 16 / 10;
+  height: auto;
+  aspect-ratio: 3 / 2;
   object-fit: cover;
+  object-position: center;
   border-radius: var(--mad-radius);
   background-color: var(--mad-surface-sunken);
 }
@@ -541,13 +561,33 @@ img {
   gap: 0.75rem;
 }
 
+/* Quadratisch, weil im Raster hoch- und querformatige Aufnahmen nebeneinander
+ * stehen: jedes andere Verhaeltnis bevorzugt eine der beiden Lagen. */
 .mad-gallery img {
   width: 100%;
-  aspect-ratio: 4 / 3;
+  height: auto;
+  aspect-ratio: 1 / 1;
   object-fit: cover;
+  object-position: center;
   border-radius: var(--mad-radius-sm);
   border: 1px solid var(--mad-border);
   background-color: var(--mad-surface-sunken);
+}
+
+/* Ein Foto in voller Groesse: `object-fit: contain` statt `cover`, und keine
+ * Vorgabe zum Seitenverhaeltnis — hier zaehlt die vollstaendige Aufnahme, nicht
+ * das gleichmaessige Raster. `width`/`height: auto` heben wie bei den Kacheln
+ * die Presentational Hints des <img> auf; begrenzt wird ueber max-*. */
+.mad-photo {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  /* Deckel, damit die Grossansicht ohne Scrollen auf den Schirm passt. */
+  max-height: min(70vh, 40rem);
+  margin-inline: auto;
+  object-fit: contain;
+  border-radius: var(--mad-radius-sm);
 }
 
 /* Bildvorschau in einer Listenzeile (Ereignis, Aktivitaetsleiste). Feste

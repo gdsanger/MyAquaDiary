@@ -1158,6 +1158,39 @@ class TankCoverTests(TestCase):
         self.assertTrue(self.tank.cover_preview)
         self.assertEqual((self.tank.cover_width, self.tank.cover_height), (1200, 800))
 
+    def size_of(self, field):
+        field.open("rb")
+        try:
+            return Image.open(BytesIO(field.read())).size
+        finally:
+            field.close()
+
+    def test_a_rotated_cover_stands_upright(self):
+        """EXIF-Orientierung 6 heißt: um 90° gedreht aufgenommen.
+
+        Die Varianten tragen keinen EXIF-Block mehr — die Drehung muss also in
+        den Pixeln stecken, sonst läge das Titelbild in der Kachel quer, während
+        das Original aufrecht steht.
+        """
+        self.tank.cover_image = photo_upload(size=(1200, 800), orientation=6)
+        self.tank.save()
+
+        self.assertEqual((self.tank.cover_width, self.tank.cover_height), (800, 1200))
+        self.assertEqual(self.size_of(self.tank.cover_thumbnail), (267, 400))
+
+    def test_the_recorded_dimensions_match_the_delivered_file(self):
+        """Was im ``<img>`` steht, muss zu der Datei passen, die geladen wird."""
+        self.tank.cover_image = photo_upload(size=(1200, 800))
+        self.tank.save()
+
+        for variant, field in (
+            (self.tank.thumb, self.tank.cover_thumbnail),
+            (self.tank.large, self.tank.cover_preview),
+        ):
+            with self.subTest(variant=field.name):
+                self.assertEqual(variant.url, field.url)
+                self.assertEqual((variant.width, variant.height), self.size_of(field))
+
     def test_the_files_still_lie_under_tanks(self):
         """Der Ordner kommt jetzt aus dem Mixin — der Pfad bleibt derselbe."""
         self.tank.cover_image = photo_upload(size=(300, 200))

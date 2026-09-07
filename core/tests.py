@@ -179,6 +179,73 @@ class TemplateColourTests(SimpleTestCase):
                 self.assertIsNone(COLOR_FUNCTION_PATTERN.search(content))
 
 
+class ImageAspectTests(SimpleTestCase):
+    """Das Seitenverhältnis gibt der Container vor, nicht das Bild.
+
+    Der Fehler, den diese Tests festhalten, ist im Browser sichtbar und in
+    Django unsichtbar: die Vorlage schreibt ``width``/``height`` ans ``<img>``,
+    damit die Fläche vor dem Laden feststeht. Beide Attribute sind
+    Presentational Hints und wirken wie eine Autorenregel mit Spezifität 0.
+    ``width: 100%`` überschreibt den einen — die Pixelhöhe des anderen bleibt
+    ohne eigene Regel stehen und macht jedes ``aspect-ratio`` wirkungslos. Die
+    Kachel ist dann so hoch, wie das Bild groß ist, und damit von Bild zu Bild
+    verschieden.
+
+    Deshalb wird hier auf ``height: auto`` bestanden: es ist die Regel, die man
+    beim Aufräumen für überflüssig hält.
+    """
+
+    #: Bildflächen mit vorgegebenem Seitenverhältnis und ihr Sollwert.
+    CROPPED = {
+        ".mad-thumb": "3 / 2",
+        ".mad-cover": "3 / 2",
+        ".mad-gallery img": "1 / 1",
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        css = COMMENT_PATTERN.sub("", CSS_PATH.read_text(encoding="utf-8"))
+        # Nur die Grundregeln: die Ausnahmen für schmale Displays stehen in
+        # ``@media``-Blöcken am Dateiende und tragen dieselben Selektoren
+        # noch einmal.
+        base = css.split("@media", 1)[0]
+        cls.blocks = {
+            selector.strip(): body
+            for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", base)
+        }
+
+    def declarations(self, selector):
+        body = self.blocks.get(selector)
+        self.assertIsNotNone(body, f"Regel {selector} fehlt")
+        pairs = (part.split(":", 1) for part in body.split(";") if ":" in part)
+        return {name.strip(): value.strip() for name, value in pairs}
+
+    def test_overview_images_carry_a_fixed_ratio(self):
+        for selector, ratio in self.CROPPED.items():
+            with self.subTest(selector=selector):
+                rules = self.declarations(selector)
+                self.assertEqual(rules.get("aspect-ratio"), ratio)
+                self.assertEqual(rules.get("object-fit"), "cover")
+
+    def test_overview_images_ignore_the_height_attribute(self):
+        """Ohne ``height: auto`` bestimmt das Bild die Layouthöhe."""
+        for selector in self.CROPPED:
+            with self.subTest(selector=selector):
+                self.assertEqual(self.declarations(selector).get("height"), "auto")
+
+    def test_the_large_view_is_not_cropped(self):
+        """In der Großansicht zählt die vollständige Aufnahme."""
+        rules = self.declarations(".mad-photo")
+        self.assertEqual(rules.get("object-fit"), "contain")
+        self.assertNotIn("aspect-ratio", rules)
+        self.assertEqual(rules.get("height"), "auto")
+
+    def test_the_cover_tile_stays_small(self):
+        """Das Titelbild soll die Spalte schmücken, nicht die Seite füllen."""
+        self.assertEqual(self.declarations(".mad-cover").get("width"), "min(100%, 22rem)")
+
+
 class ExifTests(SimpleTestCase):
     """Aufnahmezeitpunkt aus dem Bild — und was passiert, wenn keiner drinsteht."""
 

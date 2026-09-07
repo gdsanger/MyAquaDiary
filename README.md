@@ -143,6 +143,37 @@ entfernt es ganz — anders als bei einer Galerie soll hier nichts liegen bleibe
 Beim Löschen eines Bildes verschwinden Original und Varianten aus dem Speicher
 (`core/signals.py`) — Django tut das von sich aus nicht.
 
+### Bilddarstellung: der Container gibt das Verhältnis vor
+
+Fotografiert wird hoch und quer durcheinander. Damit ein Raster trotzdem
+gleichmäßig bleibt, steht das **Seitenverhältnis an der Fläche**, nicht am Bild:
+
+| Ort | Klasse | Verhältnis | Verhalten |
+|---|---|---|---|
+| Beckenkarte, Gerätekachel | `.mad-thumb` | 3:2 | `object-fit: cover`, mittig |
+| Galerie-Raster | `.mad-gallery img` | 1:1 | `object-fit: cover`, mittig |
+| Titelbild in einer Kachel | `.mad-cover` | 3:2 | in der Breite begrenzt (22 rem) |
+| Großansicht | `.mad-photo` | frei | `object-fit: contain`, kein Beschnitt |
+
+**In Übersichten wird beschnitten, in der Großansicht nicht.** Ein
+gleichmäßiges Raster ist mehr wert als die vollständige Bildfläche; wer das
+ganze Bild sehen will, öffnet es.
+
+Jede dieser Regeln setzt ausdrücklich `height: auto`, und das ist keine
+Schönheitskorrektur: `partials/image.html` schreibt `width`/`height` ans `<img>`,
+damit der Browser die Fläche vor dem Laden kennt. Beide Attribute sind
+*Presentational Hints* und wirken wie eine Autorenregel mit Spezifität 0.
+`width: 100%` überschreibt den einen — die Pixelhöhe des anderen bliebe ohne
+eigene Regel stehen und machte jedes `aspect-ratio` wirkungslos. Genau das
+sorgte dafür, dass Karten von Bild zu Bild unterschiedlich hoch waren.
+`core/tests.py` (`ImageAspectTests`) hält die Regeln maschinell nach.
+
+Die **EXIF-Orientierung** steckt in den Pixeln der Varianten, nicht mehr in
+einem Tag (`ImageOps.exif_transpose` beim Erzeugen). `width`/`height` bzw.
+`cover_width`/`cover_height` sind die Maße *nach* dieser Drehung — sie passen
+damit zu jeder ausgelieferten Variante, deren Maße `scaled_size()` daraus
+herunterrechnet.
+
 ### Katalogpflege
 
 Der Katalog ist die Ausnahme: er ist userübergreifend, ein Steckbrief gehört
