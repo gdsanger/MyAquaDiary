@@ -62,6 +62,7 @@ EVENT_ROWS = 20
 _SHARED_LABELS = {
     "scientific_name": "Wissenschaftlicher Name",
     "common_name": "Deutscher Name",
+    "variant": "Sorte / Zuchtform",
     "family": "Familie",
     "origin": "Herkunft",
     "difficulty": "Anspruch",

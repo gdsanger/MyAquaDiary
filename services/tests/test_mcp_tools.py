@@ -464,6 +464,23 @@ class CatalogReadTests(ToolTestCase):
         self.assertEqual(result["placement_label"], "Aufsitzerpflanze")
         self.assertIn("co2_required", result)
 
+    def test_the_search_finds_a_cultivated_form_and_names_it_as_one(self):
+        AnimalSpecies.objects.create(
+            scientific_name="Mikrogeophagus ramirezi",
+            common_name="Schmetterlingsbuntbarsch",
+            slug="mikrogeophagus-ramirezi-electric-blue",
+            variant="Electric Blue",
+            is_cultivated_form=True,
+        )
+
+        entry = self.call("search_catalog", query="Electric Blue")["entries"][0]
+
+        # Ohne diese beiden Felder liesse sich die Zuchtform in der Antwort
+        # nicht von der Stammform unterscheiden.
+        self.assertEqual(entry["variant"], "Electric Blue")
+        self.assertTrue(entry["is_cultivated_form"])
+        self.assertEqual(entry["name"], "Schmetterlingsbuntbarsch 'Electric Blue'")
+
     def test_an_unknown_kind_is_refused(self):
         with self.assertRaises(ToolError):
             self.call("get_catalog_entry", kind="mineral", entry_id=1)

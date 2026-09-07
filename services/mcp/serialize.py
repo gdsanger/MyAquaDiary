@@ -317,6 +317,11 @@ def catalog_entry(kind: str, instance) -> dict:
         "entry_id": instance.pk,
         "name": instance.display_name,
         "scientific_name": instance.scientific_name,
+        # Wild- und Zuchtform sind getrennte Einträge; ohne diese beiden
+        # Felder wäre für ein Sprachmodell nicht erkennbar, welcher von
+        # zwei gleich benannten Treffern gemeint ist.
+        "variant": instance.variant,
+        "is_cultivated_form": instance.is_cultivated_form,
         "common_name": instance.common_name,
         "summary": instance.summary,
         "water_type": instance.water_type,

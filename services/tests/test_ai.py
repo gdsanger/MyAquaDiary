@@ -621,6 +621,24 @@ class CatalogMatchTests(TestCase):
         )
         self.assertEqual(catalog.publish(suggestion), "")
 
+    def test_the_variant_field_is_the_one_both_catalog_models_have(self):
+        """Die Übernahme sucht über Name *und* Sorte — der Feldname muss stimmen.
+
+        Solange ``publish`` gegen einen Feldnamen sucht, den es im Katalog
+        nicht gibt, fiele der Abgleich beim Anbinden lautlos auf die falsche
+        Bedingung zurück und legte Dubletten an.
+        """
+        from catalog.models import AnimalSpecies, PlantSpecies
+
+        for model in (AnimalSpecies, PlantSpecies):
+            with self.subTest(model=model.__name__):
+                self.assertTrue(model._meta.get_field(catalog.VARIANT_FIELD))
+
+    def test_the_profile_schemas_ask_for_the_variant(self):
+        for schema in (schemas.ANIMAL_PROFILE_SCHEMA, schemas.PLANT_PROFILE_SCHEMA):
+            self.assertIn("variant", schema["properties"])
+            self.assertIn("variant", schema["required"])
+
     def test_matches_the_scientific_name_exactly_when_the_catalog_is_there(self):
         entry = FakeEntry(pk=7, scientific_name="Poecilia reticulata", verified=True)
         model = FakeModel([entry])
