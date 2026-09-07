@@ -1,0 +1,60 @@
+{% comment %}
+Eine Gerätekarte für die Übersicht. Zeigt bei zugeordneten Geräten das Becken,
+bei eingelagerten stattdessen den Bestandshinweis. Der Live-Status wird nur für
+angebundene, aktive und zugeordnete Geräte nachgeladen — ein eingelagertes
+Gerät hängt an keinem Strom.
+{% endcomment %}
+<div class="col">
+  <div class="card h-100">
+    {% include "services/_device_cover_image.html" with device=device variant=device.thumb class="mad-thumb" lazy=True only %}
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start gap-2">
+        <div>
+          <h2 class="h5 card-title mb-1">
+            <a href="{% url 'services:device_detail' device.pk %}">{{ device.name }}</a>
+          </h2>
+          <p class="small text-body-secondary mb-2">
+            {{ device.get_kind_display }}{% if device.generation_label %} {{ device.generation_label }}{% endif %}
+            {% if device.is_connected %} · {{ device.host|default:"ohne Adresse" }}{% endif %}
+            {% if device.is_stored %}
+              · nicht im Einsatz{% if device.stored_since %}, seit {{ device.stored_since|date:"d.m.Y" }}{% endif %}
+            {% else %}
+              · <a href="{{ device.tank.get_absolute_url }}">{{ device.tank.name }}</a>
+            {% endif %}
+          </p>
+        </div>
+        {% if not device.is_active %}<span class="badge text-bg-secondary">inaktiv</span>{% endif %}
+      </div>
+
+      {% if not device.is_connected %}
+        <p class="mb-2">
+          <span class="mad-status mad-status--{{ device.status }}">{{ device.get_status_display }}</span>
+          {% if device.status_message %}<span class="small">{{ device.status_message }}</span>{% endif %}
+        </p>
+      {% endif %}
+      {% if device.maintenance_due_on %}
+        <p class="small mb-2">
+          <span class="mad-status mad-status--{{ device.maintenance_status_value }}">
+            Wartung {{ device.maintenance_due_on|date:"d.m.Y" }}
+          </span>
+        </p>
+      {% endif %}
+
+      {% if device.uses_default_password %}
+        <div class="alert alert-warning py-2 small" role="alert">
+          Das Gerät nutzt noch das Werkspasswort.
+          <a href="{% url 'services:device_credentials' device.pk %}">Jetzt ändern</a>
+        </div>
+      {% endif %}
+
+      {% if device.is_connected and device.is_active and device.host and not device.is_stored %}
+        {# Status nachladen statt beim Seitenaufbau holen: ein stummes
+           Gerät kostet damit nur diesen Platzhalter. #}
+        <div hx-get="{% url 'services:device_status' device.pk %}"
+             hx-trigger="load" hx-swap="outerHTML">
+          <p class="text-body-secondary mb-0">Status wird geladen …</p>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>

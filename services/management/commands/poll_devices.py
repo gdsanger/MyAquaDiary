@@ -26,7 +26,12 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        queryset = Device.objects.filter(is_active=True, kind__in=Device.POLLED_KINDS)
+        # Eingelagerte Geräte (ohne Becken) hängen an keinem Strom — sie
+        # abzufragen liefe nur in Zeitüberschreitungen und zählte als „nicht
+        # erreichbar".
+        queryset = Device.objects.filter(
+            is_active=True, kind__in=Device.POLLED_KINDS, tank__isnull=False
+        )
         if options.get("device_id"):
             queryset = queryset.filter(pk=options["device_id"])
         if options.get("owner"):

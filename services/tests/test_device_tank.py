@@ -322,12 +322,15 @@ class OwnershipTests(DeviceTankTestCase):
 
         self.assertIn("tank", getattr(caught.exception, "message_dict", {}))
 
-    def test_deleting_the_tank_takes_its_devices(self):
+    def test_deleting_the_tank_stores_its_devices(self):
         device = make_plug(self.user, tank=self.tank)
 
         self.tank.delete()
 
-        self.assertFalse(Device.objects.filter(pk=device.pk).exists())
+        device.refresh_from_db()
+        self.assertTrue(Device.objects.filter(pk=device.pk).exists())
+        self.assertIsNone(device.tank_id)
+        self.assertTrue(device.is_stored)
 
 
 class UserModelTests(TestCase):

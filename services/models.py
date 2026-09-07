@@ -199,9 +199,14 @@ class Device(CoverImageMixin, models.Model):
     gehört genauso in die Geräteliste des Beckens wie ein Eheim-Filter, der
     seinen Fehlercode selbst meldet.
 
-    Das Becken ist Pflicht. Freitext war es einmal, mit den bekannten Folgen:
-    ein Tippfehler erzeugte in der Verbrauchsauswertung eine zweite Gruppe, und
-    ein Gerätefehler fand den Weg zum Becken gar nicht erst.
+    Das Becken ist beim Erfassen Pflicht — die Formulare bestehen darauf.
+    Freitext war es einmal, mit den bekannten Folgen: ein Tippfehler erzeugte in
+    der Verbrauchsauswertung eine zweite Gruppe, und ein Gerätefehler fand den
+    Weg zum Becken gar nicht erst. Am Modell ist der Fremdschlüssel dennoch
+    nullbar: ``tank IS NULL`` heißt „nicht im Einsatz“ — ein ausgebautes Gerät
+    liegt im Schrank, statt gelöscht oder beim alten Becken belassen zu werden.
+    Ein zweites Statusfeld dafür gibt es bewusst nicht; es liefe irgendwann
+    gegen den Fremdschlüssel auseinander.
 
     Die Zugangsdaten liegen als JSON (``user``, ``password``) verschlüsselt in
     der Datenbank und werden weder angezeigt noch protokolliert.
@@ -270,10 +275,17 @@ class Device(CoverImageMixin, models.Model):
     tank = models.ForeignKey(
         "tanks.Tank",
         verbose_name="Becken",
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name="devices",
-        help_text="Becken, an dem das Gerät hängt — Grundlage der Verbrauchsauswertung "
-        "und der Warnungen.",
+        null=True,
+        blank=True,
+        help_text="Leer lassen, wenn das Gerät gerade nicht im Einsatz ist.",
+    )
+    stored_since = models.DateField(
+        "Eingelagert seit",
+        null=True,
+        blank=True,
+        help_text="Gesetzt, solange das Gerät nicht im Einsatz ist.",
     )
     kind = models.CharField("Art", max_length=30, choices=Kind.choices)
     name = models.CharField("Name", max_length=120)
@@ -458,6 +470,16 @@ class Device(CoverImageMixin, models.Model):
         return self.is_eheim and self.api_password == DEFAULT_PASSWORD
 
     # -- Zustand -------------------------------------------------------------
+
+    @property
+    def is_stored(self) -> bool:
+        """True, solange das Gerät keinem Becken zugeordnet ist.
+
+        Der eingelagerte Zustand hat kein eigenes Feld: das fehlende Becken
+        *ist* die Aussage. Ein eingelagertes Gerät wird nicht abgefragt, erzeugt
+        keine Warnung und taucht in der Verbrauchsauswertung nicht auf.
+        """
+        return self.tank_id is None
 
     @property
     def is_eheim(self) -> bool:

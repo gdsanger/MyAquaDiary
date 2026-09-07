@@ -152,6 +152,11 @@ class TankScopedDeviceForm(BootstrapMixin, forms.ModelForm):
     taucht nicht auf und wird beim Absenden abgewiesen, auch bei einer von Hand
     geschickten Kennung. Ohne Benutzer (Django-Admin) bleibt die volle Auswahl
     stehen; dort ist der Besitzer ein Feld des Formulars.
+
+    Am Modell ist das Becken nullbar (ein eingelagertes Gerät hat keins); beim
+    Erfassen und Bearbeiten bleibt es hier trotzdem Pflicht. Der Weg in den
+    Bestand ist die ausdrückliche Schaltfläche „Einlagern", nicht ein leer
+    gelassenes Feld.
     """
 
     installed_on = DateField(label="In Betrieb seit", required=False)
@@ -162,8 +167,10 @@ class TankScopedDeviceForm(BootstrapMixin, forms.ModelForm):
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
         owner = user or (self.instance.owner if self.instance.owner_id else None)
-        if owner is not None and "tank" in self.fields:
-            self.fields["tank"].queryset = Tank.objects.for_user(owner)
+        if "tank" in self.fields:
+            self.fields["tank"].required = True
+            if owner is not None:
+                self.fields["tank"].queryset = Tank.objects.for_user(owner)
 
 
 class DeviceForm(TankScopedDeviceForm):
@@ -357,6 +364,25 @@ class ShellyDeviceForm(TankScopedDeviceForm):
         if commit:
             device.save()
         return device
+
+
+class DeviceInstallForm(BootstrapMixin, forms.Form):
+    """Beckenauswahl beim Einbauen eines eingelagerten Geräts.
+
+    Nur die eigenen Becken stehen zur Wahl — ein fremdes taucht nicht auf und
+    wird beim Absenden abgewiesen, auch bei einer von Hand geschickten Kennung.
+    """
+
+    tank = forms.ModelChoiceField(
+        label="Becken",
+        queryset=Tank.objects.none(),
+        help_text="An welches Becken kommt das Gerät?",
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if user is not None:
+            self.fields["tank"].queryset = Tank.objects.for_user(user)
 
 
 class DeviceCoverForm(BootstrapMixin, forms.Form):

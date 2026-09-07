@@ -16,7 +16,11 @@
         · {{ device.host }}{% if device.mac_address %} · {{ device.mac_address }}{% endif %}
         {% if device.firmware %} · Software {{ device.firmware }}{% endif %}
       {% endif %}
-      · <a href="{{ device.tank.get_absolute_url }}">{{ device.tank.name }}</a>
+      {% if device.is_stored %}
+        · <span class="badge text-bg-secondary align-middle">nicht im Einsatz{% if device.stored_since %}, seit {{ device.stored_since|date:"d.m.Y" }}{% endif %}</span>
+      {% else %}
+        · <a href="{{ device.tank.get_absolute_url }}">{{ device.tank.name }}</a>
+      {% endif %}
     </p>
     {% if device.maintenance_due_on %}
       <p class="mb-0 mt-1">
@@ -30,6 +34,14 @@
     <a class="btn btn-outline-secondary" href="{% url 'services:device_edit' device.pk %}">Bearbeiten</a>
     {% if device.is_eheim %}
       <a class="btn btn-outline-secondary" href="{% url 'services:device_credentials' device.pk %}">Zugangsdaten ändern</a>
+    {% endif %}
+    {% if device.is_stored %}
+      <a class="btn btn-outline-primary" href="{% url 'services:device_install' device.pk %}">Einbauen</a>
+    {% else %}
+      <form method="post" action="{% url 'services:device_store' device.pk %}" class="d-inline">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-outline-secondary">Einlagern</button>
+      </form>
     {% endif %}
   </div>
 </div>
@@ -61,6 +73,11 @@
           <p class="small text-body-secondary mb-0">
             Das Gerät ist nicht angebunden; der Status wird beim
             <a href="{% url 'services:device_edit' device.pk %}">Bearbeiten</a> gesetzt.
+          </p>
+        {% elif device.is_stored %}
+          <p class="text-body-secondary mb-0">
+            Das Gerät ist eingelagert und wird nicht abgefragt. Über
+            <a href="{% url 'services:device_install' device.pk %}">Einbauen</a> kommt es wieder an ein Becken.
           </p>
         {% elif device.is_active %}
           <div hx-get="{% url 'services:device_status' device.pk %}" hx-trigger="load" hx-swap="outerHTML">

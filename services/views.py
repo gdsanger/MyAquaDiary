@@ -38,6 +38,7 @@ from .forms import (
     DeviceDiscoveryForm,
     DeviceDocumentForm,
     DeviceForm,
+    DeviceInstallForm,
     DeviceLinkForm,
     DevicePasswordForm,
     DeviceSpecForm,
@@ -111,18 +112,40 @@ def _device(request, pk) -> Device:
     return get_object_or_404(Device, pk=pk, owner=request.user)
 
 
+#: Filter der Geräteliste. Der Schlüssel steht in der URL (``?filter=``).
+DEVICE_FILTERS = (
+    ("alle", "alle"),
+    ("im_einsatz", "im Einsatz"),
+    ("verfuegbar", "verfügbar"),
+)
+
+
+def _normalize_device_filter(value: str) -> str:
+    return value if value in dict(DEVICE_FILTERS) else "alle"
+
+
 @login_required
 def device_list(request):
     """Übersicht der eigenen Geräte; der Status kommt je Karte per HTMX nach.
 
     Angebundene und nur dokumentierte Geräte stehen in derselben Liste — es ist
-    dieselbe Geräteliste, die auch der Beckenreiter „Geräte" zeigt.
+    dieselbe Geräteliste, die auch der Beckenreiter „Geräte" zeigt. Nicht
+    zugeordnete Geräte (eingelagert) stehen in einem eigenen Abschnitt darunter;
+    der Filter blendet die eine oder die andere Gruppe aus.
     """
+    active = _normalize_device_filter(request.GET.get("filter", "alle"))
+    devices = list(request.user.devices.select_related("tank"))
+    in_use = [device for device in devices if not device.is_stored]
+    stored = [device for device in devices if device.is_stored]
     return render(
         request,
         "services/device_list.html",
         {
-            "devices": request.user.devices.select_related("tank"),
+            "in_use": in_use,
+            "stored": stored,
+            "has_devices": bool(devices),
+            "filter": active,
+            "filters": DEVICE_FILTERS,
             "warnings": device_service.warnings_for(request.user),
         },
     )
@@ -338,6 +361,42 @@ def _form_class(device: Device):
     if device.is_eheim:
         return DeviceForm
     return ManualDeviceForm
+
+
+@login_required
+@require_http_methods(["POST"])
+def device_store(request, pk):
+    """Gerät einlagern: Becken lösen und in den Bestand legen.
+
+    Ein Klick genügt — mehr als das Lösen der Zuordnung passiert nicht, und
+    zurücknehmen lässt es sich über „Einbauen" jederzeit. Der Wechsel steht als
+    Ereignis der Kategorie Technik in der Historie des bisherigen Beckens.
+    """
+    device = _device(request, pk)
+    if device.is_stored:
+        messages.info(request, f"{device.name} ist bereits eingelagert.")
+        return redirect("services:device_detail", pk=device.pk)
+    device_service.store(device, user=request.user)
+    messages.success(request, f"{device.name} eingelagert.")
+    return redirect("services:device_detail", pk=device.pk)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def device_install(request, pk):
+    """Eingelagertes Gerät wieder einbauen — mit Beckenauswahl.
+
+    Das Einlagern ist ein Klick, das Einbauen braucht ein Ziel: an welches
+    Becken kommt das Gerät. Der Wechsel steht als Ereignis der Kategorie Technik
+    in der Historie des neuen Beckens.
+    """
+    device = _device(request, pk)
+    form = DeviceInstallForm(request.POST or None, user=request.user)
+    if request.method == "POST" and form.is_valid():
+        device_service.install(device, form.cleaned_data["tank"], user=request.user)
+        messages.success(request, f"{device.name} eingebaut.")
+        return redirect("services:device_detail", pk=device.pk)
+    return render(request, "services/device_install.html", {"device": device, "form": form})
 
 
 @login_required

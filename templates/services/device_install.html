@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Einbauen – {{ device.name }}{% endblock %}
+
+{% block content %}
+<nav aria-label="Brotkrumen" class="mb-2">
+  <a href="{% url 'services:device_detail' device.pk %}" class="small">← {{ device.name }}</a>
+</nav>
+<h1 class="h3 mb-3">{{ device.name }} einbauen</h1>
+
+<div class="row">
+  <div class="col-12 col-md-8 col-lg-6">
+    <div class="card">
+      <div class="card-body">
+        <p class="text-body-secondary">
+          Das Gerät kommt zurück in den Einsatz. Der Wechsel wird als Ereignis der
+          Kategorie Technik in der Historie des gewählten Beckens vermerkt.
+        </p>
+        <form method="post">
+          {% csrf_token %}
+          {% include "partials/form_fields.html" %}
+          <button type="submit" class="btn btn-primary">Einbauen</button>
+          <a class="btn btn-outline-secondary" href="{% url 'services:device_detail' device.pk %}">Abbrechen</a>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
