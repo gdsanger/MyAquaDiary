@@ -63,6 +63,37 @@ Wo Historie dranhängt, wird nicht gelöscht:
 Löschen bleibt der Fehleingabe vorbehalten und verlangt immer einen
 Zwischenschritt; es gibt keinen Link, der beim Klick löscht.
 
+### Beobachtungen und Fotos am Ereignis
+
+Dass die Cryptocoryne neue Blätter schiebt, ist ein **Ereignis der Kategorie
+*Beobachtung*** — kein eigenes Modell. Zeitpunkt, Titel, Text und Becken sind
+dieselben Felder; ein zweites Modell brächte sie nur noch einmal mit und
+erweiterte die Zeitleiste in `selectors.recent_activity()` um eine Quelle, ohne
+dass sich fachlich etwas unterschiede.
+
+Was dem Ereignis wirklich fehlte, sind die Bilder. `TankPhoto.event` ist ein
+optionaler Fremdschlüssel mit `SET_NULL`: ein Foto gehört dem **Becken**, die
+Zuordnung zum Ereignis ist eine Angabe darüber. Wer ein Ereignis löscht,
+verliert deshalb nur die Zuordnung, nicht das Foto — es steht weiter in der
+Galerie.
+
+Erfasst wird beides in einem Vorgang: unter *Ereignisse → Beobachtung erfassen*
+nimmt dasselbe Formular Text **und** Bilder entgegen (Mehrfachauswahl,
+`accept="image/*"`, damit das Telefon Kamera und Galerie anbietet). Ein
+`capture`-Attribut steht bewusst nicht dabei — es erzwingt die Kamera und
+schließt die Mehrfachauswahl aus.
+
+Der Zeitpunkt darf leer bleiben: `taken_on` je Foto kommt aus dem EXIF-Block
+(`core/images.taken_at`), und der Zeitpunkt des Ereignisses ist der früheste
+davon. Eine falsch gestellte Kamerauhr fällt dabei durch — was in der Zukunft
+läge, gilt als unbrauchbar und wird zu „jetzt“. Ein bereits hochgeladenes Foto
+findet über *Galerie → Bearbeiten* nachträglich zu seinem Ereignis; zur Auswahl
+stehen nur Ereignisse desselben Beckens.
+
+In der Zeitleiste bleibt ein Ereignis mit Fotos **ein** Eintrag mit
+Bildvorschau. Sonst schöbe eine Beobachtung mit fünf Bildern alles andere aus
+der Dashboard-Kachel. Einzeln stehen dort nur Fotos ohne Ereignis.
+
 ### Katalogpflege
 
 Der Katalog ist die Ausnahme: er ist userübergreifend, ein Steckbrief gehört
