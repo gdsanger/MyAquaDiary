@@ -15,6 +15,8 @@ from .models import AnimalSpecies, PlantSpecies
 #: Steckbrieffelder, die sich Pflanzen und Tiere teilen.
 SHARED_FIELDS = [
     "scientific_name",
+    "variant",
+    "is_cultivated_form",
     "common_name",
     "summary",
     "description",
@@ -39,13 +41,23 @@ RANGES = [
 class SpeciesForm(BootstrapMixin, forms.ModelForm):
     """Gemeinsamer Rumpf der beiden Steckbrief-Formulare.
 
-    Der Slug wird aus dem wissenschaftlichen Namen abgeleitet: er ist die
+    Der Slug wird aus wissenschaftlichem Namen und Sorte abgeleitet: er ist die
     Adresse des Steckbriefs und keine Angabe, über die jemand nachdenken soll.
+    Ohne die Sorte im Slug kollidierten Stamm- und Zuchtform derselben Art.
     Er bleibt beim Bearbeiten erhalten, sonst brächen bestehende Links.
     """
 
     class Meta:
         widgets = {"description": forms.Textarea(attrs={"rows": 4})}
+
+    def clean_variant(self):
+        """Die Anführungszeichen setzt die Anzeige, nicht der Erfasser.
+
+        Sonst stünde 'Flamingo' einmal mit und einmal ohne Hochkomma in der
+        Datenbank — und die Eindeutigkeit über Name und Sorte hinge daran,
+        wie jemand getippt hat.
+        """
+        return self.cleaned_data.get("variant", "").strip().strip("'\"‚‘’„“").strip()
 
     def clean(self):
         cleaned = super().clean()
@@ -64,7 +76,7 @@ class SpeciesForm(BootstrapMixin, forms.ModelForm):
         return species
 
     def _unique_slug(self, species):
-        base = slugify(species.scientific_name)[:150] or "art"
+        base = slugify(f"{species.scientific_name} {species.variant}".strip())[:150] or "art"
         model = type(species)
         taken = set(
             model.objects.exclude(pk=species.pk).values_list("slug", flat=True)

@@ -1,0 +1,5 @@
+{% comment %}
+Wissenschaftlicher Name samt Sorte. Kursiv steht nur der Artname — eine
+Sortenbezeichnung wird nach gaertnerischer Konvention aufrecht und in
+einfachen Hochkommata gesetzt.
+{% endcomment %}<i>{{ species.scientific_name }}</i>{% if species.variant %} '{{ species.variant }}'{% endif %}

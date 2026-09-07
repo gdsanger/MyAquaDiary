@@ -8,7 +8,7 @@ Listenseite; mit HTMX wird nur das Raster ersetzt.
   <div class="mad-filterbar__field">
     <label class="form-label" for="filter-q">Suche</label>
     <input class="form-control" type="search" id="filter-q" name="q" value="{{ filters.q }}"
-           placeholder="Name oder wissenschaftlicher Name" autocomplete="off">
+           placeholder="Name, wissenschaftlicher Name oder Sorte" autocomplete="off">
   </div>
 
   <div class="mad-filterbar__field">
@@ -39,6 +39,17 @@ Listenseite; mit HTMX wird nur das Raster ersetzt.
         <option value="{{ value }}"{% if filters.extra == value %} selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
+  </div>
+
+  <div class="mad-filterbar__field">
+    <span class="form-label d-block">Zuchtformen</span>
+    <div class="form-check">
+      {# Ein Kaestchen statt einer Auswahlliste: gefragt ist nicht „welche Form“, #}
+      {# sondern ob die Zuchtformen ueberhaupt mitkommen sollen. #}
+      <input class="form-check-input" type="checkbox" id="filter-stammformen"
+             name="nur_stammformen" value="1"{% if filters.wild_only %} checked{% endif %}>
+      <label class="form-check-label" for="filter-stammformen">nur Stammformen</label>
+    </div>
   </div>
 
   <div>
