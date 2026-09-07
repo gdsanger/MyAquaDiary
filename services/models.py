@@ -759,6 +759,80 @@ class AISuggestion(models.Model):
         return bool(self.payload)
 
 
+class MeasurementAnalysis(models.Model):
+    """Die KI-Einordnung einer Messreihe — festgehalten, nicht jedes Mal neu.
+
+    Eine Messreihe ist hier kein eigenes Modell, sondern alles, was an einem
+    Becken zum selben Zeitpunkt gemessen wurde. ``measurement`` zeigt deshalb
+    auf den ältesten Messwert dieses Zeitpunkts; er vertritt die Reihe (siehe
+    :func:`tanks.analysis.anchor_of`).
+
+    ``context_hash`` deckt alles ab, was in den Prompt eingeht: Messreihe,
+    Verlauf, Ereignisse, Stammdaten und Besatz. Stimmt er noch, ist die
+    vorhandene Auswertung weiterhin die Antwort auf dieselbe Frage — und ein
+    zweiter Aufruf wäre bezahlte Varianz, kein Erkenntnisgewinn.
+
+    Der Zustand steht am Datensatz, weil die Auswertung im Hintergrund läuft:
+    das Speichern der Messreihe wartet nicht auf Anthropic, und die Seite holt
+    das Ergebnis nach.
+    """
+
+    class Status(models.TextChoices):
+        RUNNING = "running", "läuft"
+        READY = "ready", "fertig"
+        FAILED = "failed", "fehlgeschlagen"
+
+    measurement = models.ForeignKey(
+        "tanks.Measurement",
+        verbose_name="Messreihe",
+        related_name="analyses",
+        on_delete=models.CASCADE,
+    )
+    status = models.CharField(
+        "Status", max_length=10, choices=Status.choices, default=Status.RUNNING
+    )
+    text = models.TextField("Auswertung", blank=True)
+    model_name = models.CharField("Modell", max_length=100, blank=True)
+    context_hash = models.CharField(
+        "Datenlage",
+        max_length=64,
+        blank=True,
+        help_text="Prüfsumme über alles, was in den Prompt eingeht.",
+    )
+    error_message = models.TextField("Fehler", blank=True)
+    usage_log = models.ForeignKey(
+        AIUsageLog,
+        verbose_name="Verbrauch",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="measurement_analyses",
+    )
+    created_at = models.DateTimeField("erstellt", auto_now_add=True)
+    completed_at = models.DateTimeField("fertig am", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "KI-Auswertung"
+        verbose_name_plural = "KI-Auswertungen"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["measurement", "-created_at"])]
+
+    def __str__(self):
+        return f"Auswertung {self.created_at:%d.%m.%Y %H:%M}"
+
+    @property
+    def is_running(self) -> bool:
+        return self.status == self.Status.RUNNING
+
+    @property
+    def is_ready(self) -> bool:
+        return self.status == self.Status.READY
+
+    @property
+    def failed(self) -> bool:
+        return self.status == self.Status.FAILED
+
+
 # --------------------------------------------------------------------------
 # MCP-Server
 # --------------------------------------------------------------------------
