@@ -174,6 +174,26 @@ einem Tag (`ImageOps.exif_transpose` beim Erzeugen). `width`/`height` bzw.
 damit zu jeder ausgelieferten Variante, deren Maße `scaled_size()` daraus
 herunterrechnet.
 
+### Großansicht in der Galerie
+
+Ein Klick auf ein Galeriebild öffnet die `preview`-Variante unbeschnitten als
+Overlay (`.mad-lightbox`). Der Inhalt wird per HTMX in `#mad-lightbox`
+**nachgeladen, nicht vorab gerendert**: alle Vorschauen gleich mitzuliefern
+nähme den Kacheln ihren Sinn. Blättern tauscht denselben Container, das Overlay
+bleibt dabei stehen.
+
+Dieselbe Adresse (`tanks:photo-detail`) antwortet ohne HTMX mit einer
+vollständigen Seite (`tanks/photo_detail.html`) — jedes `href` in der Galerie
+führt dorthin, auch ohne Skript. `static/js/lightbox.js` kommt nur obendrauf und
+bringt, was ein Link nicht kann: Esc, Klick auf den Hintergrund, Pfeiltasten,
+Wischgeste und die Fokusführung (beim Öffnen in den Dialog, beim Schließen
+zurück auf das auslösende Bild). Kein Lightbox-Fremdpaket: gebraucht werden ein
+Bild, zwei Pfeile und eine Beschriftung.
+
+Bearbeiten und Löschen sind auch aus der Großansicht erreichbar. Sie tauschen
+den ganzen Reiterbereich — dieselbe Antwort, die das Formular bringt, räumt
+damit das Overlay weg.
+
 ### Katalogpflege
 
 Der Katalog ist die Ausnahme: er ist userübergreifend, ein Steckbrief gehört
@@ -747,5 +767,10 @@ Das Dashboard lädt jede Kachel als eigenes HTMX-Fragment
 Erfassungsformulare liegen als Overlay (`.mad-modal`) innerhalb des
 Reiterbereichs `#tab-area`: Jeder Reiterwechsel und jedes Speichern ersetzt
 diesen Bereich — und räumt das Formular damit ohne eine Zeile JavaScript weg.
+Die Großansicht der Galerie (`.mad-lightbox`) folgt demselben Muster und ist die
+einzige Stelle mit eigenem Skript; siehe [Großansicht in der
+Galerie](#großansicht-in-der-galerie).
+
 Die Oberfläche ist bis 375 px Breite bedienbar; Kartenköpfe, Zeilenaktionen
-und das Overlay brechen dort um, statt zu scrollen.
+und die Overlays brechen dort um, statt zu scrollen. Die Großansicht nimmt dort
+das ganze Display und lässt sich wischen.

@@ -10,7 +10,18 @@
       <div class="mad-gallery">
         {% for photo in photos %}
           <figure class="m-0">
-            {% include "partials/image.html" with variant=photo.thumb alt=photo.alt_text lazy=True only %}
+            {% comment %}
+            Der Klick öffnet die Großansicht: mit HTMX als Overlay in
+            `#mad-lightbox`, ohne HTMX führt dasselbe `href` auf die
+            eigenständige Seite. Geladen wird erst dann — die Vorschauen aller
+            Bilder gleich mitzuliefern nähme den Kacheln ihren Sinn.
+            {% endcomment %}
+            {% url 'tanks:photo-detail' tank.slug photo.pk as detail_url %}
+            <a class="mad-gallery__link" href="{{ detail_url }}" data-lightbox-open
+               aria-haspopup="dialog"
+               hx-get="{{ detail_url }}" hx-target="#mad-lightbox" hx-swap="innerHTML">
+              {% include "partials/image.html" with variant=photo.thumb alt=photo.alt_text lazy=True only %}
+            </a>
             <figcaption class="mad-list__meta mt-1">
               {{ photo.taken_on|date:"d.m.Y" }}{% if photo.caption %} · {{ photo.caption }}{% endif %}
               {% if photo.event %}
@@ -37,3 +48,10 @@
     {% endif %}
   </div>
 </section>
+
+{% comment %}
+Ziel der Großansicht. Der Container steht leer im Reiter und bleibt es, bis ein
+Bild angeklickt wird; ein Reiterwechsel ersetzt ihn samt Inhalt und räumt damit
+ein offenes Overlay von selbst weg — wie beim Formular-Overlay.
+{% endcomment %}
+<div id="mad-lightbox"></div>

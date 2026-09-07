@@ -1038,6 +1038,154 @@ class PhotoWriteTests(TestCase):
 
 
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class PhotoLightboxTests(TestCase):
+    """Die Großansicht: was sie zeigt, wie geblättert wird, was sie nicht lädt."""
+
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.tank = create_tank(self.user)
+        # Absteigend nach Datum sortiert (``TankPhoto.Meta.ordering``): das
+        # jüngste Foto steht vorn.
+        self.oldest, self.middle, self.newest = (
+            TankPhoto.objects.create(
+                tank=self.tank,
+                image=photo_upload(f"{days}.jpg", size=(1200, 800)),
+                caption=f"Bild {days}",
+                taken_on=timezone.localdate() - timedelta(days=days),
+            )
+            for days in (2, 1, 0)
+        )
+
+    def url(self, photo):
+        return reverse("tanks:photo-detail", args=[self.tank.slug, photo.pk])
+
+    def open(self, photo):
+        return self.client.get(self.url(photo), HTTP_HX_REQUEST="true")
+
+    def test_the_overlay_shows_the_preview_variant(self):
+        response = self.open(self.middle)
+
+        self.assertTemplateUsed(response, "tanks/partials/photo_lightbox.html")
+        self.assertContains(response, self.middle.preview.url)
+
+    def test_the_overlay_names_caption_date_and_event(self):
+        event = Event.objects.create(
+            tank=self.tank,
+            category=Event.Category.OBSERVATION,
+            title="Cryptocoryne schiebt Blätter",
+            occurred_at=timezone.now(),
+        )
+        self.middle.event = event
+        self.middle.save(update_fields=["event"])
+
+        response = self.open(self.middle)
+
+        self.assertContains(response, "Bild 1")
+        self.assertContains(response, self.middle.taken_on.strftime("%d.%m.%Y"))
+        self.assertContains(response, "Cryptocoryne schiebt Blätter")
+
+    def test_the_original_is_linked_in_full_resolution(self):
+        self.assertContains(self.open(self.middle), self.middle.image.url)
+
+    def test_editing_and_deleting_are_reachable(self):
+        response = self.open(self.middle)
+
+        self.assertContains(
+            response, reverse("tanks:photo-update", args=[self.tank.slug, self.middle.pk])
+        )
+        self.assertContains(
+            response, reverse("tanks:photo-delete", args=[self.tank.slug, self.middle.pk])
+        )
+
+    def test_the_middle_photo_has_both_neighbours(self):
+        response = self.open(self.middle)
+
+        self.assertContains(response, self.url(self.newest))
+        self.assertContains(response, self.url(self.oldest))
+
+    def test_the_first_photo_has_no_predecessor(self):
+        """Kein Rundlauf: am Ende der Reihe fehlt der Pfeil, statt zu springen."""
+        response = self.open(self.newest)
+
+        self.assertNotContains(response, 'data-lightbox-prev')
+        self.assertContains(response, 'data-lightbox-next')
+
+    def test_the_last_photo_has_no_successor(self):
+        response = self.open(self.oldest)
+
+        self.assertContains(response, 'data-lightbox-prev')
+        self.assertNotContains(response, 'data-lightbox-next')
+
+    def test_a_single_photo_has_no_arrows_at_all(self):
+        alone = create_tank(self.user, name="Nano", slug="nano")
+        photo = TankPhoto.objects.create(
+            tank=alone, image=image_upload(), taken_on=timezone.localdate()
+        )
+
+        response = self.client.get(
+            reverse("tanks:photo-detail", args=[alone.slug, photo.pk]), HTTP_HX_REQUEST="true"
+        )
+
+        self.assertNotContains(response, 'data-lightbox-prev')
+        self.assertNotContains(response, 'data-lightbox-next')
+
+    def test_without_htmx_the_same_address_is_a_page(self):
+        """Ohne Skript gibt es keine Überlagerung — dafür eine ganze Seite."""
+        response = self.client.get(self.url(self.middle))
+
+        self.assertTemplateUsed(response, "tanks/photo_detail.html")
+        self.assertContains(response, self.middle.preview.url)
+
+    def test_a_foreign_photo_stays_hidden(self):
+        stranger = create_tank(create_user("fremd"), name="Fremdbecken", slug="fremdbecken")
+        photo = TankPhoto.objects.create(
+            tank=stranger, image=image_upload(), taken_on=timezone.localdate()
+        )
+
+        response = self.client.get(reverse("tanks:photo-detail", args=[stranger.slug, photo.pk]))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_the_gallery_links_to_the_large_view_without_loading_it(self):
+        """Der Sinn der Kacheln: die Vorschauen kommen erst auf Klick."""
+        response = self.client.get(
+            reverse("tanks:tab", args=[self.tank.slug, "galerie"]), HTTP_HX_REQUEST="true"
+        )
+
+        self.assertContains(response, self.url(self.middle))
+        self.assertContains(response, 'id="mad-lightbox"')
+        self.assertContains(response, self.middle.thumbnail.url)
+        self.assertNotContains(response, self.middle.preview.url)
+
+
+class PhotoNeighbourTests(TestCase):
+    """Die Reihenfolge beim Blättern ist die der Galerie — auch am selben Tag."""
+
+    def setUp(self):
+        self.tank = create_tank(create_user())
+        today = timezone.localdate()
+        self.first, self.second = (
+            TankPhoto.objects.create(tank=self.tank, image=image_upload(), taken_on=today)
+            for _ in range(2)
+        )
+
+    def test_photos_of_the_same_day_are_ordered_by_key(self):
+        """``-taken_on, -pk``: das zuletzt hochgeladene Bild steht vorn."""
+        self.assertEqual(
+            selectors.photo_neighbours(self.tank, self.second), (None, self.first.pk)
+        )
+        self.assertEqual(
+            selectors.photo_neighbours(self.tank, self.first), (self.second.pk, None)
+        )
+
+    def test_a_photo_of_another_tank_has_no_neighbours(self):
+        other = create_tank(create_user("zweiter"), name="Anderes", slug="anderes")
+
+        self.assertEqual(selectors.photo_neighbours(other, self.first), (None, None))
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 class PhotoVariantTests(TestCase):
     """Was beim Speichern eines Fotos entsteht — und was verschwindet."""
 

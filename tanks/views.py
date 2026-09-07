@@ -800,6 +800,41 @@ class PhotoCreateView(TankFragmentView):
         )
 
 
+class PhotoDetailView(TankScopedMixin, View):
+    """Großansicht eines Fotos — mit HTMX als Overlay, sonst als eigene Seite.
+
+    Der Inhalt wird erst beim Klick geholt. Die Vorschauvarianten aller Bilder
+    gleich mit der Galerie auszuliefern hätte die Kacheln überflüssig gemacht,
+    für die sie da sind.
+
+    Ohne HTMX antwortet dieselbe Adresse mit einer vollständigen Seite: das
+    Foto bleibt erreichbar, auch wenn kein Skript läuft.
+    """
+
+    model = TankPhoto
+    tab = "galerie"
+
+    def get(self, request, **kwargs):
+        photo = get_object_or_404(
+            self.get_queryset().select_related("event"), pk=self.kwargs["pk"]
+        )
+        previous_pk, next_pk = selectors.photo_neighbours(self.tank, photo)
+        context = {
+            "tank": self.tank,
+            "photo": photo,
+            "previous_pk": previous_pk,
+            "next_pk": next_pk,
+            "gallery_href": f"{self.tank.get_absolute_url()}?reiter={self.tab}",
+            "nav_section": "tanks",
+        }
+        template = (
+            "tanks/partials/photo_lightbox.html"
+            if getattr(request, "htmx", False)
+            else "tanks/photo_detail.html"
+        )
+        return render(request, template, context)
+
+
 class PhotoUpdateView(TankObjectFormView):
     """Bildunterschrift, Datum — und die Zuordnung zu einem Ereignis.
 

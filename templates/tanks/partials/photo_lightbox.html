@@ -1,0 +1,65 @@
+{% comment %}
+Großansicht eines Fotos als Overlay über der Galerie.
+
+Der Inhalt wird per HTMX in `#mad-lightbox` nachgeladen — erst beim Klick, nicht
+vorab: alle Vorschaubilder gleich mitzuliefern nähme den Kacheln aus #1234 ihren
+Sinn. Blättern tauscht denselben Container, das Overlay bleibt dabei stehen.
+
+Jede Schaltfläche trägt zusätzlich ein `href`. Ohne JavaScript (und damit ohne
+HTMX) führt es auf `tanks/photo_detail.html`, dieselbe Ansicht als eigene Seite.
+`static/js/lightbox.js` kommt nur obendrauf: Esc, Hintergrundklick, Pfeiltasten,
+Wischgeste und Fokus.
+
+Das Bild wird nicht beschnitten. Wer beschnittene Kacheln sehen will, sieht sie
+im Raster — hier zählt die vollständige Aufnahme.
+
+Die äußere Fläche ist der Hintergrund, der Dialog steckt darin: `role="dialog"`
+sitzt deshalb am inneren Element, und dorthin wandert auch der Fokus.
+
+Erwartet: tank, photo, previous_pk, next_pk, gallery_href.
+{% endcomment %}
+<div class="mad-lightbox" data-lightbox>
+  <div class="mad-lightbox__dialog" data-lightbox-dialog tabindex="-1"
+       role="dialog" aria-modal="true" aria-labelledby="mad-lightbox-title">
+    <div class="mad-lightbox__header">
+      <h2 class="mad-card__title" id="mad-lightbox-title">{{ photo.alt_text }}</h2>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ gallery_href }}"
+         data-lightbox-close>Schließen</a>
+    </div>
+
+    <div class="mad-lightbox__stage">
+      {% include "partials/image.html" with variant=photo.large alt=photo.alt_text class="mad-photo" only %}
+      {% if previous_pk %}
+        {% url 'tanks:photo-detail' tank.slug previous_pk as previous_url %}
+        <a class="mad-lightbox__step mad-lightbox__step--prev" data-lightbox-prev
+           aria-label="Voriges Bild" title="Voriges Bild"
+           href="{{ previous_url }}" hx-get="{{ previous_url }}"
+           hx-target="#mad-lightbox" hx-swap="innerHTML">&lsaquo;</a>
+      {% endif %}
+      {% if next_pk %}
+        {% url 'tanks:photo-detail' tank.slug next_pk as next_url %}
+        <a class="mad-lightbox__step mad-lightbox__step--next" data-lightbox-next
+           aria-label="Nächstes Bild" title="Nächstes Bild"
+           href="{{ next_url }}" hx-get="{{ next_url }}"
+           hx-target="#mad-lightbox" hx-swap="innerHTML">&rsaquo;</a>
+      {% endif %}
+    </div>
+
+    <div class="mad-lightbox__body">
+      {% include "tanks/partials/_photo_meta.html" with photo=photo tank=tank only %}
+    </div>
+
+    <div class="mad-lightbox__footer">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ photo.original.url }}"
+         target="_blank" rel="noopener">Original in voller Auflösung</a>
+      <span class="mad-lightbox__spacer"></span>
+      {% comment %}
+      Bearbeiten und Löschen tauschen den ganzen Reiterbereich — damit räumt
+      dieselbe Antwort, die das Formular bringt, die Großansicht weg.
+      {% endcomment %}
+      {% url 'tanks:photo-update' tank.slug photo.pk as edit_url %}
+      {% url 'tanks:photo-delete' tank.slug photo.pk as delete_url %}
+      {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=delete_url only %}
+    </div>
+  </div>
+</div>
