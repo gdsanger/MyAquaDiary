@@ -34,10 +34,12 @@ from services.models import MCPAccessLog, MCPToken
 from tanks.models import (
     CareTask,
     Event,
+    HardscapeItem,
     Measurement,
     Parameter,
     Planting,
     Stocking,
+    SubstrateLayer,
     Tank,
     TankParameterTarget,
 )
@@ -171,6 +173,43 @@ class GetTankTests(ToolTestCase):
         self.assertEqual(result["animals"][0]["name"], "Guppy")
         self.assertEqual(result["animals"][0]["quantity"], 8)
         self.assertEqual(result["plants"][0]["common_name"], "Javamoos")
+
+    def test_it_returns_the_setup_bottom_up_and_with_its_effect(self):
+        """Bodengrund und Hardscape gehören zur Auskunft über ein Becken.
+
+        Sie sind die naheliegendste Erklärung für eine Wertveränderung: die
+        Wurzel drückt den pH, das Depot zehrt sich auf.
+        """
+        today = timezone.localdate()
+        SubstrateLayer.objects.create(
+            tank=self.tank,
+            kind=SubstrateLayer.Kind.NUTRIENT,
+            position=0,
+            depth_cm=Decimal("2.0"),
+            product="JBL AquaBasis",
+            added_on=today - timedelta(days=200),
+            depleted_on=today - timedelta(days=80),
+        )
+        SubstrateLayer.objects.create(
+            tank=self.tank, kind=SubstrateLayer.Kind.SAND, position=1, depth_cm=Decimal("4.0")
+        )
+        HardscapeItem.objects.create(
+            tank=self.tank,
+            kind=HardscapeItem.Kind.WOOD,
+            name="Moorkienwurzel",
+            quantity=1,
+            affects_water=True,
+            water_effect="Huminstoffe, senkt pH",
+        )
+
+        result = self.call("get_tank", tank_id=self.tank.pk)
+
+        self.assertEqual([layer["kind"] for layer in result["substrate"]], ["nutrient", "sand"])
+        self.assertEqual(result["substrate"][0]["position"], 0)
+        self.assertEqual(result["substrate"][0]["status"], "warn")
+        self.assertEqual(result["substrate_depth_cm"], 6.0)
+        self.assertTrue(result["hardscape"][0]["affects_water"])
+        self.assertEqual(result["hardscape"][0]["water_effect"], "Huminstoffe, senkt pH")
 
     def test_a_group_below_the_minimum_is_visible_in_the_answer(self):
         Stocking.objects.create(
@@ -708,6 +747,12 @@ class EveryToolTests(ToolTestCase):
         )
         Event.objects.create(
             tank=self.tank, title="Wasserwechsel", occurred_at=timezone.now()
+        )
+        SubstrateLayer.objects.create(
+            tank=self.tank, kind=SubstrateLayer.Kind.SAND, position=0, depth_cm=Decimal("4.0")
+        )
+        HardscapeItem.objects.create(
+            tank=self.tank, kind=HardscapeItem.Kind.WOOD, name="Moorkienwurzel", quantity=1
         )
 
     def valid_arguments(self):
