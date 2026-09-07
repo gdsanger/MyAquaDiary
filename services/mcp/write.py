@@ -3,14 +3,15 @@
 Alle vier Leitplanken greifen hier gemeinsam:
 
 * **Eingrenzung.** Jede Kennung im Aufruf wird über
-  :mod:`services.mcp.data` aufgelöst und gehört damit dem Token-Inhaber. Auch
-  das Zielbecken einer Umsetzung — sonst ließen sich Tiere in fremde Becken
-  buchen.
-* **Kennzeichnung.** Was hier entsteht, trägt ``source="mcp"``, sofern das
-  Modell eine Herkunft führt (:func:`services.mcp.audit.mark_source`).
+  :mod:`services.mcp.data` aufgelöst und gehört damit dem Token-Inhaber — sonst
+  ließen sich Werte in fremde Becken schreiben.
+* **Kennzeichnung.** Was hier entsteht, trägt ``source="mcp"``, sobald ein
+  Modell eine Herkunft führt (:func:`services.mcp.audit.mark_source`; derzeit
+  tut das keines). Wer schreibt, steht bis dahin im Zugriffsprotokoll und —
+  wo das Modell es vorsieht — in ``created_by``.
 * **Prüfung durch das Modell.** Geschrieben wird über ``full_clean()`` und die
-  Methoden der Modelle (``mark_done``, die Bestandsfortschreibung der
-  Bewegungen) — keine zweite Geschäftslogik neben der Web-App.
+  Methoden der Modelle (``CareTask.complete``, das die Quittierung anlegt und
+  den Termin fortschreibt) — keine zweite Geschäftslogik neben der Web-App.
 * **Protokoll und Schreibrecht** liegen im Rahmen drumherum
   (:mod:`services.mcp.runner`), nicht in jedem Werkzeug einzeln.
 
@@ -20,8 +21,6 @@ zurückzuholen — die Korrektur eines falschen Werts dagegen ist zwei Klicks
 Arbeit. Ebenso wenig gibt es hier Katalogpflege: ein Steckbrief, den alle
 Benutzer sehen, entsteht nicht über die Einzelnutzer-Schnittstelle.
 """
-
-from datetime import datetime
 
 from django.db import transaction
 from django.utils import timezone
@@ -37,16 +36,16 @@ def _values_of(model, field: str) -> list[str]:
 
 
 # --------------------------------------------------------------------------
-# Messreihen
+# Messwerte
 # --------------------------------------------------------------------------
 
 
 @tool(
     "create_measurement",
-    "Legt eine Messreihe an: ein Messzeitpunkt mit beliebig vielen Werten. "
-    "Die Messgrößen werden über ihr Kürzel angegeben (ph, kh, gh, no3, temp …); "
-    "ein Wert, der unter der Nachweisgrenze liegt, bekommt below_detection "
-    "statt einer Zahl.",
+    "Trägt Messwerte an einem Becken ein. Das Modell speichert einen Wert je "
+    "Messgröße; mehrere gleichzeitig gemessene Werte werden in einem Aufruf "
+    "übergeben und teilen sich den Zeitpunkt. Die Messgrößen werden über ihr "
+    "Kürzel angegeben (temperatur, ph, no2, no3, nh4, kh, gh, po4, leitwert).",
     writes=True,
     schema={
         "type": "object",
@@ -56,7 +55,7 @@ def _values_of(model, field: str) -> list[str]:
                 "type": "string",
                 "description": "Zeitpunkt der Messung nach ISO 8601. Ohne Angabe: jetzt.",
             },
-            "note": {"type": "string", "description": "Bemerkung zur Messreihe."},
+            "note": {"type": "string", "description": "Bemerkung zu den Werten."},
             "values": {
                 "type": "array",
                 "description": "Die gemessenen Werte. Mindestens einer.",
@@ -65,12 +64,8 @@ def _values_of(model, field: str) -> list[str]:
                     "properties": {
                         "parameter": {"type": "string", "description": "Kürzel der Messgröße."},
                         "value": {"type": "number", "description": "Gemessener Wert."},
-                        "below_detection": {
-                            "type": "boolean",
-                            "description": "Wahr, wenn nichts nachweisbar war („n. n.“).",
-                        },
                     },
-                    "required": ["parameter"],
+                    "required": ["parameter", "value"],
                 },
             },
         },
@@ -80,36 +75,34 @@ def _values_of(model, field: str) -> list[str]:
 def create_measurement(context, arguments):
     tank = data.tank(context.user, arguments.integer("tank_id", required=True))
     rows = arguments.objects("values", required=True)
+    measured_at = arguments.datetime("measured_at", default=timezone.now())
+    note = arguments.text("note", max_length=200)
 
     model = data.model("measurement")
-    value_model = data.model("measurement_value")
-    measurement = mark_source(
-        model(
-            tank=tank,
-            measured_at=arguments.datetime("measured_at", default=timezone.now()),
-            note=arguments.text("note", max_length=2000),
-        )
-    )
-
+    created = []
+    # Alle Werte eines Aufrufs oder keiner: eine halb eingetragene Messung ist
+    # schlimmer als eine abgewiesene, weil sie unauffällig falsch aussieht.
     with transaction.atomic():
-        measurement.save()
         for row in rows:
-            value = value_model(
-                measurement=measurement,
-                parameter=data.parameter(row.text("parameter", required=True)),
-                value=row.decimal("value"),
-                below_detection=row.boolean("below_detection"),
+            measurement = mark_source(
+                model(
+                    tank=tank,
+                    parameter=data.parameter(row.text("parameter", required=True)),
+                    value=row.decimal("value", required=True),
+                    measured_at=measured_at,
+                    note=note,
+                    created_by=context.user,
+                )
             )
-            # full_clean() setzt die Regeln des Modells durch — dass ein Wert
-            # und „n. n.“ sich ausschließen ebenso wie „jede Messgröße nur
-            # einmal je Messreihe“. Die Meldung daraus geht unverändert an den
-            # Client.
-            value.full_clean()
-            value.save()
+            # full_clean() setzt die Regeln des Modells durch; die Meldung
+            # daraus geht unverändert an den Client.
+            measurement.full_clean()
+            measurement.save()
+            created.append(measurement)
 
-    measurement.refresh_from_db()
     return Written(
-        serialize.measurement(measurement, with_targets=True), data.label(measurement)
+        {"measurements": [serialize.measurement(item) for item in created]},
+        ", ".join(data.label(item) for item in created),
     )
 
 
@@ -120,11 +113,9 @@ def create_measurement(context, arguments):
 
 @tool(
     "create_event",
-    "Legt ein Ereignis am Becken an: Wasserwechsel, Pflege, Technikänderung, "
-    "Beobachtung, Vorfall. Bei einem Wasserwechsel gehört die "
-    "gewechselte Menge in water_changed_l — der Prozentsatz wird daraus "
-    "berechnet. Bilder nimmt diese Schnittstelle nicht entgegen; sie entstehen "
-    "in der Oberfläche.",
+    "Legt ein Ereignis am Becken an: Wasserwechsel, Pflege, Behandlung, "
+    "Besatzänderung, Technik, Vorfall, Beobachtung. Bilder nimmt diese "
+    "Schnittstelle nicht entgegen; sie entstehen in der Oberfläche.",
     writes=True,
     schema={
         "type": "object",
@@ -134,17 +125,13 @@ def create_measurement(context, arguments):
             "category": {
                 "type": "string",
                 "description": "Kategorie, z. B. water_change, maintenance, observation. "
-                "Ohne Angabe: other. Ein unbekannter Wert wird zu other.",
+                "Ohne Angabe: other.",
             },
             "occurred_at": {
                 "type": "string",
                 "description": "Zeitpunkt nach ISO 8601. Ohne Angabe: jetzt.",
             },
             "description": {"type": "string", "description": "Ausführlicher Text."},
-            "water_changed_l": {
-                "type": "number",
-                "description": "Gewechselte Wassermenge in Litern.",
-            },
         },
         "required": ["tank_id", "title"],
     },
@@ -155,70 +142,54 @@ def create_event(context, arguments):
     event = mark_source(
         model(
             tank=tank,
-            title=arguments.text("title", required=True, max_length=200),
+            title=arguments.text("title", required=True, max_length=160),
             category=arguments.choice(
                 "category", _values_of(model, "category"), default=model.Category.OTHER
             ),
             occurred_at=arguments.datetime("occurred_at", default=timezone.now()),
             description=arguments.text("description", max_length=5000),
-            water_changed_l=arguments.decimal("water_changed_l", minimum=0),
+            created_by=context.user,
         )
     )
+    event.full_clean()
     event.save()
     return Written(serialize.event(event), data.label(event))
 
 
 @tool(
-    "complete_schedule",
-    "Quittiert einen fälligen Termin: legt das zugehörige Ereignis an und "
-    "rechnet den Termin vom Erledigungstag aus fort. Der nächste Termin steht "
-    "in der Antwort.",
+    "complete_task",
+    "Quittiert einen fälligen Pflegetermin: hält die Erledigung fest und "
+    "rechnet einen wiederkehrenden Termin vom Erledigungstag aus fort. Ein "
+    "einmaliger Termin wird dabei stillgelegt. Der neue Stand steht in der "
+    "Antwort.",
     writes=True,
     schema={
         "type": "object",
         "properties": {
-            "schedule_id": {"type": "integer", "description": "Kennung aus list_due_schedules."},
+            "task_id": {"type": "integer", "description": "Kennung aus list_due_tasks."},
             "done_on": {
                 "type": "string",
                 "description": "Tag der Erledigung (JJJJ-MM-TT). Ohne Angabe: heute.",
             },
-            "note": {"type": "string", "description": "Bemerkung für das Ereignis."},
-            "water_changed_l": {
-                "type": "number",
-                "description": "Bei einem Wasserwechsel: gewechselte Menge in Litern.",
-            },
+            "note": {"type": "string", "description": "Bemerkung zur Quittierung."},
         },
-        "required": ["schedule_id"],
+        "required": ["task_id"],
     },
 )
-def complete_schedule(context, arguments):
-    schedule = data.schedule(context.user, arguments.integer("schedule_id", required=True))
+def complete_task(context, arguments):
+    task = data.task(context.user, arguments.integer("task_id", required=True))
     done_on = arguments.date("done_on", default=timezone.localdate())
-    event_model = data.model("event")
+    note = arguments.text("note", max_length=200)
 
-    event = mark_source(
-        event_model(
-            tank=schedule.tank,
-            schedule=schedule,
-            title=schedule.title,
-            category=schedule.event_category,
-            # Der Termin gilt an dem Tag als erledigt, den der Client nennt —
-            # die Uhrzeit ist die des Eintrags, denn eine andere kennt niemand.
-            occurred_at=timezone.make_aware(
-                datetime.combine(done_on, timezone.localtime().time()),
-                timezone.get_current_timezone(),
-            ),
-            description=arguments.text("note", max_length=5000) or schedule.description,
-            water_changed_l=arguments.decimal("water_changed_l", minimum=0),
-        )
-    )
+    # ``complete`` legt die Quittierung an und schreibt den Termin fort — genau
+    # wie der Knopf in der Oberfläche. Ein zweiter Rechenweg dafür wäre eine
+    # zweite Wahrheit über den nächsten Fälligkeitstag.
     with transaction.atomic():
-        event.save()
-        schedule.mark_done(done_on)
+        completion = task.complete(on=done_on, user=context.user, note=note)
 
     return Written(
-        {"event": serialize.event(event), "schedule": serialize.schedule(schedule)},
-        data.label(event),
+        {"completion": serialize.task_completion(completion), "task": serialize.task(task)},
+        data.label(completion),
     )
 
 
@@ -228,146 +199,114 @@ def complete_schedule(context, arguments):
 
 
 @tool(
-    "add_tank_animal",
-    "Ergänzt den Besatz eines Beckens um eine Art aus dem Tierkatalog. Die "
-    "Kennung kommt aus search_catalog. Die Ersterfassung zählt selbst als "
-    "Zugang; spätere Veränderungen laufen über record_animal_movement.",
+    "add_stocking",
+    "Ergänzt den Besatz eines Beckens um eine Tierart aus dem Katalog. Die "
+    "species_id kommt aus search_catalog. Spätere Änderungen an Stückzahl oder "
+    "Verbleib laufen über update_stocking.",
     writes=True,
     schema={
         "type": "object",
         "properties": {
             "tank_id": {"type": "integer", "description": "Becken."},
-            "catalog_animal_id": {"type": "integer", "description": "Kennung aus search_catalog."},
+            "species_id": {"type": "integer", "description": "Kennung aus search_catalog (kind: animal)."},
             "quantity": {"type": "integer", "description": "Anzahl Tiere (Standard 1)."},
-            "quantity_male": {"type": "integer", "description": "Davon männlich."},
-            "quantity_female": {"type": "integer", "description": "Davon weiblich."},
-            "label": {"type": "string", "description": "Eigene Bezeichnung, z. B. „Zuchtgruppe“."},
-            "status": {
+            "added_on": {
                 "type": "string",
-                "description": "planned, present, temporary oder gone. Standard: present.",
+                "description": "Tag des Einsetzens (JJJJ-MM-TT). Ohne Angabe: heute.",
             },
-            "added_on": {"type": "string", "description": "Tag des Einzugs (JJJJ-MM-TT)."},
-            "origin": {"type": "string", "description": "Herkunft, z. B. Händler oder Züchter."},
             "note": {"type": "string", "description": "Bemerkung."},
         },
-        "required": ["tank_id", "catalog_animal_id"],
+        "required": ["tank_id", "species_id"],
     },
 )
-def add_tank_animal(context, arguments):
+def add_stocking(context, arguments):
     tank = data.tank(context.user, arguments.integer("tank_id", required=True))
-    model = data.model("tank_animal")
-    animal = model(
+    stocking = data.model("stocking")(
         tank=tank,
-        animal=data.catalog_entry("animal", arguments.integer("catalog_animal_id", required=True)),
+        species=data.catalog_entry("animal", arguments.integer("species_id", required=True)),
         quantity=arguments.integer("quantity", default=1, minimum=0),
-        quantity_male=arguments.integer("quantity_male", minimum=0),
-        quantity_female=arguments.integer("quantity_female", minimum=0),
-        label=arguments.text("label", max_length=120),
-        status=arguments.choice(
-            "status", _values_of(model, "status"), default=model.Status.PRESENT
-        ),
-        added_on=arguments.date("added_on"),
-        origin=arguments.text("origin", max_length=160),
-        note=arguments.text("note", max_length=2000),
+        added_on=arguments.date("added_on", default=timezone.localdate()),
+        note=arguments.text("note", max_length=200),
     )
-    animal.save()
-    return Written(serialize.tank_animal(animal), data.label(animal))
+    stocking.full_clean()
+    stocking.save()
+    return Written(serialize.stocking(stocking), data.label(stocking))
 
 
 @tool(
-    "add_tank_plant",
-    "Ergänzt die Bepflanzung eines Beckens um eine Art aus dem Pflanzenkatalog. "
-    "Die Kennung kommt aus search_catalog.",
+    "add_planting",
+    "Ergänzt die Bepflanzung eines Beckens um eine Pflanzenart aus dem Katalog. "
+    "Die species_id kommt aus search_catalog.",
     writes=True,
     schema={
         "type": "object",
         "properties": {
             "tank_id": {"type": "integer", "description": "Becken."},
-            "catalog_plant_id": {"type": "integer", "description": "Kennung aus search_catalog."},
-            "quantity": {"type": "integer", "description": "Anzahl Töpfe oder Stängel."},
-            "status": {
+            "species_id": {"type": "integer", "description": "Kennung aus search_catalog (kind: plant)."},
+            "quantity": {"type": "integer", "description": "Anzahl Töpfe oder Stängel (Standard 1)."},
+            "planted_on": {
                 "type": "string",
-                "description": "planned, present, temporary oder gone. Standard: present.",
+                "description": "Tag des Einpflanzens (JJJJ-MM-TT). Ohne Angabe: heute.",
             },
-            "placement": {"type": "string", "description": "Wo im Becken, z. B. „Hintergrund links“."},
-            "attached_to": {"type": "string", "description": "Aufgebunden auf, z. B. „Wurzel“."},
-            "added_on": {"type": "string", "description": "Tag des Einpflanzens (JJJJ-MM-TT)."},
             "note": {"type": "string", "description": "Bemerkung."},
         },
-        "required": ["tank_id", "catalog_plant_id"],
+        "required": ["tank_id", "species_id"],
     },
 )
-def add_tank_plant(context, arguments):
+def add_planting(context, arguments):
     tank = data.tank(context.user, arguments.integer("tank_id", required=True))
-    model = data.model("tank_plant")
-    plant = model(
+    planting = data.model("planting")(
         tank=tank,
-        plant=data.catalog_entry("plant", arguments.integer("catalog_plant_id", required=True)),
-        quantity=arguments.integer("quantity", minimum=0),
-        status=arguments.choice(
-            "status", _values_of(model, "status"), default=model.Status.PRESENT
-        ),
-        placement=arguments.text("placement", max_length=120),
-        attached_to=arguments.text("attached_to", max_length=120),
-        added_on=arguments.date("added_on"),
-        note=arguments.text("note", max_length=2000),
+        species=data.catalog_entry("plant", arguments.integer("species_id", required=True)),
+        quantity=arguments.integer("quantity", default=1, minimum=0),
+        planted_on=arguments.date("planted_on", default=timezone.localdate()),
+        note=arguments.text("note", max_length=200),
     )
-    plant.save()
-    return Written(serialize.tank_plant(plant), data.label(plant))
+    planting.full_clean()
+    planting.save()
+    return Written(serialize.planting(planting), data.label(planting))
 
 
 @tool(
-    "record_animal_movement",
-    "Bucht einen Zu- oder Abgang beim Besatz: Zukauf, Nachzucht, Umsetzung, "
-    "Abgabe, Verlust. Der Bestand wird dabei fortgeschrieben. Die "
-    "tank_animal_id steht im Besatz eines Beckens (get_tank).",
+    "update_stocking",
+    "Schreibt einen Besatzposten fort: neue Stückzahl nach Nachwuchs, Zukauf "
+    "oder Verlust, oder removed_on, wenn die Art das Becken verlassen hat. Die "
+    "stocking_id steht im Besatz eines Beckens (get_tank).",
     writes=True,
     schema={
         "type": "object",
         "properties": {
-            "tank_animal_id": {"type": "integer", "description": "Besatzposten aus get_tank."},
-            "direction": {"type": "string", "enum": ["in", "out"], "description": "Zugang oder Abgang."},
-            "reason": {
+            "stocking_id": {"type": "integer", "description": "Besatzposten aus get_tank."},
+            "quantity": {"type": "integer", "description": "Neue Stückzahl (nicht die Differenz)."},
+            "removed_on": {
                 "type": "string",
-                "description": "Grund: purchase, breeding, transfer_in, transfer_out, sold, "
-                "died, predation, jumped, unknown.",
-            },
-            "quantity": {"type": "integer", "description": "Anzahl Tiere, mindestens 1."},
-            "occurred_on": {"type": "string", "description": "Tag der Buchung (JJJJ-MM-TT). Standard: heute."},
-            "target_tank_id": {
-                "type": "integer",
-                "description": "Bei Umsetzung in ein anderes eigenes Becken: dessen Kennung.",
+                "description": "Tag der Entnahme (JJJJ-MM-TT). Setzt den Posten auf beendet.",
             },
             "note": {"type": "string", "description": "Bemerkung."},
         },
-        "required": ["tank_animal_id", "direction", "reason", "quantity"],
+        "required": ["stocking_id"],
     },
 )
-def record_animal_movement(context, arguments):
-    stock = data.tank_animal(context.user, arguments.integer("tank_animal_id", required=True))
-    model = data.model("tank_animal_movement")
+def update_stocking(context, arguments):
+    """Ändert einen Besatzposten.
 
-    target_tank_id = arguments.integer("target_tank_id")
-    # Auch das Zielbecken gehört geprüft: eine Umsetzung ist ein Schreibvorgang
-    # an zwei Becken, und beide müssen dem Token-Inhaber gehören.
-    target_tank = data.tank(context.user, target_tank_id) if target_tank_id else None
+    Übergeben wird die neue Stückzahl, nicht die Veränderung: das Modell führt
+    keine Bestandshistorie, aus der sich eine Differenz verrechnen ließe. Wer
+    „drei dazu“ meint, muss die Summe nennen — das ist eindeutig, eine
+    Differenz auf einen nur vermuteten Ausgangsbestand wäre es nicht.
+    """
+    stocking = data.stocking(context.user, arguments.integer("stocking_id", required=True))
 
-    movement = model(
-        tank_animal=stock,
-        direction=arguments.choice("direction", _values_of(model, "direction"), required=True),
-        reason=arguments.choice("reason", _values_of(model, "reason"), required=True),
-        quantity=arguments.integer("quantity", required=True, minimum=1),
-        occurred_on=arguments.date("occurred_on", default=timezone.localdate()),
-        target_tank=target_tank,
-        note=arguments.text("note", max_length=2000),
-    )
-    movement.full_clean()
-    # save() schreibt den Bestand fort und lehnt einen Abgang ab, der ihn unter
-    # null drücken würde — dieselbe Prüfung wie in der Oberfläche.
-    movement.save()
+    quantity = arguments.integer("quantity", minimum=0)
+    if quantity is not None:
+        stocking.quantity = quantity
+    removed_on = arguments.date("removed_on")
+    if removed_on is not None:
+        stocking.removed_on = removed_on
+    note = arguments.text("note", max_length=200)
+    if note:
+        stocking.note = note
 
-    stock.refresh_from_db()
-    return Written(
-        {"movement": serialize.movement(movement), "stock": serialize.tank_animal(stock)},
-        data.label(movement),
-    )
+    stocking.full_clean()
+    stocking.save()
+    return Written(serialize.stocking(stocking), data.label(stocking))

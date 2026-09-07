@@ -74,15 +74,14 @@ def _period_filter(arguments, queryset, field):
 def list_tanks(context, arguments):
     queryset = data.tanks(context.user)
     if not arguments.boolean("include_dissolved"):
-        queryset = queryset.filter(shut_down_on__isnull=True)
+        queryset = queryset.active()
     return {"tanks": [serialize.tank(item) for item in queryset]}
 
 
 @tool(
     "get_tank",
-    "Ein Becken im Detail: Stammdaten, Technik (Bodengrund, Filterung, "
-    "Beleuchtung, CO2, Düngung), Zielbereiche der Wasserwerte, Besatz und "
-    "Bepflanzung.",
+    "Ein Becken im Detail: Stammdaten, Notizen, Zielbereiche der Wasserwerte, "
+    "Besatz und Bepflanzung.",
     schema={
         "type": "object",
         "properties": {"tank_id": {"type": "integer", "description": "Kennung des Beckens."}},
@@ -90,28 +89,37 @@ def list_tanks(context, arguments):
     },
 )
 def get_tank(context, arguments):
-    tank = data.tank(context.user, arguments.integer("tank_id", required=True))
+    # Ohne Vorabladung fragt die Serialisierung je Zielbereich, Besatzposten und
+    # Pflanze einzeln nach — bei einem gut gefüllten Becken sind das dutzende
+    # Abfragen für eine Antwort.
+    tank = data.tank(
+        context.user,
+        arguments.integer("tank_id", required=True),
+        prefetch=("parameter_targets__parameter", "stockings__species", "plantings__species"),
+    )
     return serialize.tank_detail(tank)
 
 
 # --------------------------------------------------------------------------
-# Messreihen
+# Messwerte
 # --------------------------------------------------------------------------
 
 
 @tool(
     "list_measurements",
-    "Messreihen eines oder aller Becken, neueste zuerst. Eine Messreihe ist "
-    "ein Messzeitpunkt mit allen dabei erfassten Werten, nicht ein Einzelwert. "
-    "Mit parameter lässt sich auf Messreihen einschränken, die eine bestimmte "
-    "Messgröße enthalten (z. B. ph, kh, no3).",
+    "Messwerte eines oder aller Becken, neueste zuerst. Je Eintrag eine "
+    "Messgröße mit einem Wert; gleichzeitig erfasste Werte teilen sich den "
+    "Zeitpunkt. Mit parameter lässt sich auf eine Messgröße einschränken "
+    "(z. B. ph, kh, no3). Jeder Wert kommt mit dem Abgleich gegen den "
+    "Zielbereich des Beckens (status: ok, warn, critical, unknown).",
     schema={
         "type": "object",
         "properties": {
             "tank_id": {"type": "integer", "description": "Nur dieses Becken."},
             "parameter": {
                 "type": "string",
-                "description": "Kürzel einer Messgröße, z. B. ph, kh, gh, no3, temp.",
+                "description": "Kürzel einer Messgröße: temperatur, ph, no2, no3, "
+                "nh4, kh, gh, po4, leitwert.",
             },
             **_PERIOD_SCHEMA,
         },
@@ -122,19 +130,24 @@ def list_measurements(context, arguments):
     queryset = _period_filter(arguments, queryset, "measured_at")
     parameter = arguments.text("parameter")
     if parameter:
-        queryset = queryset.filter(values__parameter__key=parameter).distinct()
-    queryset = queryset.prefetch_related("values__parameter")[: arguments.limit()]
-    return {"measurements": [serialize.measurement(item) for item in queryset]}
+        queryset = queryset.filter(parameter__key=parameter)
+    rows = list(queryset[: arguments.limit()])
+    targets = data.parameter_targets(context.user, [row.tank_id for row in rows])
+    return {
+        "measurements": [
+            serialize.measurement(row, targets=targets.get(row.tank_id, {})) for row in rows
+        ]
+    }
 
 
 @tool(
     "get_measurement",
-    "Eine einzelne Messreihe mit allen Werten, dem daraus berechneten CO2-Gehalt "
-    "und dem Abgleich mit den Zielbereichen des Beckens (status: low, ok, high).",
+    "Ein einzelner Messwert mit dem Abgleich gegen den Zielbereich des Beckens "
+    "(status: ok, warn, critical, unknown).",
     schema={
         "type": "object",
         "properties": {
-            "measurement_id": {"type": "integer", "description": "Kennung der Messreihe."}
+            "measurement_id": {"type": "integer", "description": "Kennung des Messwerts."}
         },
         "required": ["measurement_id"],
     },
@@ -143,7 +156,7 @@ def get_measurement(context, arguments):
     measurement = data.measurement(
         context.user, arguments.integer("measurement_id", required=True)
     )
-    return serialize.measurement(measurement, with_targets=True)
+    return serialize.measurement(measurement)
 
 
 # --------------------------------------------------------------------------
@@ -181,10 +194,11 @@ def _event_categories() -> list[str]:
 
 
 @tool(
-    "list_due_schedules",
-    "Wiederkehrende Termine, die fällig oder in den nächsten Tagen fällig sind "
-    "— Wasserwechsel, Filterreinigung, Düngung. Negatives days_until_due heißt "
-    "überfällig.",
+    "list_due_tasks",
+    "Pflegetermine, die fällig oder in den nächsten Tagen fällig sind — "
+    "Wasserwechsel, Filterreinigung, Düngung, Wassertest. Negatives "
+    "days_until_due heißt überfällig. Die task_id wird für complete_task "
+    "gebraucht.",
     schema={
         "type": "object",
         "properties": {
@@ -200,16 +214,16 @@ def _event_categories() -> list[str]:
         },
     },
 )
-def list_due_schedules(context, arguments):
+def list_due_tasks(context, arguments):
     days_ahead = arguments.integer("days_ahead", default=7, minimum=0, maximum=365)
     today = timezone.localdate()
-    queryset = _tank_filter(context, arguments, data.schedules(context.user))
+    queryset = _tank_filter(context, arguments, data.tasks(context.user))
     if not arguments.boolean("include_inactive"):
         queryset = queryset.filter(is_active=True)
-    queryset = queryset.filter(next_due_on__lte=today + timedelta(days=days_ahead))
+    queryset = queryset.filter(due_on__lte=today + timedelta(days=days_ahead))
     return {
         "as_of": today.isoformat(),
-        "schedules": [serialize.schedule(item, today=today) for item in queryset],
+        "tasks": [serialize.task(item, today=today) for item in queryset],
     }
 
 
@@ -244,12 +258,12 @@ def search_catalog(context, arguments):
 
     results = []
     for current in kinds:
-        model = data.catalog_model(current)
-        matches = model.objects.filter(scientific_name__icontains=query) | model.objects.filter(
-            common_name__icontains=query
-        )
+        # ``search`` ist dieselbe Suche wie im Katalog der Web-App — sie deckt
+        # neben beiden Namen auch die Kurzbeschreibung ab. Eine zweite,
+        # abweichende Suchlogik neben der Oberfläche soll es nicht geben.
+        matches = data.catalog_model(current).objects.search(query)
         results.extend(
-            serialize.catalog_entry(current, entry) for entry in matches.distinct()[:limit]
+            serialize.catalog_entry(current, entry) for entry in matches[:limit]
         )
     return {"query": query, "entries": results}
 

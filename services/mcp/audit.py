@@ -1,17 +1,18 @@
 """Kennzeichnung und Protokoll schreibender Zugriffe.
 
-Zwei Spuren führen von einem Datensatz zurück zum MCP-Aufruf:
+Die Spur von einem Datensatz zurück zum MCP-Aufruf führt über **das
+Protokoll**: :func:`access_log` hält Zeitpunkt, Token, Werkzeug, Parameter und
+den erzeugten Datensatz fest — auch bei abgewiesenen Aufrufen. Was der Client
+geschickt hat, geht dabei durch :func:`services.masking.mask`. Damit lässt sich
+die Frage beantworten, die man sich Wochen später stellt: „Wo kommt dieser Wert
+her?“
 
-* **Am Datensatz selbst.** Kennt ein Modell ein ``source``-Feld, trägt
-  :func:`mark_source` dort ``mcp`` ein. Eine Messreihe aus einem Chatfenster ist
-  damit in der Oberfläche von einer von Hand erfassten unterscheidbar, ohne
-  irgendwo nachschlagen zu müssen.
-* **Im Protokoll.** :func:`access_log` hält Zeitpunkt, Token, Werkzeug,
-  Parameter und den erzeugten Datensatz fest — auch bei abgewiesenen Aufrufen.
-  Was der Client geschickt hat, geht dabei durch :func:`services.masking.mask`.
-
-Beides zusammen beantwortet die Frage, die man sich Wochen später stellt: „Wo
-kommt dieser Wert her?“
+**Am Datensatz selbst** steht die Herkunft derzeit nicht: keines der
+Tagebuch-Modelle führt ein ``source``-Feld. :func:`mark_source` bleibt
+trotzdem, weil sie am Modell prüft statt am Werkzeug — bekommt ein Modell
+später eine Herkunft, tragen die schreibenden Werkzeuge sie ohne weitere
+Änderung ein. Wer den Unterschied „aus dem Chatfenster“ / „von Hand“ in der
+Oberfläche sehen will, braucht dieses Feld; das ist ein eigenes Item.
 """
 
 from django.core.exceptions import FieldDoesNotExist
@@ -19,8 +20,8 @@ from django.core.exceptions import FieldDoesNotExist
 from services.masking import mask
 from services.models import MCPAccessLog
 
-#: Wert für das ``source``-Feld. Dieselbe Schreibweise wie ``manual``,
-#: ``device`` und ``import`` in ``tanks.Source``.
+#: Wert für ein künftiges ``source``-Feld — dieselbe Schreibweise, die die
+#: Oberfläche für ``manual``, ``device`` und ``import`` verwenden würde.
 SOURCE = "mcp"
 
 
