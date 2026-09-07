@@ -20,8 +20,6 @@ from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
-from tanks.models import Tank
-
 #: Die Wasserparameter aus der Datenmigration — hier gebraucht, um sie nach dem
 #: Leeren der Tabellen wiederherzustellen. Der Modulname beginnt mit einer
 #: Ziffer und lässt sich deshalb nicht regulär importieren.
@@ -87,8 +85,16 @@ class DeviceMigrationTestCase(TransactionTestCase):
     # -- Daten ----------------------------------------------------------------
 
     def tank_named(self, name, slug=None):
-        return Tank.objects.create(
-            owner=self.user,
+        """Ein Becken im damaligen Zustand.
+
+        Über das historische Modell und nicht über ``tanks.models.Tank``: die
+        Datenbank steht hier auf dem Stand vor der Zusammenführung, und ein
+        Feld, das das Becken erst später bekommen hat, gibt es dort noch nicht.
+        Deshalb wird auch überall über ``tank_id`` verglichen — ein
+        historisches Modell ist für Djangos Gleichheit nicht dasselbe Modell.
+        """
+        return self.old_apps.get_model("tanks", "Tank").objects.create(
+            owner_id=self.user.pk,
             name=name,
             slug=slug or name.lower().replace(" ", "-"),
             volume_liters="240.0",
@@ -129,7 +135,7 @@ class LabelMatchingTests(DeviceMigrationTestCase):
 
         self.merge()
 
-        self.assertEqual(self.merged(name="Licht").tank, self.tank)
+        self.assertEqual(self.merged(name="Licht").tank_id, self.tank.pk)
 
     def test_an_unknown_label_stays_unassigned_and_is_reported(self):
         self.plug(label="Keller")
@@ -182,7 +188,7 @@ class CarryOverTests(DeviceMigrationTestCase):
 
         device = self.merged(name="Außenfilter")
         self.assertEqual(device.owner, self.user)
-        self.assertEqual(device.tank, self.tank)
+        self.assertEqual(device.tank_id, self.tank.pk)
         self.assertEqual(device.kind, "filter")
         self.assertEqual(device.manufacturer, "Eheim")
         self.assertEqual(device.model_name, "2075")
@@ -240,5 +246,5 @@ class RequiredTankTests(DeviceMigrationTestCase):
 
         from services.models import Device
 
-        self.assertEqual(Device.objects.get().tank, self.tank)
+        self.assertEqual(Device.objects.get().tank_id, self.tank.pk)
         self.assertFalse(hasattr(Device.objects.get(), "tank_label"))
