@@ -294,14 +294,15 @@ docker compose exec web python manage.py ai_test
 |---|---|---|
 | Pflanze/Tier bestimmen | *KI → Art bestimmen* | Kandidaten mit Konfidenz und Katalogtreffern |
 | Steckbrief entwerfen | Vorschlagsseite | vorbefüllte Felder, die geprüft werden müssen |
-| Messwerte deuten | `ai.read_measurements` | Einordnung des Verlaufs als Markdown |
+| Messreihe auswerten | Becken → Reiter *Messwerte* | Einordnung im Zusammenhang als Markdown |
+| Messwerte deuten | `ai.read_measurements` | Einordnung eines Verlaufs als Markdown |
 | Besatz prüfen | `ai.check_stocking` | Befunde zu Beckengröße, Gruppen, Verträglichkeit |
 | Beckenbericht | `ai.tank_report` | Zusammenfassung eines Zeitraums als Markdown |
 
-Die drei Auswertungen nehmen einfache Datenstrukturen entgegen
-(`TankFacts`, `StockItem`, `ReportPeriod`) statt Modellinstanzen — Becken,
-Messreihen und Besatz liegen in einem anderen Schritt des Epics. Ihre
-Oberfläche entsteht mit den Beckenseiten; die Service-Schicht steht.
+Die Auswertungen nehmen einfache Datenstrukturen entgegen (`TankFacts`,
+`StockItem`, `MeasurementContext`) statt Modellinstanzen: die Service-Schicht
+kennt weder ORM noch App-Grenzen. Gefüllt werden sie dort, wo die Daten zu
+Hause sind — für die Messreihen in `tanks/analysis.py`.
 
 ```python
 from services import ai
@@ -335,6 +336,43 @@ Bei Messwerten ist Zurückhaltung eingebaut: der System-Prompt verbietet die
 Diagnose ausdrücklich, es wird eingeordnet und auf Auffälligkeiten hingewiesen.
 Die Verantwortung für die Tiere bleibt beim Halter. Jede Antwort ist in der
 Oberfläche als KI-Vorschlag gekennzeichnet.
+
+### Auswertung einer Messreihe
+
+Auf dem Reiter *Messwerte* eines Beckens ordnet Claude die jüngste Messreihe im
+Zusammenhang ein — so, wie es ein erfahrener Aquarianer im Gespräch täte. Was
+dafür mitgeht, steht in `tanks/analysis.py`:
+
+1. die **aktuelle Messreihe** mit Zielabgleich und gerechnetem CO₂
+   (`3 · KH · 10^(7 − pH)`, die übliche Näherung — im Prompt ausdrücklich als
+   gerechnet und nicht als gemessen benannt)
+2. alle **Messreihen der letzten zehn Tage**, damit ein Verlauf sichtbar ist
+3. die **letzten zehn Ereignisse** bis zum Messzeitpunkt
+4. **Beckenstammdaten**: Volumen, Alter, Wassertyp, Technik, Zielbereiche
+5. **Besatz und Bepflanzung** mit den Toleranzbereichen aus dem Katalog
+
+Die Punkte 2 bis 5 sind nicht Beiwerk. Ein KH-Anstieg ist Verdunstung oder ein
+sich auflösender Stein — das entscheidet sich am Ereignis „Osmosewasser
+nachgefüllt". Nitrit „n.n." an Tag 3 bedeutet etwas anderes als an Tag 30. Und
+ob 27 °C in Ordnung sind, hängt daran, welche Arten im Becken schwimmen. Ohne
+diesen Kontext kommen allgemeine Sätze heraus, die überall und nirgends gelten.
+
+Eine Messreihe ist kein eigenes Modell, sondern alles, was an einem Becken zum
+selben Zeitpunkt gemessen wurde. Die Auswertung hängt deshalb am ältesten
+Messwert dieses Zeitpunkts, der die Reihe vertritt.
+
+| Verhalten | Warum |
+|---|---|
+| Läuft neben der Anfrage her, Ergebnis kommt per HTMX nach | Das Speichern der Messreihe darf nicht auf Anthropic warten |
+| Ergebnis liegt als `MeasurementAnalysis` in der Datenbank | Bei jedem Seitenaufruf neu wäre teuer und ergäbe bei gleicher Datenlage jedes Mal einen anderen Text |
+| `context_hash` über den gesamten Kontext | Unveränderte Datenlage heißt: die vorhandene Auswertung gilt weiter, ohne zweiten Aufruf |
+| Je Becken *automatisch / auf Knopfdruck / aus* (Default: Knopfdruck) | In der Einfahrphase wird täglich gemessen; ein Aufruf je Messung summiert sich |
+
+Der Aufruf läuft in einem eigenen Thread (`AI_ANALYSIS_BACKGROUND`, in Tests
+abgeschaltet) — die Anwendung bringt keinen Broker mit, und ein Ergebnis, das
+ohnehin in der Datenbank landet, braucht auch keinen. Geht der Prozess
+unterdessen unter, bleibt die Auswertung sichtbar auf „läuft" stehen und ist
+mit einem Klick neu anstoßbar.
 
 ### Kostenkontrolle
 

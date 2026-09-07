@@ -61,6 +61,10 @@ class AIResult:
     completion_tokens: int = 0
     cost_usd: Decimal = Decimal(0)
     duration_ms: int = 0
+    #: Der geschriebene Protokolleintrag — damit ein gespeichertes Ergebnis
+    #: sagen kann, was es gekostet hat. ``None``, wenn das Protokoll nicht
+    #: geschrieben werden konnte; das darf einen Aufruf nie scheitern lassen.
+    usage_log: object | None = None
 
     def __bool__(self) -> bool:
         return self.ok
@@ -134,7 +138,7 @@ class AIService:
 
         prompt_tokens, completion_tokens, cost = _account(message, self.model_name)
         duration_ms = _elapsed_ms(started)
-        self._log(
+        usage_log = self._log(
             action,
             user,
             prompt_tokens=prompt_tokens,
@@ -160,6 +164,7 @@ class AIService:
             completion_tokens=completion_tokens,
             cost_usd=cost,
             duration_ms=duration_ms,
+            usage_log=usage_log,
         )
 
     # -- Innenleben ----------------------------------------------------------
@@ -232,14 +237,15 @@ class AIService:
         duration_ms=0,
         success=True,
         error="",
-    ) -> None:
+    ):
         """Schreibt den Protokolleintrag — auch für abgelehnte Aufrufe.
 
         Ein am Budget gescheiterter Versuch steht damit im Admin, und ein
-        Protokollfehler stoppt nie den Aufrufer.
+        Protokollfehler stoppt nie den Aufrufer: dann gibt es eben keinen
+        Eintrag, auf den sich ein Ergebnis berufen kann.
         """
         try:
-            AIUsageLog.objects.create(
+            return AIUsageLog.objects.create(
                 user=user if getattr(user, "pk", None) else None,
                 action=action[:50],
                 model_name=self.model_name[:100],
@@ -252,6 +258,7 @@ class AIService:
             )
         except Exception:  # pragma: no cover - Protokoll darf nie blockieren
             logger.exception("KI-Protokoll konnte nicht geschrieben werden")
+            return None
 
     def _redact(self, message: str) -> str:
         """Stellt sicher, dass der API-Key nie in Logs oder UI landet."""

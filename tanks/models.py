@@ -93,6 +93,19 @@ class TankQuerySet(models.QuerySet):
 class Tank(models.Model):
     """Ein Aquarium eines Benutzers."""
 
+    class AIAnalysis(models.TextChoices):
+        """Wann die KI eine frisch erfasste Messreihe einordnet.
+
+        In der Einfahrphase wird täglich gemessen; ein Aufruf je Messung
+        summiert sich. Deshalb ist ``MANUAL`` die Voreinstellung — die
+        Auswertung passiert auf Knopfdruck, ``AUTO`` nimmt einem den Klick ab,
+        ``OFF`` blendet sie am Becken vollständig aus.
+        """
+
+        AUTO = "auto", "automatisch nach jeder Messreihe"
+        MANUAL = "manual", "auf Knopfdruck"
+        OFF = "off", "aus"
+
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="tanks", on_delete=models.CASCADE, verbose_name="Besitzer"
     )
@@ -115,6 +128,13 @@ class Tank(models.Model):
         help_text="Bestimmt die Farbmarkierung des Beckens in Listen und auf dem Dashboard.",
     )
     cover_image = models.ImageField("Titelbild", upload_to=tank_cover_path, blank=True)
+    ai_analysis_mode = models.CharField(
+        "KI-Auswertung der Messreihen",
+        max_length=10,
+        choices=AIAnalysis.choices,
+        default=AIAnalysis.MANUAL,
+        help_text="Ohne hinterlegten API-Key hat die Einstellung keine Wirkung.",
+    )
     notes = models.TextField("Notizen", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -187,6 +207,15 @@ class Tank(models.Model):
         if months < 24:
             return f"{months} Monate"
         return f"{months // 12} Jahre"
+
+    @property
+    def ai_analysis_wanted(self):
+        """Soll an diesem Becken überhaupt ausgewertet werden?"""
+        return self.ai_analysis_mode != self.AIAnalysis.OFF
+
+    @property
+    def ai_analysis_automatic(self):
+        return self.ai_analysis_mode == self.AIAnalysis.AUTO
 
 
 class Parameter(models.Model):

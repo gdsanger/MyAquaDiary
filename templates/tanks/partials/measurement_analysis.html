@@ -1,0 +1,70 @@
+{% comment %}
+KI-Auswertung der jüngsten Messreihe.
+
+Solange die Auswertung läuft, holt sich dieser Block sein Ergebnis selbst nach
+(`hx-trigger="load delay:4s"`); ist sie fertig, fehlt das Attribut und das
+Nachladen hört von allein auf. Ohne JavaScript zeigt ein Neuladen der Seite
+denselben Stand — der Reiter rendert diesen Block serverseitig.
+
+Der Block verschwindet vollständig, wenn kein API-Key hinterlegt ist, das
+Becken die Auswertung abgeschaltet hat oder es noch keine Messwerte gibt.
+{% endcomment %}
+<div id="ki-auswertung"
+     {% if analysis.analysis.is_running %}
+       hx-get="{% url 'tanks:measurement-analysis' tank.slug %}"
+       hx-trigger="load delay:4s" hx-swap="outerHTML"
+     {% endif %}>
+  {% if analysis.available %}
+    <section class="mad-card mb-4">
+      <div class="mad-card__header">
+        <h2 class="mad-card__title">KI-Auswertung der Messreihe</h2>
+        {% if analysis.can_start %}
+          <div class="mad-actions">
+            <form method="post" action="{% url 'tanks:measurement-analysis' tank.slug %}"
+                  hx-post="{% url 'tanks:measurement-analysis' tank.slug %}"
+                  hx-target="#ki-auswertung" hx-swap="outerHTML">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-outline-primary btn-sm">
+                {% if analysis.analysis %}Neu auswerten{% else %}Auswerten lassen{% endif %}
+              </button>
+            </form>
+          </div>
+        {% endif %}
+      </div>
+      <div class="mad-card__body">
+        {% if analysis.notice %}
+          <p class="mad-muted">{{ analysis.notice }}</p>
+        {% endif %}
+
+        {% if analysis.analysis.is_running %}
+          <p class="mb-0" aria-live="polite">
+            Claude liest gerade Verlauf, Ereignisse und Besatz — das dauert einen Moment.
+            Das Ergebnis erscheint hier von selbst.
+          </p>
+        {% elif analysis.analysis.is_ready %}
+          {% include "services/_ai_notice.html" with label="KI-Auswertung" %}
+          <div class="mt-3">{{ analysis.analysis.text|linebreaks }}</div>
+          <p class="mad-muted mt-3 mb-0">
+            Ausgewertet am {{ analysis.analysis.completed_at|date:"d.m.Y H:i" }}
+            {% if analysis.analysis.model_name %}mit {{ analysis.analysis.model_name }}{% endif %}
+            {% if analysis.analysis.usage_log %}
+              · {{ analysis.analysis.usage_log.total_tokens }} Token
+            {% endif %}
+            {% if analysis.stale %}
+              · Seitdem haben sich Daten geändert.
+            {% endif %}
+          </p>
+        {% elif analysis.analysis.failed %}
+          <p class="mb-0">{{ analysis.analysis.error_message }}</p>
+        {% else %}
+          <p class="mb-0">
+            Noch nicht ausgewertet. Claude ordnet die Messreihe im Zusammenhang ein:
+            Verlauf der letzten Tage, die letzten Ereignisse, die Zielbereiche des
+            Beckens und die Ansprüche des Besatzes. Was dabei herauskommt, sind
+            Hinweise — keine Diagnose.
+          </p>
+        {% endif %}
+      </div>
+    </section>
+  {% endif %}
+</div>

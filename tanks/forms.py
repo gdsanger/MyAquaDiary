@@ -15,6 +15,7 @@ from django.utils.text import slugify
 
 from catalog.models import AnimalSpecies, PlantSpecies
 from core.forms import BootstrapMixin, DateField, DateTimeField, MultipleImageField
+from services.ai import ai_enabled
 
 from .models import (
     CareTask,
@@ -99,6 +100,7 @@ class TankForm(BootstrapMixin, forms.ModelForm):
             "setup_date",
             "accent",
             "cover_image",
+            "ai_analysis_mode",
             "notes",
         ]
         widgets = {"notes": forms.Textarea(attrs={"rows": 3})}
@@ -106,6 +108,11 @@ class TankForm(BootstrapMixin, forms.ModelForm):
     def __init__(self, *args, owner=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.owner = owner if owner is not None else getattr(self.instance, "owner", None)
+        # Ohne hinterlegten API-Key gibt es die KI-Auswertung nicht — dann hat
+        # auch die Einstellung dazu am Becken nichts zu suchen. Der Wert bleibt
+        # am Datensatz stehen und gilt wieder, sobald ein Key da ist.
+        if not ai_enabled():
+            self.fields.pop("ai_analysis_mode", None)
 
     def clean_name(self):
         name = self.cleaned_data["name"].strip()

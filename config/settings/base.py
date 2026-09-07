@@ -151,6 +151,12 @@ AI_IMAGE_MAX_EDGE = env.int("AI_IMAGE_MAX_EDGE", default=1024)
 # nur auf ausdrückliche Anforderung des Benutzers.
 AI_TIMEOUT = env.int("AI_TIMEOUT", default=120)
 
+# Die KI-Auswertung einer Messreihe läuft neben der Anfrage her, damit das
+# Speichern nicht auf Anthropic wartet; das Ergebnis wird per HTMX nachgeladen.
+# Abgeschaltet läuft sie im Anfrage-Thread — das brauchen die Tests, die sonst
+# außerhalb ihrer Transaktion nach der Messreihe suchen würden.
+AI_ANALYSIS_BACKGROUND = env.bool("AI_ANALYSIS_BACKGROUND", default=True)
+
 # Basis-URL für absolute Links in Mails (Mails haben keinen Request-Kontext).
 SITE_URL = env("SITE_URL", default="http://localhost:8000")
 

@@ -448,15 +448,60 @@ class AIServiceTests(TestCase):
 # --------------------------------------------------------------------------
 
 
+def _series_context(*, age="14 Monate", events=None) -> prompts.MeasurementContext:
+    """Ein vollständiger Auswertungskontext, wie ihn ``tanks.analysis`` baut."""
+    return prompts.MeasurementContext(
+        tank=prompts.TankFacts(
+            name="Gesellschaftsbecken",
+            volume_liters=240,
+            water_type="Süßwasser",
+            started_on="01.07.2025",
+            age=age,
+            targets="pH-Wert 6,5–7,5",
+        ),
+        current=prompts.Series(
+            measured_at="06.09.2026 20:00",
+            readings=(
+                prompts.Reading(
+                    name="pH-Wert", value="7,2", target="6,5–7,5", status="In Ordnung"
+                ),
+                prompts.Reading(name="Karbonathärte", value="5", unit="°dH"),
+            ),
+            co2="19",
+        ),
+        history=(
+            prompts.Series(
+                measured_at="05.09.2026 09:00",
+                readings=(prompts.Reading(name="pH-Wert", value="7,4"),),
+            ),
+        ),
+        events=events
+        if events is not None
+        else (
+            prompts.DiaryEvent(
+                occurred_at="04.09.2026 18:00",
+                title="Osmosewasser nachgefüllt",
+                category="Wartung",
+            ),
+        ),
+        stock=(prompts.StockItem("Neonsalmler (Tier)", count=12, note="23–27 °C, Gruppe ab 10"),),
+    )
+
+
 class PromptTests(TestCase):
     def test_guardrails_are_part_of_every_system_prompt(self):
         for system in (prompts.IDENTIFY_SYSTEM, prompts.PROFILE_SYSTEM,
-                       prompts.MEASUREMENT_SYSTEM, prompts.STOCKING_SYSTEM,
-                       prompts.REPORT_SYSTEM):
+                       prompts.MEASUREMENT_SYSTEM, prompts.SERIES_SYSTEM,
+                       prompts.STOCKING_SYSTEM, prompts.REPORT_SYSTEM):
             self.assertIn("Verantwortung", system)
 
     def test_measurement_prompt_forbids_a_diagnosis(self):
         self.assertIn("keine Diagnose", prompts.MEASUREMENT_SYSTEM)
+
+    def test_series_prompt_forbids_diagnosis_and_soothing(self):
+        """Einordnen statt behandeln — und Kritisches nicht weichzeichnen."""
+        self.assertIn("keine Diagnose", prompts.SERIES_SYSTEM)
+        self.assertIn("beruhigst nicht um jeden Preis", prompts.SERIES_SYSTEM)
 
     def test_tank_facts_skip_what_is_unknown(self):
         text = prompts.TankFacts(name="Becken 1").as_text()
@@ -470,6 +515,39 @@ class PromptTests(TestCase):
         table = prompts.measurements_table([{"measured_at": "01.09.", "ph": 7.2, "no2": None}])
         self.assertIn("ph 7.2", table)
         self.assertNotIn("no2", table)
+
+    def test_series_prompt_carries_the_whole_context(self):
+        """Ohne Verlauf, Ereignisse und Besatz bliebe nur eine allgemeine Aussage."""
+        text = prompts.series_prompt(_series_context())
+
+        self.assertIn("Gesellschaftsbecken", text)
+        self.assertIn("pH-Wert: 7,2", text)
+        self.assertIn("CO₂ (aus KH und pH gerechnet): 19", text)
+        self.assertIn("Osmosewasser nachgefüllt", text)
+        self.assertIn("12× Neonsalmler", text)
+        self.assertIn("05.09.2026 09:00", text)
+
+    def test_series_context_names_what_is_missing(self):
+        empty = prompts.MeasurementContext(
+            tank=prompts.TankFacts(name="Becken"),
+            current=prompts.Series(measured_at="06.09.2026 20:00"),
+        )
+        text = empty.as_text()
+        self.assertIn("keine weiteren Messreihen", text)
+        self.assertIn("keine Ereignisse erfasst", text)
+
+    def test_fingerprint_follows_the_data_but_not_the_calendar(self):
+        """Gleiche Daten, gleiche Prüfsumme — auch wenn das Becken älter wird."""
+        first = _series_context()
+        self.assertEqual(first.fingerprint(), _series_context().fingerprint())
+
+        older = _series_context(age="15 Monate")
+        self.assertEqual(first.fingerprint(), older.fingerprint())
+
+        changed = _series_context(
+            events=(prompts.DiaryEvent(occurred_at="06.09.2026 18:00", title="Wasserwechsel"),)
+        )
+        self.assertNotEqual(first.fingerprint(), changed.fingerprint())
 
     def test_stocking_prompt_separates_planned_from_present(self):
         text = prompts.stocking_prompt(
@@ -668,6 +746,35 @@ class EvaluationTests(TestCase):
         answer = ai.read_measurements(self.tank, [], service=service)
         self.assertFalse(answer)
         self.assertEqual(service.client().calls, [])
+
+    def test_series_analysis_sends_history_events_and_stock(self):
+        service = service_with(message("Der pH ist seit gestern leicht gefallen."))
+        answer = ai.analyse_series(_series_context(), service=service)
+
+        self.assertTrue(answer)
+        self.assertIn("pH", answer.text)
+        sent = service.client().calls[0]["messages"][0]["content"][0]["text"]
+        self.assertIn("05.09.2026 09:00", sent)
+        self.assertIn("Osmosewasser nachgefüllt", sent)
+        self.assertIn("Neonsalmler", sent)
+
+    def test_series_without_readings_means_no_call(self):
+        service = service_with(message("darf nicht passieren"))
+        answer = ai.analyse_series(
+            prompts.MeasurementContext(
+                tank=prompts.TankFacts(name="Becken"),
+                current=prompts.Series(measured_at="06.09.2026 20:00"),
+            ),
+            service=service,
+        )
+        self.assertFalse(answer)
+        self.assertEqual(service.client().calls, [])
+
+    def test_series_analysis_carries_its_usage_log(self):
+        """Was ein gespeichertes Ergebnis gekostet hat, muss daran hängen."""
+        answer = ai.analyse_series(_series_context(), service=service_with(message("Alles ruhig.")))
+        self.assertIsNotNone(answer.result.usage_log)
+        self.assertEqual(answer.result.usage_log.action, AIUsageLog.Action.MEASUREMENTS)
 
     def test_stocking_check_returns_findings(self):
         payload = json.dumps(

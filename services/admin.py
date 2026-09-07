@@ -23,6 +23,7 @@ from .models import (
     MailLog,
     MCPAccessLog,
     MCPToken,
+    MeasurementAnalysis,
 )
 
 
@@ -310,6 +311,24 @@ class AIUsageLogAdmin(admin.ModelAdmin):
     readonly_fields = ["created_at", "user", "action", "model_name", "prompt_tokens",
                        "completion_tokens", "total_cost_usd", "duration_ms", "success",
                        "error_message"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(MeasurementAnalysis)
+class MeasurementAnalysisAdmin(admin.ModelAdmin):
+    """Einblick in die Messreihen-Auswertungen — ausgelöst wird am Becken."""
+
+    list_display = ["created_at", "measurement", "status", "model_name", "usage_log"]
+    list_filter = ["status", "model_name", "created_at"]
+    search_fields = ["measurement__tank__name"]
+    date_hierarchy = "created_at"
+    readonly_fields = ["created_at", "completed_at", "measurement", "status", "text",
+                       "model_name", "context_hash", "error_message", "usage_log"]
 
     def has_add_permission(self, request):
         return False
