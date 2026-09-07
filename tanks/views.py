@@ -14,8 +14,9 @@ from django.urls import reverse
 from django.views.generic import TemplateView, View
 
 from core.views import NavSectionMixin
+from services.ai import ai_enabled
 
-from . import selectors
+from . import analysis, selectors
 from .charts import key_parameter_charts
 from .forms import (
     CareTaskForm,
@@ -98,6 +99,9 @@ def tab_context(tank, tab):
             "measurements": measurements,
             "charts": key_parameter_charts(tank),
             "page_size": MEASUREMENT_PAGE_SIZE,
+            # Serverseitig mitgeliefert und nicht erst nachgeladen: ohne
+            # JavaScript ist die Auswertung sonst gar nicht zu sehen.
+            "analysis": analysis.state(tank),
         }
     if tab == "ereignisse":
         return {"events": tank.events.all()[:100]}
@@ -501,6 +505,10 @@ class MeasurementCreateView(TankFragmentView):
         if not form.is_valid():
             return self.render_tab(self.form_context(form))
         created = form.save(self.tank, user=request.user)
+        # Die Auswertung läuft neben der Anfrage her; gespeichert ist die
+        # Messreihe auch dann, wenn Anthropic nicht antwortet.
+        if created and self.tank.ai_analysis_automatic:
+            analysis.start(analysis.anchor_of(created[0]), user=request.user)
         return self.done(f"{len(created)} Messwert(e) erfasst.")
 
     def form_context(self, form):
@@ -513,6 +521,42 @@ class MeasurementCreateView(TankFragmentView):
             modal_hint="Nicht nachweisbare Werte als „n.n.“ eintragen. "
             "Leere Felder werden nicht gespeichert.",
         )
+
+
+class MeasurementAnalysisView(TankScopedMixin, View):
+    """Die KI-Auswertung der jüngsten Messreihe — als eigenes Fragment.
+
+    Bewusst nicht der ganze Reiterbereich: solange die Auswertung läuft, holt
+    sich dieser Block sein Ergebnis im Sekundentakt nach, und dabei soll nicht
+    jedes Mal die halbe Seite neu entstehen.
+
+    Ohne HTMX gibt es kein Nachladen; dann führt der Weg über den Reiter, der
+    denselben Block serverseitig rendert. ``POST`` landet deshalb ohne HTMX auf
+    der Beckenseite und nicht auf einem nackten Fragment.
+    """
+
+    model = Measurement
+    template_name = "tanks/partials/measurement_analysis.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        # Kein API-Key heißt: die Adresse gibt es nicht — wie bei den übrigen
+        # KI-Ansichten (siehe ``services.views._ai_view``).
+        if not ai_enabled():
+            raise Http404("Die KI-Assistenz ist nicht eingerichtet")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get(self, request, **kwargs):
+        return self.render_state(analysis.state(self.tank))
+
+    def post(self, request, **kwargs):
+        anchor = analysis.latest_anchor(self.tank)
+        state = analysis.start(anchor, user=request.user) if anchor else analysis.state(self.tank)
+        return self.render_state(state)
+
+    def render_state(self, state):
+        if not getattr(self.request, "htmx", False):
+            return HttpResponseRedirect(f"{self.tank.get_absolute_url()}?reiter=messwerte")
+        return render(self.request, self.template_name, {"tank": self.tank, "analysis": state})
 
 
 class MeasurementUpdateView(TankObjectFormView):

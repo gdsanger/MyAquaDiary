@@ -20,6 +20,11 @@ urlpatterns = [
         name="measurement-create",
     ),
     path(
+        "<slug:slug>/messwerte/auswertung/",
+        views.MeasurementAnalysisView.as_view(),
+        name="measurement-analysis",
+    ),
+    path(
         "<slug:slug>/messwerte/<int:pk>/bearbeiten/",
         views.MeasurementUpdateView.as_view(),
         name="measurement-update",

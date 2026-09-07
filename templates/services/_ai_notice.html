@@ -1,7 +1,9 @@
 {# Kennzeichnung jeder KI-Antwort. Bewusst überall dieselbe Formulierung: ein
-   Vorschlag bleibt ein Vorschlag, egal auf welcher Seite er auftaucht. #}
+   Vorschlag bleibt ein Vorschlag, egal auf welcher Seite er auftaucht. Nur die
+   Aufschrift auf dem Abzeichen darf die aufrufende Seite setzen (`label`) —
+   eine Messreihen-Auswertung ist kein Katalogvorschlag. #}
 <p class="small text-body-secondary mb-0">
-  <span class="badge text-bg-secondary align-middle">KI-Vorschlag</span>
+  <span class="badge text-bg-secondary align-middle">{{ label|default:"KI-Vorschlag" }}</span>
   Erstellt von Anthropic Claude. Die Angaben sind unbestätigt und können falsch sein —
   bitte prüfen, bevor du sie übernimmst.
 </p>
