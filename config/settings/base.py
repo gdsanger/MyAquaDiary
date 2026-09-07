@@ -18,7 +18,15 @@ environ.Env.read_env(BASE_DIR / ".env")
 SECRET_KEY = env("DJANGO_SECRET_KEY")
 
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[])
-
+CSRF_TRUSTED_ORIGINS = [
+    "https://aqua.angerlabs.de",
+    "https://aquamcpmcp.angerlabs.de",
+    "http://localhost",
+    "http://127.0.0.1:8015",
+    "http://178.105.124.17:8015",
+    # optional Wildcard, falls mehrere Subdomains:
+    # "https://*.angermeier.net",
+]
 # Schlüsselmaterial für core.fields.EncryptedTextField. Der erste Schlüssel
 # verschlüsselt, alle weiteren stehen für die Entschlüsselung bereit (Rotation).
 # Ohne Angabe wird ein Schlüssel aus SECRET_KEY abgeleitet.
@@ -41,6 +49,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -99,13 +108,13 @@ LANGUAGE_CODE = "de-de"
 TIME_ZONE = "Europe/Berlin"
 USE_I18N = True
 USE_TZ = True
+# WhiteNoise configuration for serving static files in production
 
 STATIC_URL = "static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
-
-MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "mediafiles"
+MEDIA_URL = "media/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

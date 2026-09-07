@@ -1,10 +1,10 @@
 """URL configuration for the MyAquaDiary project."""
 
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
-from django.urls import include, path
+from django.urls import include, path, re_path
+from django.views.static import serve
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -16,9 +16,14 @@ urlpatterns = [
     path("", include("dashboard.urls")),
 ]
 
+# Titelbilder und Galeriefotos ausliefern. Provisorium: NPM kann kein alias,
+# deshalb übernimmt das vorerst Django. Ersetzen, sobald ein eigener
+# Static-Server davor steht.
+urlpatterns += [
+    re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
+]
+
 if settings.DEBUG:
     import debug_toolbar
 
     urlpatterns += [path("__debug__/", include(debug_toolbar.urls))]
-    # Titelbilder und Galeriefotos in der Entwicklung direkt ausliefern.
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
