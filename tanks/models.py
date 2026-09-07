@@ -1,5 +1,5 @@
 """Becken und alles, was daran hängt: Messwerte, Ereignisse, Besatz,
-Bepflanzung, Termine und Fotos.
+Bepflanzung, Einrichtung, Termine und Fotos.
 
 Die Geräte hängen ebenfalls am Becken, stehen aber in :mod:`services.models`:
 es gibt genau ein Gerätemodell, und das trägt neben Hersteller und Wartung auch
@@ -36,6 +36,15 @@ WARN_TOLERANCE = Decimal("0.2")
 #: Termine innerhalb dieses Zeitraums gelten als „anstehend".
 UPCOMING_DAYS = 14
 
+#: Standzeit eines Nährstoffdepots: vier Monate. Die Spanne reicht von drei bis
+#: sechs Monaten und hängt an Produkt und Zehrung der Pflanzen — die Zahl ist
+#: deshalb nur die Vorbelegung, überschrieben wird sie im Formular.
+NUTRIENT_DEPOT_DAYS = 120
+
+#: Erlenzapfen, Laub und Seemandelbaumblätter sind nach etwa sechs Wochen
+#: erschöpft; danach geben sie keine Huminstoffe mehr ab.
+BOTANICALS_DAYS = 42
+
 
 # Der Ablageort des Titelbilds kommt jetzt aus ``core.images`` und gilt für
 # jedes Modell mit Titelbild. Die drei alten Namen bleiben als Verweis stehen:
@@ -44,6 +53,13 @@ UPCOMING_DAYS = 14
 tank_cover_path = cover_path
 tank_cover_thumb_path = cover_thumb_path
 tank_cover_preview_path = cover_preview_path
+
+
+def format_cm(value):
+    """Zentimeterangabe deutsch und ohne überflüssige Null: „6", „6,5"."""
+    if value is None:
+        return ""
+    return f"{value:.1f}".rstrip("0").rstrip(".").replace(".", ",")
 
 
 def tank_photo_path(instance, filename):
@@ -178,6 +194,8 @@ class Tank(CoverImageMixin, models.Model):
             self.tasks,
             self.devices,
             self.photos,
+            self.substrate_layers,
+            self.hardscape,
         ]
         return any(manager.exists() for manager in related)
 
@@ -210,6 +228,40 @@ class Tank(CoverImageMixin, models.Model):
         if months < 24:
             return f"{months} Monate"
         return f"{months // 12} Jahre"
+
+    @property
+    def substrate_depth_cm(self):
+        """Gesamthöhe des Bodengrunds als Summe der Schichtmächtigkeiten.
+
+        Gerechnet wird über ``.all()`` und damit über ein ``prefetch_related``,
+        wo die Aufrufstelle eines gesetzt hat. Schichten ohne Angabe zählen
+        nicht mit — eine fehlende Mächtigkeit ist keine Null.
+        """
+        depths = [layer.depth_cm for layer in self.substrate_layers.all() if layer.depth_cm]
+        return sum(depths) if depths else None
+
+    @property
+    def setup_summary(self):
+        """Einrichtung in einer Zeile: „6 cm Bodengrund · 3 Wurzeln · 5 Steine".
+
+        Für die Übersicht gedacht, wo kein Platz für den Schichtstapel ist.
+        Gezählt wird nur, was im Becken liegt; entferntes Hardscape gehört in
+        die Geschichte, nicht in die Zusammenfassung.
+        """
+        parts = []
+        depth = self.substrate_depth_cm
+        if depth:
+            parts.append(f"{format_cm(depth)} cm Bodengrund")
+
+        counts = {}
+        for item in self.hardscape.all():
+            if item.is_active:
+                counts[item.kind] = counts.get(item.kind, 0) + (item.quantity or 1)
+        for kind, singular, plural in HardscapeItem.SUMMARY_LABELS:
+            count = counts.get(kind)
+            if count:
+                parts.append(f"{count} {singular if count == 1 else plural}")
+        return " · ".join(parts)
 
 
 class Parameter(models.Model):
@@ -445,6 +497,232 @@ class Planting(models.Model):
     @property
     def is_active(self):
         return self.removed_on is None
+
+
+class SubstrateLayer(models.Model):
+    """Eine Schicht des Bodengrunds, gezählt von unten nach oben.
+
+    Bodengrund ist kein Satz im Notizfeld, sondern eine Reihenfolge mit
+    Mächtigkeiten: „2 cm Nährstoffdepot, darüber 4 cm Sand". Erst als Schichten
+    erfasst ergeben sich Gesamthöhe und die Standzeit eines Depots — und die
+    Standzeit ist der Grund für die Erfassung: ein aufgebrauchtes Depot kippt
+    ein Becken gern über N- oder K-Mangel in die Algen.
+
+    Ein Gerät ist das nicht: ein Filter hat Betriebszustand, Verbrauch und
+    Wartungsintervall, eine Schicht hat Mächtigkeit und ein Verfallsdatum.
+    """
+
+    class Kind(models.TextChoices):
+        NUTRIENT = "nutrient", "Nährstoffdepot"
+        SOIL = "soil", "Aquasoil"
+        GRAVEL = "gravel", "Kies"
+        SAND = "sand", "Sand"
+        LAVA = "lava", "Lavagranulat"
+        FILTER_MAT = "filter_mat", "Filtermatte / Trennschicht"
+        OTHER = "other", "Sonstiges"
+
+    #: Schichtarten mit begrenzter Standzeit. Kies zehrt nicht auf, ein Depot
+    #: schon — nur dafür wird ein Verfallsdatum vorgeschlagen.
+    DEPOT_KINDS = {Kind.NUTRIENT}
+
+    tank = models.ForeignKey(Tank, related_name="substrate_layers", on_delete=models.CASCADE)
+    position = models.PositiveSmallIntegerField(
+        "Position", default=0, help_text="0 ist die unterste Schicht."
+    )
+    kind = models.CharField("Art", max_length=12, choices=Kind.choices, default=Kind.GRAVEL)
+    product = models.CharField(
+        "Produkt", max_length=160, blank=True, help_text="z. B. „Dennerle Sansibar“."
+    )
+    grain_size = models.CharField("Körnung", max_length=60, blank=True, help_text="z. B. „0,5–1 mm“.")
+    depth_cm = models.DecimalField("Mächtigkeit (cm)", max_digits=4, decimal_places=1, null=True, blank=True)
+    added_on = models.DateField("Eingebracht am", null=True, blank=True)
+    depleted_on = models.DateField(
+        "Erschöpft am",
+        null=True,
+        blank=True,
+        help_text="Bei Depots das rechnerische Ende der Standzeit.",
+    )
+    note = models.TextField("Notiz", blank=True)
+
+    class Meta:
+        # Aufsteigend, also von unten nach oben — die Darstellung dreht das um.
+        ordering = ["position", "pk"]
+        verbose_name = "Bodengrundschicht"
+        verbose_name_plural = "Bodengrund"
+
+    def __str__(self):
+        depth = f"{self.depth_display} " if self.depth_cm else ""
+        product = f" ({self.product})" if self.product else ""
+        return f"{depth}{self.get_kind_display()}{product}"
+
+    @property
+    def depth_display(self):
+        return f"{format_cm(self.depth_cm)} cm" if self.depth_cm else ""
+
+    @property
+    def is_depot(self):
+        return self.kind in self.DEPOT_KINDS
+
+    def move(self, step):
+        """Verschiebt die Schicht im Stapel; ``step`` ist +1 nach oben.
+
+        Nummeriert dabei den ganzen Stapel lückenlos durch: Positionen aus dem
+        Admin oder aus einer gelöschten Schicht müssen keine Folge bilden, und
+        eine Reihenfolge mit Lücken lässt sich nicht zuverlässig tauschen.
+        Am Rand des Stapels passiert nichts.
+        """
+        layers = list(self.tank.substrate_layers.all())
+        index = next((i for i, layer in enumerate(layers) if layer.pk == self.pk), None)
+        if index is None:
+            return False
+        target = index + step
+        if not 0 <= target < len(layers):
+            return False
+        layers[index], layers[target] = layers[target], layers[index]
+        for position, layer in enumerate(layers):
+            layer.position = position
+        SubstrateLayer.objects.bulk_update(layers, ["position"])
+        return True
+
+    def default_depleted_on(self):
+        """Vorgeschlagenes Ende der Standzeit — nur für Depots."""
+        if not self.is_depot or self.added_on is None:
+            return None
+        return self.added_on + timedelta(days=NUTRIENT_DEPOT_DAYS)
+
+    def depletion_status(self, today=None):
+        """Ist die Standzeit abgelaufen? Ohne Datum gibt es dazu keine Aussage."""
+        if self.depleted_on is None:
+            return Status.UNKNOWN
+        today = today or timezone.localdate()
+        return Status.WARN if self.depleted_on <= today else Status.OK
+
+    @property
+    def status_value(self):
+        return self.depletion_status()
+
+    @property
+    def depletion_label(self):
+        if self.depleted_on is None:
+            return ""
+        if self.depletion_status() == Status.WARN:
+            return f"erschöpft seit {self.depleted_on:%d.%m.%Y}"
+        return f"reicht bis {self.depleted_on:%d.%m.%Y}"
+
+    @property
+    def suggests_reminder(self):
+        """Lässt sich aus dieser Schicht ein Termin ableiten?"""
+        return bool(self.is_depot and (self.depleted_on or self.default_depleted_on()))
+
+    def reminder_defaults(self):
+        """Vorbelegung des angebotenen Termins — angelegt wird er nicht hier."""
+        name = self.product or self.get_kind_display()
+        return {
+            "title": f"Nährstoffdepot erschöpft: {name}"[:160],
+            "category": CareTask.Category.FERTILIZER,
+            "due_on": self.depleted_on or self.default_depleted_on(),
+            "notes": (
+                "Das Depot ist rechnerisch aufgebraucht. Düngung über die "
+                "Wassersäule prüfen, bevor Mangelerscheinungen auftreten."
+            ),
+        }
+
+
+class HardscapeItem(models.Model):
+    """Wurzel, Stein, Erlenzapfen, Rückwand — was sonst noch im Becken liegt.
+
+    Erfasst wird es wegen der Wasserwerte: Moorkienwurzel und Erlenzapfen geben
+    Huminstoffe ab und drücken den pH, kalkhaltiges Gestein hebt KH und
+    Leitwert. Bei einer unerklärten Veränderung ist die Einrichtung der erste
+    Verdächtige — nachvollziehen lässt sich das nur, wenn erfasst ist, was wann
+    hineinkam und was wieder heraus ist.
+    """
+
+    class Kind(models.TextChoices):
+        WOOD = "wood", "Wurzel / Holz"
+        STONE = "stone", "Stein"
+        BOTANICALS = "botanicals", "Erlenzapfen, Laub, Seemandelbaumblätter"
+        BACKGROUND = "background", "Rückwand"
+        CAVE = "cave", "Höhle / Versteck"
+        OTHER = "other", "Sonstiges"
+
+    #: Kurzbezeichnungen (Einzahl, Mehrzahl) für ``Tank.setup_summary``, in der
+    #: Reihenfolge, in der sie dort erscheinen. Die Klartexte der Auswahlliste
+    #: sind dafür zu lang — „5 Erlenzapfen, Laub, Seemandelbaumblätter" liest
+    #: sich in einer Kartenzeile nicht.
+    SUMMARY_LABELS = [
+        (Kind.WOOD, "Wurzel", "Wurzeln"),
+        (Kind.STONE, "Stein", "Steine"),
+        (Kind.BOTANICALS, "Zapfen & Laub", "Zapfen & Laub"),
+        (Kind.CAVE, "Höhle", "Höhlen"),
+        (Kind.BACKGROUND, "Rückwand", "Rückwände"),
+        (Kind.OTHER, "Dekoration", "Dekorationen"),
+    ]
+
+    #: Arten, die sich aufbrauchen und deshalb einen Termin nahelegen.
+    PERISHABLE_KINDS = {Kind.BOTANICALS}
+
+    tank = models.ForeignKey(Tank, related_name="hardscape", on_delete=models.CASCADE)
+    kind = models.CharField("Art", max_length=12, choices=Kind.choices, default=Kind.WOOD)
+    name = models.CharField("Bezeichnung", max_length=160, help_text="z. B. „Moorkienwurzel“.")
+    quantity = models.PositiveSmallIntegerField("Anzahl", null=True, blank=True)
+    added_on = models.DateField("Eingebracht am", null=True, blank=True)
+    removed_on = models.DateField("Entfernt am", null=True, blank=True)
+    # Ob ein Stein auslaugt, hängt vom Gestein ab und nicht von der Kategorie:
+    # deshalb ein eigenes Merkmal statt einer Ableitung aus ``kind``.
+    affects_water = models.BooleanField("Wirkt auf die Wasserwerte", default=False)
+    water_effect = models.CharField(
+        "Wirkung", max_length=200, blank=True, help_text="z. B. „Huminstoffe, senkt pH“."
+    )
+    note = models.TextField("Notiz", blank=True)
+
+    class Meta:
+        # Was im Becken liegt, steht oben; Entferntes sortiert sich mit dem
+        # jüngsten Abgang dahinter.
+        ordering = [models.F("removed_on").asc(nulls_first=True), "kind", "name"]
+        verbose_name = "Hardscape"
+        verbose_name_plural = "Hardscape"
+
+    def __str__(self):
+        return f"{self.quantity}× {self.name}" if self.quantity else self.name
+
+    @property
+    def is_active(self):
+        return self.removed_on is None
+
+    @property
+    def expected_depletion(self):
+        """Rechnerisches Ende botanischen Hardscapes — abgeleitet, kein Feld.
+
+        Erlenzapfen und Laub geben nach vier bis sechs Wochen nichts mehr ab.
+        Das ist eine Erfahrungsgröße und keine Eigenschaft des Stücks; sie
+        gehört deshalb nicht in die Tabelle.
+        """
+        if self.kind not in self.PERISHABLE_KINDS or self.added_on is None:
+            return None
+        return self.added_on + timedelta(days=BOTANICALS_DAYS)
+
+    @property
+    def effect_label(self):
+        """Wirkung auf die Wasserwerte in Worten, für Liste und Prompt."""
+        if not self.affects_water:
+            return ""
+        return self.water_effect or "wirkt auf die Wasserwerte"
+
+    @property
+    def suggests_reminder(self):
+        return bool(self.is_active and self.expected_depletion)
+
+    def reminder_defaults(self):
+        return {
+            "title": f"{self.name} erneuern"[:160],
+            "category": CareTask.Category.OTHER,
+            "due_on": self.expected_depletion,
+            "notes": (
+                "Erlenzapfen und Laub sind nach vier bis sechs Wochen erschöpft "
+                "und geben keine Huminstoffe mehr ab."
+            ),
+        }
 
 
 class CareTaskQuerySet(models.QuerySet):
