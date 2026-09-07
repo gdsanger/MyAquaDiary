@@ -131,6 +131,10 @@ def probe(device: Device) -> ProbeResult:
     """
     if not device.is_connected:
         return ProbeResult(error="Das Gerät ist nicht angebunden und wird nur dokumentiert.")
+    if device.is_stored:
+        # Ein eingelagertes Gerät hängt an keinem Strom. Es abzufragen liefe in
+        # eine Zeitüberschreitung und setzte den Status fälschlich auf kritisch.
+        return ProbeResult(error="Das Gerät ist eingelagert und wird nicht abgefragt.")
     if not device.is_active:
         return ProbeResult(error="Das Gerät ist deaktiviert.")
     try:
@@ -174,6 +178,8 @@ def execute(device: Device, action: str, params: dict | None = None, *, user=Non
     params = params or {}
     if not device.is_connected:
         return CommandResult(False, "Für dieses Gerät gibt es keine Steuerung.")
+    if device.is_stored:
+        return CommandResult(False, "Das Gerät ist eingelagert und hängt an keinem Strom.")
     if not device.is_active:
         return CommandResult(False, "Das Gerät ist deaktiviert.")
 
@@ -265,6 +271,8 @@ ACTION_LABELS = {
     "bio": "Bio-Modus",
     "pulse": "Pulse-Modus",
     "changeauth": "Zugangsdaten ändern",
+    "store": "Einlagern",
+    "install": "Einbauen",
 }
 
 
@@ -316,13 +324,19 @@ def change_password(device: Device, password: str, *, user=None) -> CommandResul
 
 
 def record_event(device: Device, *, action: str, title: str, description: str = "", user=None,
-                 succeeded: bool = True) -> DeviceEvent:
+                 succeeded: bool = True, tank=None) -> DeviceEvent:
     """Schreibt das Geräte-Ereignis — und dasselbe noch einmal am Becken.
 
     Einzige Stelle, an der das Protokoll entsteht. Was an der Technik passiert,
     gehört in die Beckenhistorie: wer eine Woche später eine Trübung sucht,
     sieht dort, dass am Vorabend der Filter umgestellt wurde. Fehlgeschlagene
     Versuche stehen mit dabei — gerade sie erklären hinterher etwas.
+
+    ``tank`` benennt das Becken, an dem das Ereignis hängt; ohne Angabe ist es
+    das aktuelle des Geräts. Beim Ein- und Auslagern wechselt das Becken gerade,
+    deshalb muss der Aufrufer es dort ausdrücklich mitgeben. Hängt das Gerät an
+    keinem Becken (eingelagert), entsteht nur das Geräte-Ereignis — an ein
+    Becken, das es nicht gibt, lässt sich nichts anhängen.
     """
     event = DeviceEvent.objects.create(
         device=device,
@@ -332,17 +346,63 @@ def record_event(device: Device, *, action: str, title: str, description: str = 
         description=description,
         succeeded=succeeded,
     )
-    TankEvent.objects.create(
-        tank_id=device.tank_id,
-        category=TankEvent.Category.EQUIPMENT,
-        title=title[:160],
-        # Der Gerätename steht im Titel nicht immer („Filter eingeschaltet"),
-        # am Becken hängen aber mehrere Geräte.
-        description=" · ".join(part for part in (device.name, description) if part),
-        occurred_at=event.occurred_at,
-        created_by=event.user,
-    )
+    tank_id = tank.pk if tank is not None else device.tank_id
+    if tank_id is not None:
+        TankEvent.objects.create(
+            tank_id=tank_id,
+            category=TankEvent.Category.EQUIPMENT,
+            title=title[:160],
+            # Der Gerätename steht im Titel nicht immer („Filter eingeschaltet"),
+            # am Becken hängen aber mehrere Geräte.
+            description=" · ".join(part for part in (device.name, description) if part),
+            occurred_at=event.occurred_at,
+            created_by=event.user,
+        )
     return event
+
+
+# --------------------------------------------------------------------------
+# Ein- und Auslagern
+# --------------------------------------------------------------------------
+
+
+def store(device: Device, *, user=None) -> DeviceEvent:
+    """Gerät einlagern: Becken lösen, Einlagerungsdatum setzen, Ereignis anlegen.
+
+    Das Gerät ist danach „nicht im Einsatz" — ``tank`` leer, ``stored_since``
+    auf heute. Das Ereignis der Kategorie Technik entsteht am **bisherigen**
+    Becken, denn dort fehlt das Gerät ab jetzt.
+    """
+    previous_tank = device.tank
+    device.tank = None
+    device.stored_since = timezone.localdate()
+    device.save(update_fields=["tank", "stored_since"])
+    return record_event(
+        device,
+        action="store",
+        title=f"{device.name} eingelagert",
+        user=user,
+        tank=previous_tank,
+    )
+
+
+def install(device: Device, tank, *, user=None) -> DeviceEvent:
+    """Gerät einbauen: Becken zuordnen, Einlagerungsdatum zurücksetzen, Ereignis.
+
+    Das Ereignis der Kategorie Technik entsteht am **neuen** Becken, denn dort
+    hängt das Gerät ab jetzt.
+    """
+    device.tank = tank
+    device.stored_since = None
+    device.save(update_fields=["tank", "stored_since"])
+    return record_event(
+        device,
+        action="install",
+        title=f"{device.name} eingebaut",
+        description=f"Becken: {tank.name}",
+        user=user,
+        tank=tank,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -373,7 +433,9 @@ def warnings_for(user) -> list[DeviceWarning]:
     """
     latest = DeviceReading.objects.filter(device=OuterRef("pk")).order_by("-read_at")
     devices = (
-        Device.objects.filter(owner=user, is_active=True)
+        # Eingelagerte Geräte (ohne Becken) bleiben draußen: ein Filter im
+        # Schrank mit altem Fehlercode ist keine Meldung wert.
+        Device.objects.filter(owner=user, is_active=True, tank__isnull=False)
         .annotate(
             latest_error=Subquery(latest.values("error_code")[:1]),
             latest_read_at=Subquery(latest.values("read_at")[:1]),

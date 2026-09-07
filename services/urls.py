@@ -13,6 +13,8 @@ urlpatterns = [
     path("geraete/<int:pk>/", views.device_detail, name="device_detail"),
     path("geraete/<int:pk>/status/", views.device_status, name="device_status"),
     path("geraete/<int:pk>/bearbeiten/", views.device_edit, name="device_edit"),
+    path("geraete/<int:pk>/einlagern/", views.device_store, name="device_store"),
+    path("geraete/<int:pk>/einbauen/", views.device_install, name="device_install"),
     path("geraete/<int:pk>/zugang/", views.device_credentials, name="device_credentials"),
     path("geraete/<int:pk>/steuern/<str:action>/", views.device_control, name="device_control"),
     # Titelbild — ein Abschnitt der Detailseite wie die folgenden, nur ohne

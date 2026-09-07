@@ -345,18 +345,28 @@ def total_cost(usages) -> Decimal:
 
 
 def metered_devices(user):
-    """Geräte des Benutzers, die überhaupt einen Zähler haben."""
-    return Device.objects.filter(owner=user, kind__in=Device.METERED_KINDS)
+    """Geräte des Benutzers, die überhaupt einen Zähler haben.
+
+    Nur zugeordnete: ein eingelagertes Gerät (ohne Becken) hängt an keinem
+    Strom und gehört in keine Beckenauswertung — es hätte auch kein Becken, dem
+    die Gruppierung es zuschlagen könnte.
+    """
+    return Device.objects.filter(
+        owner=user, kind__in=Device.METERED_KINDS, tank__isnull=False
+    )
 
 
 def estimated_devices(user):
     """Geräte ohne Zähler, deren Verbrauch sich hochrechnen lässt.
 
-    Nur aktive: ein abgemeldetes Gerät verbraucht nichts mehr, und eine
-    Schätzung, die es weiterlaufen lässt, wäre schlicht falsch.
+    Nur aktive und zugeordnete: ein abgemeldetes oder eingelagertes Gerät
+    verbraucht nichts mehr, und eine Schätzung, die es weiterlaufen lässt, wäre
+    schlicht falsch.
     """
     return (
-        Device.objects.filter(owner=user, is_active=True, power_watts__isnull=False)
+        Device.objects.filter(
+            owner=user, is_active=True, power_watts__isnull=False, tank__isnull=False
+        )
         .exclude(kind__in=Device.METERED_KINDS)
     )
 
