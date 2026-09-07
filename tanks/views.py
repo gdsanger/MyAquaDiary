@@ -100,7 +100,9 @@ def tab_context(tank, tab):
             "page_size": MEASUREMENT_PAGE_SIZE,
         }
     if tab == "ereignisse":
-        return {"events": tank.events.all()[:100]}
+        # ``prefetch_related`` statt einer Abfrage je Zeile: die Vorschaubilder
+        # stehen an jedem Eintrag.
+        return {"events": tank.events.prefetch_related("photos")[:100]}
     if tab == "besatz":
         return {"stockings": tank.stockings.select_related("species").prefetch_related("species__images")}
     if tab == "pflanzen":
@@ -112,7 +114,7 @@ def tab_context(tank, tab):
         # Bereich /geraete/ zeigt. Ein zweites Gerätemodell gibt es nicht.
         return {"devices": tank.devices.order_by("kind", "name")}
     if tab == "galerie":
-        return {"photos": tank.photos.all()}
+        return {"photos": tank.photos.select_related("event")}
     return {}
 
 
@@ -537,18 +539,66 @@ class MeasurementDeleteView(TankObjectConfirmView):
 # --- Ereignisse -----------------------------------------------------------
 
 
-class EventCreateView(TankObjectFormView):
+class EventFormView(TankObjectFormView):
+    """Ereignis anlegen oder bearbeiten — samt Bildern in einem Durchgang.
+
+    Das Formular nimmt Bilder entgegen, die Fotos entstehen aber erst, wenn das
+    Ereignis eine Kennung hat. Deshalb der zweite Schritt nach ``save()``.
+    """
+
     model = Event
     tab = "ereignisse"
     form_class = EventForm
+    multipart = True
+
+    #: Fotos dieses Durchgangs — ``save()`` füllt sie, die Meldung liest sie.
+    photos = ()
+
+    def save(self, form):
+        event = super().save(form)
+        self.photos = form.save_photos(event)
+        return event
+
+    def success_message(self, obj):
+        message = super().success_message(obj)
+        if not self.photos:
+            return message
+        return f"{message} {len(self.photos)} Foto(s) hinzugefügt."
+
+
+class EventCreateView(EventFormView):
     create_title = "Ereignis erfassen"
     create_url_name = "tanks:event-create"
 
+    #: Kategorie, die das leere Formular vorschlägt. ``EventObservationCreateView``
+    #: setzt sie um — dieselbe Ansicht, nur ein anderer Einstieg.
+    initial_category = None
 
-class EventUpdateView(TankObjectFormView):
-    model = Event
-    tab = "ereignisse"
-    form_class = EventForm
+    def get_form(self, data=None, files=None):
+        form = super().get_form(data, files)
+        if data is None and self.initial_category:
+            form.initial["category"] = self.initial_category
+        return form
+
+
+class EventObservationCreateView(EventCreateView):
+    """„Beobachtung erfassen“ — der Hauptfall am Becken, mit dem Telefon.
+
+    Kein eigener Ablauf und kein eigenes Modell: dasselbe Formular mit
+    vorgewählter Kategorie. Wer am Becken steht, soll die Auswahlliste nicht
+    erst durchsuchen müssen.
+    """
+
+    create_title = "Beobachtung erfassen"
+    create_url_name = "tanks:observation-create"
+    initial_category = Event.Category.OBSERVATION
+    hint = (
+        "Fotografieren, zwei Sätze dazu, fertig. Bleibt der Zeitpunkt leer, "
+        "kommt er aus den Bildern."
+    )
+
+
+class EventUpdateView(EventFormView):
     update_title = "Ereignis bearbeiten"
     update_url_name = "tanks:event-update"
 
@@ -751,11 +801,20 @@ class PhotoCreateView(TankFragmentView):
 
 
 class PhotoUpdateView(TankObjectFormView):
+    """Bildunterschrift, Datum — und die Zuordnung zu einem Ereignis.
+
+    Das Becken kommt aus dem Mixin; das Formular begrenzt die Ereignisauswahl
+    darauf, damit ein Foto nicht an einem fremden Ereignis landet.
+    """
+
     model = TankPhoto
     tab = "galerie"
     form_class = PhotoForm
-    update_title = "Bildunterschrift bearbeiten"
+    update_title = "Foto bearbeiten"
     update_url_name = "tanks:photo-update"
+
+    def form_kwargs(self):
+        return {"tank": self.tank}
 
 
 class PhotoDeleteView(TankObjectConfirmView):
