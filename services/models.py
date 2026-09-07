@@ -964,11 +964,12 @@ class AISuggestion(models.Model):
     übernommen. Ein unbestätigt übernommener Steckbrief verbreitet Fehler über
     alle Benutzer — deshalb der Zwischenschritt.
 
-    ``payload`` trägt die Felder so, wie der Katalog sie erwartet
-    (``scientific_name``, ``common_name``, ``difficulty`` …). Solange die
-    Katalog-Modelle im Epic noch fehlen, bleibt der bestätigte Entwurf hier
-    liegen und wird beim Bestätigen übernommen, sobald der Katalog da ist
-    (siehe :mod:`services.ai.catalog`).
+    ``payload`` trägt die Felder so, wie der Prompt sie abfragt
+    (``scientific_name``, ``difficulty``, ``temp_min_c`` …) — auch die, für die
+    es im Katalog kein Feld gibt. Was dort hingehört, übersetzt
+    :mod:`services.ai.catalog` beim Bestätigen; der Entwurf bleibt vollständig
+    stehen, denn er ist zugleich das Protokoll dessen, was die KI geantwortet
+    hat.
     """
 
     class Kind(models.TextChoices):

@@ -1,9 +1,10 @@
 """JSON-Schemata der KI-Antworten.
 
-Die Feldnamen der Steckbriefe entsprechen absichtlich denen des Katalogs
-(``scientific_name``, ``min_tank_liters``, ``growth_form`` …): ein bestätigter
-Entwurf lässt sich damit ohne Übersetzungsschicht in einen Katalogeintrag
-übernehmen (siehe :mod:`services.ai.catalog`).
+Die Steckbriefe fragen mehr ab, als der Katalog speichert: Herkunft, Familie
+oder Verträglichkeit stehen am Vorschlag und sind dort zu lesen, im Katalog
+haben sie kein Feld. Wo es eines gibt, heißt es hier möglichst gleich; die
+verbleibenden Unterschiede in Namen und Auswahllisten übersetzt
+:mod:`services.ai.catalog` beim Übernehmen an genau einer Stelle.
 
 Alle Objekte setzen ``additionalProperties: false`` und listen jedes Feld unter
 ``required`` — beides verlangen Structured Outputs. Felder, die das Modell
@@ -11,14 +12,15 @@ nicht kennt, kommen als leerer String bzw. ``null`` zurück; das ist besser als
 ein geratener Wert.
 """
 
-#: Auswahllisten, wortgleich zu den TextChoices im Katalog.
+#: Auswahllisten. Wo der Katalog dasselbe Feld führt, sind die Werte wortgleich
+#: zu seinen TextChoices — sonst fiele die Angabe beim Übernehmen weg.
 ANIMAL_GROUPS = ["fisch", "garnele", "krebs", "schnecke", "muschel"]
 SOCIAL_BEHAVIORS = ["einzeln", "paar", "harem", "gruppe", "schwarm"]
 ZONES = ["boden", "mitte", "oberflaeche"]
-DIFFICULTIES = ["easy", "medium", "demanding"]
+DIFFICULTIES = ["easy", "medium", "hard"]
 DIETS = ["allesfresser", "fleisch", "pflanzen", "aufwuchs"]
 GROWTH_FORMS = ["stem", "rosette", "epiphyte", "ground_cover", "floating", "moss"]
-PLACEMENTS = ["foreground", "midground", "background"]
+PLACEMENTS = ["foreground", "midground", "background", "floating", "epiphyte"]
 GROWTH_RATES = ["slow", "medium", "fast"]
 DEMANDS = ["low", "medium", "high"]
 
@@ -36,6 +38,10 @@ def _number(description):
 
 def _integer(description):
     return {"type": ["integer", "null"], "description": description}
+
+
+def _boolean(description):
+    return {"type": "boolean", "description": description}
 
 
 def _object(properties):
@@ -74,7 +80,7 @@ IDENTIFICATION_SCHEMA = _object(
     }
 )
 
-#: Steckbrief-Entwurf Tier — Feldnamen wie in catalog.CatalogAnimal.
+#: Steckbrief-Entwurf Tier — Feldnamen wie in catalog.AnimalSpecies.
 ANIMAL_PROFILE_SCHEMA = _object(
     {
         "scientific_name": _string("Wissenschaftlicher Name."),
@@ -82,6 +88,10 @@ ANIMAL_PROFILE_SCHEMA = _object(
         "variant": _string(
             "Zuchtform oder Sorte, z. B. Electric Blue. Nur wenn die Form eindeutig "
             "belegt ist; im Zweifel leer und unter uncertainties nennen."
+        ),
+        "is_cultivated_form": _boolean(
+            "True, wenn die unter variant genannte Form durch Selektion entstanden "
+            "ist und so in der Natur nicht vorkommt. Bei der Stammform false."
         ),
         "group": _string("Tiergruppe.", ANIMAL_GROUPS),
         "family": _string("Familie, sonst leer."),
@@ -109,7 +119,7 @@ ANIMAL_PROFILE_SCHEMA = _object(
     }
 )
 
-#: Steckbrief-Entwurf Pflanze — Feldnamen wie in catalog.CatalogPlant.
+#: Steckbrief-Entwurf Pflanze — Feldnamen wie in catalog.PlantSpecies.
 PLANT_PROFILE_SCHEMA = _object(
     {
         "scientific_name": _string("Wissenschaftlicher Name."),
@@ -117,6 +127,10 @@ PLANT_PROFILE_SCHEMA = _object(
         "variant": _string(
             "Sorte, z. B. Flamingo oder Red Ruby. Nur wenn die Sorte eindeutig belegt "
             "ist; im Zweifel leer und unter uncertainties nennen."
+        ),
+        "is_cultivated_form": _boolean(
+            "True, wenn die unter variant genannte Sorte gezüchtet ist und so in der "
+            "Natur nicht vorkommt. Bei der Stammform false."
         ),
         "family": _string("Familie, sonst leer."),
         "origin": _string("Herkunftsgebiet, sonst leer."),
