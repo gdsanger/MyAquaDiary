@@ -622,10 +622,19 @@ daraus einen Katalogeintrag an — ein unbestätigt übernommener Steckbrief wü
 Fehler über alle Nutzer verbreiten. Verworfene Vorschläge bleiben als Protokoll
 stehen.
 
-Der Katalog wird über `apps.get_model` aufgelöst statt importiert (siehe
-`services/ai/catalog.py`): solange `catalog.CatalogAnimal` und
-`catalog.CatalogPlant` im Epic fehlen, bleibt der Abgleich leer und eine
-Bestätigung merkt sich den Entwurf, statt zu scheitern.
+`services/ai/catalog.py` importiert `catalog.AnimalSpecies` und
+`catalog.PlantSpecies` direkt. Vor dem Katalog löste es sie über
+`apps.get_model` auf; heute wäre ein falscher Modellname von „gibt es noch
+nicht“ nicht zu unterscheiden, und der Abgleich fände stillschweigend nie
+etwas.
+
+Der Entwurf spricht die Sprache des Prompts (`temp_min_c`,
+`min_tank_liters`), der Katalog die des Datenmodells (`temperature_min`,
+`min_tank_volume_l`); `FIELD_NAMES` und `FIELD_VALUES` übersetzen beim
+Übernehmen an einer Stelle. Was der Katalog nicht führt — Familie, Herkunft,
+Verträglichkeit — bleibt am Vorschlag und ist dort zu lesen. Eine Angabe, die
+das Katalogfeld nicht annimmt, fällt mit einem Logeintrag weg, statt die
+Übernahme scheitern zu lassen.
 
 Ein Steckbrief-Entwurf gilt für genau eine Form: das Feld `variant` trägt die
 Sorte, und die Übernahme sucht über wissenschaftlichen Namen **und** Sorte, wie
@@ -829,10 +838,9 @@ prozesslokal — bei mehreren Workern zählt dann jeder für sich, das Limit
 vervielfacht sich entsprechend. Als Schutz gegen eine Endlosschleife reicht das;
 wer es genau haben will, hinterlegt einen gemeinsamen Cache (Redis, Memcached).
 
-Becken und Katalog werden — wie in `services/ai/catalog.py` — über
-`apps.get_model` aufgelöst statt importiert. Solange die Modelle im Epic
-fehlen, antwortet jedes Werkzeug mit einer verständlichen Meldung, statt den
-Server beim Start scheitern zu lassen.
+Becken und Katalog werden — wie in `services/ai/catalog.py` — importiert.
+`services/mcp/data.py` führt die Zuordnung von Kurznamen auf Modelle an einer
+Stelle; ein Tippfehler fällt damit beim Start auf und nicht erst dem Client.
 | `services` | Anbindung Graph-API, Eheim, Shelly, KI |
 
 ## Oberfläche
