@@ -24,6 +24,7 @@ gegen die diese Schicht ursprünglich geschrieben war (#1236).
 """
 
 from catalog.models import AnimalSpecies, PlantSpecies
+from tanks import derived, selectors
 from tanks.models import (
     CareTask,
     Event,
@@ -32,6 +33,7 @@ from tanks.models import (
     Planting,
     Stocking,
     Tank,
+    TankDerivedTarget,
     TankParameterTarget,
 )
 
@@ -43,6 +45,7 @@ MODELS = {
     "tank": Tank,
     "parameter": Parameter,
     "parameter_target": TankParameterTarget,
+    "derived_target": TankDerivedTarget,
     "measurement": Measurement,
     "event": Event,
     "task": CareTask,
@@ -156,6 +159,35 @@ def parameter_targets(user, tank_ids):
     for row in rows:
         found.setdefault(row.tank_id, {})[row.parameter_id] = row
     return found
+
+
+def derived_values(rows):
+    """CO₂ zu einer Messwertmenge — gerechnet, nie gespeichert.
+
+    ``rows`` sind Messwerte beliebiger Größen und stammen aus :func:`measurements`
+    und damit bereits aus eigenen Becken — hier wird nicht noch einmal
+    eingegrenzt, sondern nur gerechnet. Gepaart wird je Becken getrennt: eine
+    KH aus dem einen und ein pH aus dem anderen Becken ergeben keinen Wert.
+
+    Der Statusabgleich läuft über dieselbe Funktion wie in der Oberfläche: ein
+    Modell soll nicht anders über den Zielbereich urteilen als die Anwendung.
+    """
+    window = derived.pairing_window()
+    by_tank: dict[int, dict[str, list]] = {}
+    for row in rows:
+        if row.parameter.key in derived.CO2.sources:
+            per_key = by_tank.setdefault(row.tank_id, {key: [] for key in derived.CO2.sources})
+            per_key[row.parameter.key].append(row)
+
+    values = []
+    for per_key in by_tank.values():
+        for group in per_key.values():
+            group.sort(key=lambda item: item.measured_at)
+        values.extend(derived.co2_values(per_key["kh"], per_key["ph"], window))
+    values.sort(key=lambda item: item.measured_at, reverse=True)
+
+    targets = selectors.derived_target_map(list(by_tank))
+    return selectors.annotate_derived_status(values, targets)
 
 
 # --------------------------------------------------------------------------
