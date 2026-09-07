@@ -18,12 +18,15 @@ from core.forms import BootstrapMixin, DateField, DateTimeField, MultipleImageFi
 from core.images import taken_at
 
 from .models import (
+    NUTRIENT_DEPOT_DAYS,
     CareTask,
     Event,
+    HardscapeItem,
     Measurement,
     Parameter,
     Planting,
     Stocking,
+    SubstrateLayer,
     Tank,
     TankParameterTarget,
     TankPhoto,
@@ -395,6 +398,108 @@ class PlantingForm(BootstrapMixin, forms.ModelForm):
                 "removed_on", "Die Pflanze kann nicht vor dem Einsetzen entfernt worden sein."
             )
         return cleaned
+
+
+class SubstrateLayerForm(BootstrapMixin, forms.ModelForm):
+    """Eine Schicht des Bodengrunds.
+
+    ``position`` steht nicht im Formular: die Reihenfolge wird am Stapel
+    verschoben und nicht als Zahl eingetippt. Eine neue Schicht legt die Ansicht
+    obenauf — so, wie sie auch eingefüllt wird.
+
+    Das Ende der Standzeit füllt das Formular nur beim Nährstoffdepot vor, und
+    zwar mit vier Monaten. Die Spanne reicht von drei bis sechs; die Vorgabe ist
+    deshalb ein Vorschlag und kein Ergebnis.
+    """
+
+    added_on = DateField(label="Eingebracht am", required=False, initial=timezone.localdate)
+    depleted_on = DateField(
+        label="Erschöpft am",
+        required=False,
+        help_text="Beim Nährstoffdepot sonst vier Monate nach dem Einbringen.",
+    )
+
+    class Meta:
+        model = SubstrateLayer
+        fields = ["kind", "product", "grain_size", "depth_cm", "added_on", "depleted_on", "note"]
+        widgets = {"note": forms.Textarea(attrs={"rows": 2})}
+
+    def clean_depth_cm(self):
+        depth = self.cleaned_data.get("depth_cm")
+        if depth is not None and depth <= 0:
+            raise forms.ValidationError("Eine Schicht ohne Mächtigkeit ist keine Schicht.")
+        return depth
+
+    def clean(self):
+        cleaned = super().clean()
+        added, depleted = cleaned.get("added_on"), cleaned.get("depleted_on")
+        if added and depleted and depleted < added:
+            self.add_error("depleted_on", "Die Standzeit endet vor dem Einbringen.")
+        elif added and not depleted and cleaned.get("kind") in SubstrateLayer.DEPOT_KINDS:
+            cleaned["depleted_on"] = added + timedelta(days=NUTRIENT_DEPOT_DAYS)
+        return cleaned
+
+
+class HardscapeItemForm(BootstrapMixin, forms.ModelForm):
+    """Wurzel, Stein, Botanik, Rückwand.
+
+    ``removed_on`` steht mit im Formular, damit ein versehentlich gebuchter
+    Abgang ohne Umweg zurückgenommen werden kann; der reguläre Weg dorthin ist
+    :class:`HardscapeRemovalForm`.
+    """
+
+    added_on = DateField(label="Eingebracht am", required=False, initial=timezone.localdate)
+    removed_on = DateField(label="Entfernt am", required=False)
+
+    class Meta:
+        model = HardscapeItem
+        fields = [
+            "kind",
+            "name",
+            "quantity",
+            "added_on",
+            "removed_on",
+            "affects_water",
+            "water_effect",
+            "note",
+        ]
+        widgets = {"note": forms.Textarea(attrs={"rows": 2})}
+
+    def clean(self):
+        cleaned = super().clean()
+        added, removed = cleaned.get("added_on"), cleaned.get("removed_on")
+        if added and removed and removed < added:
+            self.add_error("removed_on", "Entfernt werden kann nur, was vorher drin lag.")
+        # Wer eine Wirkung beschreibt, meint auch, dass sie eintritt. Das
+        # Häkchen nachzufordern wäre eine Rückfrage ohne Erkenntnisgewinn — und
+        # ohne es fiele die Angabe aus Auswertung und KI-Kontext heraus.
+        if cleaned.get("water_effect") and not cleaned.get("affects_water"):
+            cleaned["affects_water"] = True
+        return cleaned
+
+
+class HardscapeRemovalForm(BootstrapMixin, forms.ModelForm):
+    """Abgang einer Einrichtungsposition.
+
+    Nicht gelöscht, sondern mit Datum versehen: dass ein Becken ein halbes Jahr
+    lang eine Moorkienwurzel enthielt, erklärt womöglich einen pH-Verlauf —
+    und zwar auch dann noch, wenn die Wurzel längst draußen ist.
+    """
+
+    removed_on = DateField(label="Entfernt am", initial=timezone.localdate)
+
+    class Meta:
+        model = HardscapeItem
+        fields = ["removed_on", "note"]
+        widgets = {"note": forms.Textarea(attrs={"rows": 2})}
+
+    def clean_removed_on(self):
+        value = self.cleaned_data["removed_on"]
+        if self.instance.added_on and value < self.instance.added_on:
+            raise forms.ValidationError("Entfernt werden kann nur, was vorher drin lag.")
+        if value > timezone.localdate():
+            raise forms.ValidationError("Das Datum liegt in der Zukunft.")
+        return value
 
 
 class CareTaskForm(BootstrapMixin, forms.ModelForm):

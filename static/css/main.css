@@ -657,6 +657,26 @@ img {
   color: var(--mad-text-muted);
 }
 
+/*
+ * Was nicht mehr im Becken liegt (entferntes Hardscape), bleibt lesbar, tritt
+ * aber zurueck. Nicht ausgeblendet: es erklaert womoeglich einen Verlauf, der
+ * erst spaeter auffaellt.
+ */
+.mad-past .mad-list__title,
+.mad-past .mad-list__meta {
+  color: var(--mad-text-muted);
+}
+
+/*
+ * Bodengrund als Stapel. Der Balken links macht die Schichtung sichtbar; die
+ * Maechtigkeit steht als Zahl daneben und wird nicht massstaeblich gezeichnet —
+ * 2 cm und 4 cm unterscheiden sich sonst nur um wenige Pixel, und eine Schicht
+ * ohne Angabe haette gar keine Hoehe.
+ */
+.mad-stack > li {
+  border-left: 4px solid var(--mad-border-strong);
+}
+
 .mad-definition {
   display: grid;
   grid-template-columns: minmax(8rem, 40%) 1fr;

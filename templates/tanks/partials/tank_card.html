@@ -30,6 +30,11 @@ mit den Zaehlern animal_count, plant_count, open_task_count, last_measured_at.
       <dd>{% if tank.last_measured_at %}{{ tank.last_measured_at|date:"d.m.Y" }}{% else %}—{% endif %}</dd>
     </dl>
 
+    {# Einrichtung in einer Zeile — der Schichtstapel steht im Reiter. #}
+    {% if tank.setup_summary %}
+      <p class="mad-muted mb-3">{{ tank.setup_summary }}</p>
+    {% endif %}
+
     {% if tank.is_dissolved %}
       <span class="mad-status">Aufgelöst am {{ tank.dissolved_on|date:"d.m.Y" }}</span>
     {% elif tank.open_task_count %}

@@ -20,6 +20,10 @@
           <dd>{{ tank.setup_date|date:"d.m.Y" }}</dd>
           <dt>{% if tank.is_dissolved %}Laufzeit{% else %}Alter{% endif %}</dt>
           <dd>{{ tank.age_display }}</dd>
+          {% if tank.setup_summary %}
+            <dt>Einrichtung</dt>
+            <dd>{{ tank.setup_summary }}</dd>
+          {% endif %}
         </dl>
         {% if tank.notes %}
           <p class="mad-muted mt-3 mb-0">{{ tank.notes|linebreaksbr }}</p>

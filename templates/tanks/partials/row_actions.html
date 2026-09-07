@@ -1,6 +1,8 @@
 {% comment %}
 Aktionen einer Zeile. Erwartet `edit_url` und optional `second_url` mit
-`second_label` (Löschen, Abgang buchen, Deaktivieren).
+`second_label` (Löschen, Abgang buchen, Deaktivieren) sowie `third_url` mit
+`third_label` — die dritte Stelle gibt es für Zeilen, an denen neben Bearbeiten
+und Abgang noch etwas anzubieten ist (Erinnerung aus einer Standzeit).
 
 Jede Aktion ist ein Link mit href: ohne JavaScript führt er auf die
 Beckenseite mit geöffnetem Formular, mit HTMX tauscht er nur den Reiter.
@@ -13,5 +15,9 @@ Beckenseite mit geöffnetem Formular, mit HTMX tauscht er nur den Reiter.
   {% if second_url %}
     <a class="btn btn-outline-secondary btn-sm" href="{{ second_url }}"
        hx-get="{{ second_url }}" hx-target="#tab-area" hx-swap="outerHTML">{{ second_label|default:"Löschen" }}</a>
+  {% endif %}
+  {% if third_url %}
+    <a class="btn btn-outline-secondary btn-sm" href="{{ third_url }}"
+       hx-get="{{ third_url }}" hx-target="#tab-area" hx-swap="outerHTML">{{ third_label }}</a>
   {% endif %}
 </div>
