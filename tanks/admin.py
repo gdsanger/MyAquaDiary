@@ -79,5 +79,6 @@ class CareTaskAdmin(admin.ModelAdmin):
 
 @admin.register(TankPhoto)
 class TankPhotoAdmin(admin.ModelAdmin):
-    list_display = ["tank", "taken_on", "caption"]
+    list_display = ["tank", "taken_on", "caption", "event"]
     list_filter = ["tank"]
+    raw_id_fields = ["event"]
