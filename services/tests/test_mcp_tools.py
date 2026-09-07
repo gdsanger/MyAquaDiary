@@ -41,6 +41,7 @@ from tanks.models import (
     Stocking,
     SubstrateLayer,
     Tank,
+    TankDerivedTarget,
     TankParameterTarget,
 )
 
@@ -356,6 +357,121 @@ class MeasurementReadTests(ToolTestCase):
     def test_an_absurd_limit_is_refused(self):
         with self.assertRaises(ToolError):
             self.call("list_measurements", limit=5000)
+
+
+class DerivedMeasurementReadTests(ToolTestCase):
+    """CO₂ über MCP: gerechnet aus KH und pH, nirgends gespeichert."""
+
+    def make_pair(self, kh="5", ph="6.9", tank=None, apart_minutes=0, when=None):
+        when = when or timezone.now()
+        return (
+            self.make_measurement(
+                tank, parameter=self.kh, value=kh, when=when - timedelta(minutes=apart_minutes)
+            ),
+            self.make_measurement(tank, parameter=self.ph, value=ph, when=when),
+        )
+
+    def test_list_measurements_carries_the_calculated_value(self):
+        self.make_pair(kh="5", ph="6.9")
+
+        result = self.call("list_measurements")
+
+        self.assertEqual(len(result["derived"]), 1)
+        found = result["derived"][0]
+        self.assertEqual(found["parameter"], "co2")
+        self.assertAlmostEqual(found["value"], 19, delta=0.5)
+        self.assertEqual(found["display_value"], "19 mg/l")
+        self.assertEqual(found["status"], "ok")
+
+    def test_a_calculated_value_has_no_measurement_id(self):
+        """Es gibt keine Kennung, weil es den Datensatz nicht gibt."""
+        self.make_pair()
+
+        found = self.call("list_measurements")["derived"][0]
+
+        self.assertNotIn("measurement_id", found)
+        self.assertTrue(found["is_derived"])
+
+    def test_it_names_the_values_it_was_calculated_from(self):
+        kh, ph = self.make_pair(apart_minutes=10)
+
+        sources = self.call("list_measurements")["derived"][0]["sources"]
+
+        self.assertEqual({item["measurement_id"] for item in sources}, {kh.pk, ph.pk})
+        self.assertIn("3 × KH", self.call("list_measurements")["derived"][0]["formula"])
+
+    def test_without_a_partner_there_is_nothing(self):
+        self.make_measurement(parameter=self.kh, value="5")
+
+        self.assertEqual(self.call("list_measurements")["derived"], [])
+
+    def test_values_too_far_apart_are_not_paired(self):
+        self.make_pair(apart_minutes=60 * 8)
+
+        self.assertEqual(self.call("list_measurements")["derived"], [])
+
+    def test_the_filter_co2_returns_only_calculated_values(self):
+        self.make_pair()
+
+        result = self.call("list_measurements", parameter="co2")
+
+        self.assertEqual(result["measurements"], [])
+        self.assertEqual(len(result["derived"]), 1)
+
+    def test_another_parameter_filter_leaves_the_calculated_values_out(self):
+        self.make_pair()
+
+        result = self.call("list_measurements", parameter="no3")
+
+        self.assertEqual(result["derived"], [])
+
+    def test_a_foreign_tank_contributes_nothing(self):
+        """KH von hier und pH von dort ergeben kein Paar — und kein Leck."""
+        self.make_measurement(parameter=self.kh, value="5")
+        self.make_measurement(self.foreign_tank, parameter=self.ph, value="6.9")
+
+        self.assertEqual(self.call("list_measurements")["derived"], [])
+
+    def test_get_measurement_shows_the_co2_a_value_takes_part_in(self):
+        kh, ph = self.make_pair()
+
+        for measurement in (kh, ph):
+            with self.subTest(parameter=measurement.parameter.key):
+                found = self.call("get_measurement", measurement_id=measurement.pk)
+                self.assertEqual(len(found["derived"]), 1)
+                self.assertAlmostEqual(found["derived"][0]["value"], 19, delta=0.5)
+
+    def test_an_unrelated_measurement_has_no_calculated_value(self):
+        measurement = self.make_measurement(parameter=self.no3, value="10")
+
+        self.assertEqual(self.call("get_measurement", measurement_id=measurement.pk)["derived"], [])
+
+    def test_a_lonely_ph_value_has_no_calculated_value(self):
+        measurement = self.make_measurement(parameter=self.ph, value="6.9")
+
+        self.assertEqual(self.call("get_measurement", measurement_id=measurement.pk)["derived"], [])
+
+    def test_get_tank_reports_the_target_range_even_without_an_override(self):
+        """Die Vorgabe steht im Code — nachschlagen ließe sie sich sonst nicht."""
+        found = self.call("get_tank", tank_id=self.tank.pk)["derived_targets"]
+
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["parameter"], "co2")
+        self.assertEqual(found[0]["minimum"], 15)
+        self.assertEqual(found[0]["maximum"], 25)
+        self.assertTrue(found[0]["is_default"])
+
+    def test_an_own_target_range_wins(self):
+        TankDerivedTarget.objects.create(
+            tank=self.tank, key="co2", minimum=Decimal("10"), maximum=Decimal("18")
+        )
+        self.make_pair(kh="6", ph="6.7")  # ≈ 36 mg/l
+
+        found = self.call("get_tank", tank_id=self.tank.pk)["derived_targets"][0]
+        self.assertEqual(found["maximum"], 18)
+        self.assertFalse(found["is_default"])
+
+        self.assertEqual(self.call("list_measurements")["derived"][0]["status"], "critical")
 
 
 class EventReadTests(ToolTestCase):

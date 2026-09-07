@@ -24,8 +24,8 @@ from core.testing import (
     photo_upload,
     stock,
 )
-from tanks import selectors
-from tanks.charts import parameter_series
+from tanks import derived, selectors
+from tanks.charts import derived_charts, parameter_series
 from tanks.models import (
     BOTANICALS_DAYS,
     NUTRIENT_DEPOT_DAYS,
@@ -1409,6 +1409,305 @@ class ParameterTargetWriteTests(TestCase):
 
         self.client.post(reverse("tanks:target-delete", args=[self.tank.slug, target.pk]))
         self.assertFalse(TankParameterTarget.objects.exists())
+
+
+class Co2TestCase(TestCase):
+    """Gemeinsamer Aufbau für alles, was mit CO₂ zu tun hat.
+
+    Die Zeitpunkte sind hier auf Minuten genau nötig — das Paarungsfenster
+    misst Stunden, und ``create_measurement`` kennt nur ganze Tage.
+    """
+
+    def setUp(self):
+        self.user = create_user()
+        self.tank = create_tank(self.user)
+        self.kh = Parameter.objects.get(key="kh")
+        self.ph = Parameter.objects.get(key="ph")
+        self.now = timezone.now()
+
+    def measure(self, parameter, value, minutes_ago=0):
+        return Measurement.objects.create(
+            tank=self.tank,
+            parameter=parameter,
+            value=Decimal(value),
+            measured_at=self.now - timedelta(minutes=minutes_ago),
+        )
+
+    def pair(self, kh="5", ph="6.9", apart_minutes=0):
+        """Ein KH- und ein pH-Wert, ``apart_minutes`` auseinander."""
+        return (
+            self.measure(self.kh, kh, minutes_ago=apart_minutes),
+            self.measure(self.ph, ph),
+        )
+
+
+class Co2FormulaTests(Co2TestCase):
+    """Die Werte aus der Betriebstabelle des Items, Toleranz ±0,5 mg/l."""
+
+    #: KH, pH, erwartetes CO₂ in mg/l.
+    CASES = [
+        ("5", "6.9", 19),
+        ("5", "7.0", 15),
+        ("6", "7.0", 18),
+        ("5", "6.8", 24),
+        ("6", "6.7", 36),
+    ]
+
+    def test_the_formula_matches_the_operating_table(self):
+        for kh, ph, expected in self.CASES:
+            with self.subTest(kh=kh, ph=ph):
+                self.assertAlmostEqual(
+                    float(derived.co2_from(kh, ph)), expected, delta=0.5
+                )
+
+    def test_the_calculated_value_reaches_the_overview(self):
+        for kh, ph, expected in self.CASES:
+            with self.subTest(kh=kh, ph=ph):
+                Measurement.objects.all().delete()
+                self.pair(kh=kh, ph=ph)
+                value = selectors.latest_derived(self.tank)[0]
+                self.assertAlmostEqual(float(value.value), expected, delta=0.5)
+
+    def test_an_impossible_ph_yields_nothing_instead_of_an_error(self):
+        """Ein vertippter pH darf die Beckenseite nicht umwerfen.
+
+        Das Erfassungsfeld nimmt acht Stellen entgegen, und 10^(7 − pH) wächst
+        exponentiell — aus „-9999" entstünde eine Zahl mit zehntausend Stellen.
+        """
+        self.measure(self.kh, "5")
+        self.measure(self.ph, "-9999")
+        self.assertEqual(selectors.derived_values(self.tank), [])
+
+    def test_it_is_displayed_without_decimals(self):
+        """Ein Tröpfchentest gibt die zweite Stelle nicht her.
+
+        0,1 pH daneben sind ein Viertel des Ergebnisses — „18,9 mg/l" verspräche
+        eine Genauigkeit, die die Eingangswerte nicht haben.
+        """
+        self.pair(kh="5", ph="6.9")
+        self.assertEqual(selectors.latest_derived(self.tank)[0].display_value, "19 mg/l")
+
+
+class Co2PairingTests(Co2TestCase):
+    """Welche KH gehört zu welchem pH — der eigentliche Punkt der Sache."""
+
+    def test_values_with_the_same_timestamp_are_paired(self):
+        self.pair(apart_minutes=0)
+        self.assertEqual(len(selectors.derived_values(self.tank)), 1)
+
+    def test_values_recorded_in_two_steps_are_paired(self):
+        """Erst die KH tropfen, zehn Minuten später den pH ablesen."""
+        self.pair(apart_minutes=10)
+        self.assertEqual(len(selectors.derived_values(self.tank)), 1)
+
+    def test_without_a_partner_in_the_window_there_is_no_value(self):
+        self.pair(apart_minutes=60 * 8)
+        self.assertEqual(selectors.derived_values(self.tank), [])
+
+    def test_a_lonely_kh_value_yields_nothing(self):
+        self.measure(self.kh, "5")
+        self.assertEqual(selectors.derived_values(self.tank), [])
+
+    def test_no_fallback_to_a_two_week_old_partner(self):
+        """Ein CO₂ aus weit auseinanderliegenden Messungen sieht echt aus.
+
+        Genau deshalb entsteht es nicht: lieber keine Zahl als eine, der man
+        die Herkunft nicht ansieht.
+        """
+        self.measure(self.kh, "5", minutes_ago=60 * 24 * 14)
+        self.measure(self.ph, "6.9")
+        self.assertEqual(selectors.derived_values(self.tank), [])
+
+    @override_settings(CO2_PAIR_WINDOW_HOURS=12)
+    def test_the_window_size_is_configurable(self):
+        self.pair(apart_minutes=60 * 8)
+        self.assertEqual(len(selectors.derived_values(self.tank)), 1)
+
+    def test_the_nearest_partner_wins(self):
+        near = self.measure(self.kh, "5", minutes_ago=10)
+        self.measure(self.kh, "9", minutes_ago=120)
+        self.measure(self.ph, "7.0")
+
+        values = selectors.derived_values(self.tank)
+        newest = values[0]
+        self.assertIn(near, newest.sources)
+        self.assertAlmostEqual(float(newest.value), 15, delta=0.5)
+
+    def test_the_pair_carries_the_later_of_the_two_timestamps(self):
+        kh, ph = self.pair(apart_minutes=30)
+        value = selectors.derived_values(self.tank)[0]
+        self.assertEqual(value.measured_at, ph.measured_at)
+        self.assertGreater(value.measured_at, kh.measured_at)
+
+    def test_two_ph_values_around_one_kh_give_two_results(self):
+        """Gepaart wird in beide Richtungen — sonst fiele der zweite pH aus."""
+        self.measure(self.kh, "5", minutes_ago=60)
+        self.measure(self.ph, "6.9", minutes_ago=120)
+        self.measure(self.ph, "7.0")
+
+        self.assertEqual(len(selectors.derived_values(self.tank)), 2)
+
+    def test_values_of_another_tank_are_not_paired(self):
+        other = create_tank(self.user, name="Zweitbecken", slug="zweitbecken")
+        self.measure(self.kh, "5")
+        Measurement.objects.create(
+            tank=other, parameter=self.ph, value=Decimal("6.9"), measured_at=self.now
+        )
+        self.assertEqual(selectors.derived_values(self.tank), [])
+        self.assertEqual(selectors.derived_values(other), [])
+
+
+class Co2IsNeverStoredTests(Co2TestCase):
+    def test_there_is_no_catalog_entry_to_record_it_by_hand(self):
+        """Ein ``Parameter`` mit Schlüssel ``co2`` stünde im Erfassungsformular."""
+        self.assertFalse(Parameter.objects.filter(key="co2").exists())
+
+    def test_the_entry_form_does_not_offer_it(self):
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("tanks:measurement-create", args=[self.tank.slug])
+        )
+        self.assertNotContains(response, "CO₂")
+
+    def test_no_measurement_row_is_created(self):
+        self.pair()
+        selectors.derived_values(self.tank)
+        self.assertEqual(Measurement.objects.count(), 2)
+
+    def test_a_corrected_source_value_moves_the_result(self):
+        """Der Grund, aus dem nicht gespeichert wird.
+
+        Ein abgelegter Wert bliebe stehen und sähe dabei aus wie eine Messung.
+        """
+        _, ph = self.pair(kh="5", ph="7.0")
+        self.assertAlmostEqual(float(selectors.latest_derived(self.tank)[0].value), 15, delta=0.5)
+
+        ph.value = Decimal("6.8")
+        ph.save()
+        self.assertAlmostEqual(float(selectors.latest_derived(self.tank)[0].value), 24, delta=0.5)
+
+
+class Co2DisplayTests(Co2TestCase):
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.user)
+
+    def test_it_appears_in_the_measurement_tab_marked_as_calculated(self):
+        self.pair()
+        response = self.client.get(f"{self.tank.get_absolute_url()}?reiter=messwerte")
+        self.assertContains(response, "CO₂")
+        self.assertContains(response, "berechnet")
+
+    def test_it_appears_in_the_current_values_tile(self):
+        self.pair()
+        response = self.client.get(self.tank.get_absolute_url())
+        self.assertContains(response, "CO₂")
+
+    def test_without_a_pair_nothing_is_shown(self):
+        """Kein Wert — weder im Reiter noch in der Kachel.
+
+        In der Übersicht bleibt allein die Zeile im Zielbereichsblock stehen:
+        die gehört zur Einstellung und ist keine Auskunft über das Wasser.
+        """
+        self.measure(self.kh, "5")
+
+        response = self.client.get(f"{self.tank.get_absolute_url()}?reiter=messwerte")
+        self.assertNotContains(response, "CO₂")
+
+        overview = selectors.tank_measurement_overview(self.tank)
+        self.assertEqual([row for row in overview if getattr(row, "is_derived", False)], [])
+
+    def test_the_row_offers_no_edit_or_delete(self):
+        """Zu ändern gibt es an einer gerechneten Zeile nichts."""
+        self.pair()
+        rows = selectors.tank_measurement_rows(self.tank)
+        calculated = [row for row in rows if getattr(row, "is_derived", False)]
+        self.assertEqual(len(calculated), 1)
+        self.assertFalse(hasattr(calculated[0], "pk"))
+
+    def test_the_measurement_list_mixes_both_in_chronological_order(self):
+        self.pair()
+        rows = selectors.tank_measurement_rows(self.tank)
+        timestamps = [row.measured_at for row in rows]
+        self.assertEqual(timestamps, sorted(timestamps, reverse=True))
+        self.assertEqual(len(rows), 3)
+
+    def test_it_gets_its_own_curve(self):
+        for minutes in (0, 60 * 24, 60 * 48):
+            self.measure(self.kh, "5", minutes_ago=minutes)
+            self.measure(self.ph, "6.9", minutes_ago=minutes)
+
+        charts = derived_charts(self.tank)
+        self.assertEqual(len(charts), 1)
+        self.assertTrue(charts[0]["is_derived"])
+        self.assertEqual(len(charts[0]["points"]), 3)
+        self.assertIn("berechnete Werte", charts[0]["summary"])
+
+    def test_without_a_pair_there_is_no_curve(self):
+        self.measure(self.kh, "5")
+        self.assertEqual(derived_charts(self.tank), [])
+
+
+class Co2TargetTests(Co2TestCase):
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.user)
+        self.url = reverse("tanks:derived-target-update", args=[self.tank.slug, "co2"])
+
+    def test_the_default_range_is_15_to_25(self):
+        self.pair(kh="5", ph="6.9")  # ≈ 19 mg/l
+        value = selectors.latest_derived(self.tank)[0]
+        self.assertEqual(value.target_label, "15–25 mg/l")
+        self.assertEqual(value.status_code, Status.OK)
+
+    def test_a_value_above_the_range_is_flagged(self):
+        self.pair(kh="6", ph="6.7")  # ≈ 36 mg/l
+        self.assertEqual(selectors.latest_derived(self.tank)[0].status_code, Status.CRITICAL)
+
+    def test_the_range_can_be_overridden_per_tank(self):
+        self.client.post(self.url, {"minimum": "10", "maximum": "18"})
+
+        target = self.tank.derived_targets.get()
+        self.assertEqual(target.key, "co2")
+        self.assertEqual(target.range_label, "10–18 mg/l")
+
+        self.pair(kh="6", ph="6.7")  # ≈ 36 mg/l, jetzt weit daneben
+        self.assertEqual(selectors.latest_derived(self.tank)[0].status_code, Status.CRITICAL)
+
+    def test_the_form_starts_from_the_default(self):
+        response = self.client.get(self.url)
+        self.assertContains(response, "15")
+        self.assertContains(response, "25")
+
+    def test_a_reversed_range_is_refused(self):
+        self.client.post(self.url, {"minimum": "25", "maximum": "15"})
+        self.assertFalse(self.tank.derived_targets.exists())
+
+    def test_the_override_can_be_reset(self):
+        self.client.post(self.url, {"minimum": "10", "maximum": "18"})
+        self.client.post(reverse("tanks:derived-target-reset", args=[self.tank.slug, "co2"]))
+
+        self.assertFalse(self.tank.derived_targets.exists())
+        self.pair(kh="5", ph="6.9")
+        self.assertEqual(selectors.latest_derived(self.tank)[0].target_label, "15–25 mg/l")
+
+    def test_the_overview_lists_the_range(self):
+        response = self.client.get(self.tank.get_absolute_url())
+        self.assertContains(response, "15–25 mg/l")
+
+    def test_an_unknown_derived_key_is_a_404(self):
+        response = self.client.get(
+            reverse("tanks:derived-target-update", args=[self.tank.slug, "kalium"])
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_foreign_tank_stays_out_of_reach(self):
+        stranger = create_user("fremder")
+        foreign = create_tank(stranger, name="Fremdbecken", slug="fremdbecken")
+        response = self.client.get(
+            reverse("tanks:derived-target-update", args=[foreign.slug, "co2"])
+        )
+        self.assertEqual(response.status_code, 404)
 
 
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp())
