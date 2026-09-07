@@ -28,6 +28,7 @@ from .models import (
     Stocking,
     SubstrateLayer,
     Tank,
+    TankDerivedTarget,
     TankParameterTarget,
     TankPhoto,
 )
@@ -541,6 +542,34 @@ class TankParameterTargetForm(BootstrapMixin, forms.ModelForm):
                 self.add_error(
                     "parameter", "Für diesen Parameter gibt es hier bereits einen Zielbereich."
                 )
+        return cleaned
+
+
+class TankDerivedTargetForm(BootstrapMixin, forms.ModelForm):
+    """Zielbereich einer gerechneten Größe (CO₂).
+
+    Ohne Auswahlfeld: welche Größe gemeint ist, steht in der Adresse. Zur
+    Auswahl stünde ohnehin nur eine, und die abgeleiteten Größen sind keine
+    Liste, aus der man sich etwas anlegt — es gibt sie, sobald KH und pH
+    zusammenpassen.
+    """
+
+    class Meta:
+        model = TankDerivedTarget
+        fields = ["minimum", "maximum"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["minimum"].label = "Zielbereich ab"
+        self.fields["maximum"].label = "Zielbereich bis"
+
+    def clean(self):
+        cleaned = super().clean()
+        minimum, maximum = cleaned.get("minimum"), cleaned.get("maximum")
+        if minimum is None and maximum is None:
+            raise forms.ValidationError("Ohne Grenze ist es kein Zielbereich.")
+        if minimum is not None and maximum is not None and minimum > maximum:
+            self.add_error("maximum", "Die Obergrenze liegt unter der Untergrenze.")
         return cleaned
 
 

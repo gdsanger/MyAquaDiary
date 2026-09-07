@@ -8,7 +8,10 @@ Farben stehen im Stylesheet (.mad-chart__*), nicht hier.
 {% endcomment %}
 <figure class="mb-3">
   <figcaption class="d-flex justify-content-between align-items-baseline mb-1">
-    <span class="fw-semibold">{{ chart.parameter.name }}</span>
+    <span class="fw-semibold">
+      {{ chart.parameter.name }}
+      {% if chart.is_derived %}<span class="mad-derived">berechnet</span>{% endif %}
+    </span>
     <span class="mad-value mad-value--{{ chart.latest_status }}">{{ chart.latest.display_value }}</span>
   </figcaption>
   {% localize off %}
