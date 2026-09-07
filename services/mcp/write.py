@@ -45,7 +45,10 @@ def _values_of(model, field: str) -> list[str]:
     "Trägt Messwerte an einem Becken ein. Das Modell speichert einen Wert je "
     "Messgröße; mehrere gleichzeitig gemessene Werte werden in einem Aufruf "
     "übergeben und teilen sich den Zeitpunkt. Die Messgrößen werden über ihr "
-    "Kürzel angegeben (temperatur, ph, no2, no3, nh4, kh, gh, po4, leitwert).",
+    "Kürzel angegeben (temperatur, ph, no2, no3, nh4, kh, gh, po4, leitwert). "
+    "Ein Wert unterhalb der Nachweisgrenze des Tests wird nicht als 0 "
+    "eingetragen, sondern mit below_detection: true (dann ohne value) — das "
+    "geht nur bei Messgrößen mit Nachweisgrenze (no2, no3, nh4, po4).",
     writes=True,
     schema={
         "type": "object",
@@ -64,8 +67,12 @@ def _values_of(model, field: str) -> list[str]:
                     "properties": {
                         "parameter": {"type": "string", "description": "Kürzel der Messgröße."},
                         "value": {"type": "number", "description": "Gemessener Wert."},
+                        "below_detection": {
+                            "type": "boolean",
+                            "description": "true für „nicht nachweisbar“ (n.n.); dann ohne value.",
+                        },
                     },
-                    "required": ["parameter", "value"],
+                    "required": ["parameter"],
                 },
             },
         },
@@ -84,11 +91,15 @@ def create_measurement(context, arguments):
     # schlimmer als eine abgewiesene, weil sie unauffällig falsch aussieht.
     with transaction.atomic():
         for row in rows:
+            below_detection = row.boolean("below_detection")
             measurement = mark_source(
                 model(
                     tank=tank,
                     parameter=data.parameter(row.text("parameter", required=True)),
-                    value=row.decimal("value", required=True),
+                    # Bei n.n. keinen Wert: das Modell verlangt genau eines von
+                    # beidem und weist „beides“ ab.
+                    value=None if below_detection else row.decimal("value", required=True),
+                    below_detection=below_detection,
                     measured_at=measured_at,
                     note=note,
                     created_by=context.user,

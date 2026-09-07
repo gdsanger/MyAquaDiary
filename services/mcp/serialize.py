@@ -171,7 +171,12 @@ def measurement(instance, *, targets=None) -> dict:
         "parameter": instance.parameter.key,
         "parameter_label": instance.parameter.name,
         "unit": instance.parameter.unit,
+        # ``value`` ist ``null`` bei n.n. — nicht 0. ``below_detection`` sagt,
+        # dass unterhalb der Nachweisgrenze durchaus etwas sein kann, der Test
+        # es aber nicht auflöst; ``display_value`` steht dann auf „n.n.“.
         "value": number(instance.value),
+        "below_detection": instance.below_detection,
+        "detection_limit": number(instance.parameter.detection_limit),
         "display_value": instance.display_value,
         "status": status,
         "status_label": status_label,
