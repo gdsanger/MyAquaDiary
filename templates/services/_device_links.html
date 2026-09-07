@@ -1,0 +1,43 @@
+{% comment %}
+Verweise am Gerät: Herstellerseite, Ersatzteilshop, API-Dokumentation, der
+Forenthread zur Reparatur. Getrennt von den Dokumenten, weil ein Link keine
+Datei ist.
+{% endcomment %}
+<div class="card mt-3" id="geraet-links">
+  <div class="card-body">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+      <h2 class="h5 card-title mb-0">Links</h2>
+      <a class="btn btn-sm btn-outline-primary"
+         href="{% url 'services:device_link_create' device.pk %}"
+         hx-get="{% url 'services:device_link_create' device.pk %}"
+         hx-target="#geraet-links" hx-swap="outerHTML">Link hinzufügen</a>
+    </div>
+
+    {% if open_section == "links" and section_action %}
+      {% include "services/_device_section_form.html" with section_cancel_url="services:device_links" %}
+    {% endif %}
+
+    {% if links %}
+      <ul class="list-unstyled mb-0">
+        {% for link in links %}
+          <li class="border-bottom py-2 d-flex flex-wrap justify-content-between align-items-start gap-2">
+            <div>
+              <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.title }}</a>
+              <div class="small text-body-secondary text-break">{{ link.url }}</div>
+            </div>
+            <span class="text-nowrap">
+              <a class="small" href="{% url 'services:device_link_update' device.pk link.pk %}"
+                 hx-get="{% url 'services:device_link_update' device.pk link.pk %}"
+                 hx-target="#geraet-links" hx-swap="outerHTML">Bearbeiten</a>
+              <a class="small ms-2" href="{% url 'services:device_link_delete' device.pk link.pk %}"
+                 hx-get="{% url 'services:device_link_delete' device.pk link.pk %}"
+                 hx-target="#geraet-links" hx-swap="outerHTML">Löschen</a>
+            </span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="text-body-secondary mb-0">Noch keine Links erfasst.</p>
+    {% endif %}
+  </div>
+</div>

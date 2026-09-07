@@ -1,5 +1,6 @@
 """Verbrauchsauswertung: aus Zählerständen wird Verbrauch je Zeitraum."""
 
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -7,7 +8,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from services import energy
-from services.models import DeviceReading
+from services.models import Device, DeviceReading
 from services.tests.test_shelly_devices import make_plug
 
 
@@ -159,3 +160,108 @@ class ComparisonTests(EnergyTestCase):
 
         self.assertEqual(len(usages), 2)
         self.assertEqual(usages[0].kwh, Decimal("0.000"))
+
+
+class EstimateTests(EnergyTestCase):
+    """Geräte ohne Steckdose: hochgerechnet aus Nennleistung und Laufzeit.
+
+    Ohne diese Hochrechnung zeigte die Auswertung nur die zwei gemessenen
+    Geräte — Beleuchtung, Heizung und CO₂-Ventil hängen an keiner messenden
+    Dose und fehlten in der Antwort auf die Frage, was ein Becken kostet.
+    """
+
+    def make_heater(self, **kwargs):
+        defaults = {
+            "owner": self.user,
+            "tank": self.device.tank,
+            "name": "Heizstab",
+            "kind": Device.Kind.HEATER,
+            "power_watts": Decimal("100.0"),
+        }
+        return Device.objects.create(**{**defaults, **kwargs})
+
+    def test_power_and_runtime_become_kilowatt_hours(self):
+        heater = self.make_heater(daily_runtime_hours=Decimal("10.0"))
+        today = timezone.localdate()
+
+        # 100 W · 10 h = 1 kWh am Tag.
+        self.assertEqual(
+            energy.device_estimate(heater, energy.PERIOD_DAY, today), Decimal("1.000")
+        )
+
+    def test_without_a_runtime_the_device_is_assumed_to_run_around_the_clock(self):
+        heater = self.make_heater()
+        today = timezone.localdate()
+
+        self.assertEqual(
+            energy.device_estimate(heater, energy.PERIOD_DAY, today), Decimal("2.400")
+        )
+
+    def test_a_device_without_a_rating_is_not_guessed(self):
+        heater = self.make_heater(power_watts=None)
+        today = timezone.localdate()
+
+        self.assertEqual(energy.device_estimate(heater, energy.PERIOD_DAY, today), Decimal("0.000"))
+        self.assertEqual(energy.device_buckets(heater, energy.PERIOD_DAY), [])
+
+    def test_the_time_before_the_installation_is_not_counted(self):
+        today = timezone.localdate()
+        heater = self.make_heater(
+            daily_runtime_hours=Decimal("24.0"), installed_on=today - timedelta(days=2)
+        )
+
+        days = energy.running_days(heater, today - timedelta(days=9), energy.PERIOD_DAY)
+        self.assertEqual(days, 0)
+
+        estimate = energy.device_estimate(heater, energy.PERIOD_DAY, today - timedelta(days=1))
+        self.assertEqual(estimate, Decimal("2.400"))
+
+    def test_the_current_period_only_counts_up_to_today(self):
+        today = timezone.localdate()
+        heater = self.make_heater(daily_runtime_hours=Decimal("24.0"))
+        start = energy.bucket_start_of(today, energy.PERIOD_MONTH)
+
+        days = energy.running_days(heater, start, energy.PERIOD_MONTH)
+
+        self.assertEqual(days, today.day)
+
+    def test_an_estimate_is_marked_as_one(self):
+        self.make_heater(daily_runtime_hours=Decimal("10.0"))
+        self.add_reading(1000, hours_ago=2)
+        self.add_reading(1400, hours_ago=1)
+
+        usages = {
+            usage.label: usage
+            for usage in energy.usage_by_device(self.user, energy.PERIOD_DAY)
+        }
+
+        self.assertTrue(usages["Heizstab"].has_estimate)
+        self.assertTrue(usages["Heizstab"].is_fully_estimated)
+        self.assertFalse(usages["Licht"].has_estimate)
+
+    def test_measured_and_estimated_devices_land_in_the_same_tank(self):
+        self.make_heater(daily_runtime_hours=Decimal("10.0"))
+        self.add_reading(1000, hours_ago=2)
+        self.add_reading(1400, hours_ago=1)
+
+        usage = energy.usage_by_tank(self.user, energy.PERIOD_DAY)[0]
+
+        self.assertEqual(usage.label, "Becken 1")
+        self.assertEqual(usage.kwh, Decimal("1.400"))
+        self.assertEqual(usage.estimated_kwh, Decimal("1.000"))
+        self.assertFalse(usage.is_fully_estimated)
+
+    def test_a_switched_off_device_does_not_keep_consuming(self):
+        self.make_heater(daily_runtime_hours=Decimal("10.0"), is_active=False)
+
+        labels = [usage.label for usage in energy.usage_by_device(self.user, energy.PERIOD_DAY)]
+
+        self.assertNotIn("Heizstab", labels)
+
+    def test_the_history_of_an_estimated_device_is_marked_too(self):
+        heater = self.make_heater(daily_runtime_hours=Decimal("10.0"))
+
+        buckets = energy.device_buckets(heater, energy.PERIOD_DAY, limit=3)
+
+        self.assertEqual(len(buckets), 3)
+        self.assertTrue(all(bucket.estimated for bucket in buckets))

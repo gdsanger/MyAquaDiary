@@ -10,15 +10,25 @@ from django.utils import timezone
 from django.utils.html import format_html
 
 from .ai import budget_status
-from .forms import AIConfigForm, DeviceForm, MailConfigForm, TestMailForm
+from .forms import (
+    COMMERCIAL_FIELDS,
+    TECHNICAL_FIELDS,
+    AIConfigForm,
+    DeviceForm,
+    MailConfigForm,
+    TestMailForm,
+)
 from .graph import GraphMailService, render_mail
 from .models import (
     AIConfig,
     AISuggestion,
     AIUsageLog,
     Device,
+    DeviceDocument,
     DeviceEvent,
+    DeviceLink,
     DeviceReading,
+    DeviceSpec,
     MailConfig,
     MailLog,
     MCPAccessLog,
@@ -145,6 +155,22 @@ class MailLogAdmin(admin.ModelAdmin):
         return False
 
 
+class DeviceSpecInline(admin.TabularInline):
+    model = DeviceSpec
+    extra = 0
+
+
+class DeviceDocumentInline(admin.TabularInline):
+    model = DeviceDocument
+    extra = 0
+    readonly_fields = ["uploaded_at"]
+
+
+class DeviceLinkInline(admin.TabularInline):
+    model = DeviceLink
+    extra = 0
+
+
 @admin.register(Device)
 class DeviceAdmin(admin.ModelAdmin):
     """Geräteverwaltung für den Betrieb — die Pflege durch Benutzer läuft über
@@ -175,8 +201,25 @@ class DeviceAdmin(admin.ModelAdmin):
                 "description": "Angaben, die jedes Gerät hat — auch eines ohne Anbindung.",
             },
         ),
+        (
+            "Kauf und Garantie",
+            {
+                "fields": COMMERCIAL_FIELDS,
+                "description": "Läuft die Garantie demnächst ab, erscheint das als Hinweis "
+                "auf dem Dashboard.",
+            },
+        ),
+        (
+            "Technische Daten",
+            {
+                "fields": TECHNICAL_FIELDS,
+                "description": "Nur, womit die Anwendung rechnet. Alles Übrige steht als freie "
+                "Angabe am Gerät (DeviceSpec).",
+            },
+        ),
         ("Verwaltung", {"fields": ["last_seen", "created_at"]}),
     ]
+    inlines = [DeviceSpecInline, DeviceDocumentInline, DeviceLinkInline]
 
     @admin.display(description="Passwort")
     def password_status(self, obj):
@@ -191,7 +234,8 @@ class DeviceAdmin(admin.ModelAdmin):
         kwargs["fields"] = ["owner", "name", "kind", "tank", "is_active", "host",
                             "mac_address", "firmware", "generation", "username", "password",
                             "manufacturer", "model_name", "installed_on",
-                            "maintenance_interval_days", "last_maintenance_on"]
+                            "maintenance_interval_days", "last_maintenance_on",
+                            *COMMERCIAL_FIELDS, *TECHNICAL_FIELDS]
         return super().get_form(request, obj, **kwargs)
 
 

@@ -1,0 +1,57 @@
+{% comment %}
+Technische Daten eines Geräts: die typisierten Felder aus dem Gerät selbst und
+darunter die freien Angaben. Getrennt, weil es ein Unterschied ist, ob die
+Anwendung mit einem Wert rechnet (Nennleistung) oder ihn nur zeigt (Lumen).
+{% endcomment %}
+<div class="card mt-3" id="geraet-specs">
+  <div class="card-body">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+      <h2 class="h5 card-title mb-0">Technische Daten</h2>
+      <a class="btn btn-sm btn-outline-primary"
+         href="{% url 'services:device_spec_create' device.pk %}"
+         hx-get="{% url 'services:device_spec_create' device.pk %}"
+         hx-target="#geraet-specs" hx-swap="outerHTML">Angabe hinzufügen</a>
+    </div>
+
+    {% if open_section == "specs" and section_action %}
+      {% include "services/_device_section_form.html" with section_cancel_url="services:device_specs" %}
+    {% endif %}
+
+    <dl class="row mb-0">
+      {% if device.power_watts is not None %}
+        <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Nennleistung</dt>
+        <dd class="col-6 col-sm-7">{{ device.power_watts }} W</dd>
+      {% endif %}
+      {% if device.daily_runtime_hours is not None %}
+        <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Laufzeit</dt>
+        <dd class="col-6 col-sm-7">{{ device.daily_runtime_hours }} h/Tag</dd>
+      {% endif %}
+      {% if device.flow_rate_lph %}
+        <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Förderleistung</dt>
+        <dd class="col-6 col-sm-7">{{ device.flow_rate_lph }} l/h</dd>
+      {% endif %}
+      {% for spec in specs %}
+        <dt class="col-6 col-sm-5 fw-normal text-body-secondary">{{ spec.label }}</dt>
+        <dd class="col-6 col-sm-7 d-flex justify-content-between align-items-start gap-2">
+          <span>{{ spec.display_value }}</span>
+          <span class="text-nowrap">
+            <a class="small" href="{% url 'services:device_spec_update' device.pk spec.pk %}"
+               hx-get="{% url 'services:device_spec_update' device.pk spec.pk %}"
+               hx-target="#geraet-specs" hx-swap="outerHTML">Bearbeiten</a>
+            <a class="small ms-2" href="{% url 'services:device_spec_delete' device.pk spec.pk %}"
+               hx-get="{% url 'services:device_spec_delete' device.pk spec.pk %}"
+               hx-target="#geraet-specs" hx-swap="outerHTML">Löschen</a>
+          </span>
+        </dd>
+      {% endfor %}
+    </dl>
+
+    {% if device.power_watts is None and not device.flow_rate_lph and not specs %}
+      <p class="text-body-secondary mb-0">
+        Noch keine technischen Daten erfasst. Die Nennleistung gehört ins
+        <a href="{% url 'services:device_edit' device.pk %}">Gerät selbst</a> — mit ihr rechnet die
+        Verbrauchsauswertung; alles Übrige steht als freie Angabe hier.
+      </p>
+    {% endif %}
+  </div>
+</div>

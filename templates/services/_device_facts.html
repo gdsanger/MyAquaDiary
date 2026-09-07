@@ -1,0 +1,53 @@
+{% comment %}
+Stammdaten eines Geräts: was es ist, woher es kommt, was es gekostet hat und
+wie lange Garantie darauf ist. Steht bei angebundenen Geräten in einer eigenen
+Karte und bei den übrigen dort, wo sonst das Diagramm wäre — der Inhalt ist
+derselbe, also gibt es ihn nur einmal.
+{% endcomment %}
+<dl class="row mb-0">
+  {% if device.manufacturer or device.model_name %}
+    <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Hersteller</dt>
+    <dd class="col-6 col-sm-7">{{ device.manufacturer }} {{ device.model_name }}</dd>
+  {% endif %}
+  {% if device.serial_number %}
+    <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Seriennummer</dt>
+    <dd class="col-6 col-sm-7">{{ device.serial_number }}</dd>
+  {% endif %}
+  {% if device.installed_on %}
+    <dt class="col-6 col-sm-5 fw-normal text-body-secondary">In Betrieb seit</dt>
+    <dd class="col-6 col-sm-7">{{ device.installed_on|date:"d.m.Y" }}</dd>
+  {% endif %}
+  {% if device.supplier %}
+    <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Lieferant</dt>
+    <dd class="col-6 col-sm-7">{{ device.supplier }}</dd>
+  {% endif %}
+  {% if device.purchased_on %}
+    <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Gekauft am</dt>
+    <dd class="col-6 col-sm-7">{{ device.purchased_on|date:"d.m.Y" }}</dd>
+  {% endif %}
+  {% if device.purchase_price is not None %}
+    <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Kaufpreis</dt>
+    <dd class="col-6 col-sm-7">{{ device.purchase_price }} €</dd>
+  {% endif %}
+  {% if device.warranty_until %}
+    <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Garantie</dt>
+    <dd class="col-6 col-sm-7">
+      <span class="mad-status mad-status--{{ device.warranty_status_value }}">
+        {% if device.warranty_expired %}abgelaufen am{% else %}bis{% endif %}
+        {{ device.warranty_until|date:"d.m.Y" }}
+      </span>
+    </dd>
+  {% endif %}
+  {% if device.last_maintenance_on %}
+    <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Letzte Wartung</dt>
+    <dd class="col-6 col-sm-7">{{ device.last_maintenance_on|date:"d.m.Y" }}</dd>
+  {% endif %}
+  {% if device.maintenance_due_on %}
+    <dt class="col-6 col-sm-5 fw-normal text-body-secondary">Nächste Wartung</dt>
+    <dd class="col-6 col-sm-7">
+      <span class="mad-status mad-status--{{ device.maintenance_status_value }}">
+        {{ device.maintenance_due_on|date:"d.m.Y" }}
+      </span>
+    </dd>
+  {% endif %}
+</dl>

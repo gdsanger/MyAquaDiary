@@ -242,6 +242,36 @@ class WarningTileTests(TestCase):
         self.assertIn("Außenfilter: Kritisch", titles)
         self.assertIn("Wartung fällig: Außenfilter", titles)
 
+    def test_warranty_running_out_is_reported(self):
+        Device.objects.create(
+            owner=self.user,
+            tank=self.tank,
+            name="Beleuchtung",
+            kind=Device.Kind.LIGHT,
+            warranty_until=timezone.localdate() + timedelta(days=10),
+        )
+        response = self.client.get(reverse("dashboard:tile-warnings"))
+        titles = [warning["title"] for warning in response.context["warnings"]]
+        self.assertIn("Garantie läuft ab: Beleuchtung", titles)
+
+    def test_a_warranty_far_out_or_long_gone_is_silent(self):
+        Device.objects.create(
+            owner=self.user,
+            tank=self.tank,
+            name="Neuer Filter",
+            kind=Device.Kind.FILTER,
+            warranty_until=timezone.localdate() + timedelta(days=200),
+        )
+        Device.objects.create(
+            owner=self.user,
+            tank=self.tank,
+            name="Alter Heizer",
+            kind=Device.Kind.HEATER,
+            warranty_until=timezone.localdate() - timedelta(days=1),
+        )
+        response = self.client.get(reverse("dashboard:tile-warnings"))
+        self.assertEqual(response.context["warnings"], [])
+
     def test_group_size_below_minimum_is_reported(self):
         stock(self.tank, create_animal(), quantity=4)
         response = self.client.get(reverse("dashboard:tile-warnings"))

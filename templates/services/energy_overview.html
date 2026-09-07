@@ -17,13 +17,15 @@
   </div>
 </div>
 
-{% if not has_meters %}
+{% if not has_devices %}
   <div class="card">
     <div class="card-body">
-      <p class="mb-2">Noch keine Steckdose angebunden.</p>
+      <p class="mb-2">Noch nichts zu rechnen.</p>
       <p class="text-body-secondary mb-0">
-        Der Verbrauch wird aus den Zählerständen der
-        <a href="{% url 'services:shelly_add' %}">Shelly-Steckdosen</a> gerechnet.
+        Der Verbrauch kommt aus den Zählerständen der
+        <a href="{% url 'services:shelly_add' %}">Shelly-Steckdosen</a> — und für alles ohne
+        Steckdose aus der Nennleistung, die am
+        <a href="{% url 'services:device_list' %}">Gerät</a> hinterlegt ist.
       </p>
     </div>
   </div>
@@ -31,6 +33,12 @@
   <div class="card mb-3">
     <div class="card-body">
       <h2 class="h5 card-title">Vergleich der Becken – {{ period_label|lower }} bis heute</h2>
+      {% if total_estimated_kwh %}
+        <p class="small text-body-secondary">
+          Geräte ohne messende Steckdose sind aus Nennleistung und Laufzeit hochgerechnet
+          ({{ total_estimated_kwh }} kWh der Summe). Solche Werte sind als „geschätzt“ gekennzeichnet.
+        </p>
+      {% endif %}
       {% include "services/_bar_chart.html" %}
       <div class="table-responsive mt-3">
         <table class="table table-sm align-middle mb-0">
@@ -39,14 +47,19 @@
               <th scope="col">Becken</th>
               <th scope="col" class="text-end">Verbrauch</th>
               <th scope="col" class="text-end">Kosten</th>
-              <th scope="col">Steckdosen</th>
+              <th scope="col">Geräte</th>
             </tr>
           </thead>
           <tbody>
             {% for usage in tanks %}
               <tr>
                 <td><a href="{{ usage.tank.get_absolute_url }}">{{ usage.label }}</a></td>
-                <td class="text-end">{{ usage.kwh }} kWh</td>
+                <td class="text-end">
+                  {{ usage.kwh }} kWh
+                  {% if usage.has_estimate %}
+                    <span class="badge text-bg-secondary">{% if usage.is_fully_estimated %}geschätzt{% else %}davon {{ usage.estimated_kwh }} geschätzt{% endif %}</span>
+                  {% endif %}
+                </td>
                 <td class="text-end">{{ usage.cost }} €</td>
                 <td class="small text-body-secondary">{{ usage.device_names }}</td>
               </tr>
@@ -75,12 +88,12 @@
 
   <div class="card">
     <div class="card-body">
-      <h2 class="h5 card-title">Je Steckdose</h2>
+      <h2 class="h5 card-title">Je Gerät</h2>
       <div class="table-responsive">
         <table class="table table-sm align-middle mb-0">
           <thead>
             <tr>
-              <th scope="col">Steckdose</th>
+              <th scope="col">Gerät</th>
               <th scope="col">Becken</th>
               <th scope="col" class="text-end">Verbrauch</th>
               <th scope="col" class="text-end">Kosten</th>
@@ -93,7 +106,10 @@
                   <td><a href="{% url 'services:device_detail' device.pk %}">{{ usage.label }}</a></td>
                   <td>{{ device.tank.name }}</td>
                 {% endwith %}
-                <td class="text-end">{{ usage.kwh }} kWh</td>
+                <td class="text-end">
+                  {{ usage.kwh }} kWh
+                  {% if usage.has_estimate %}<span class="badge text-bg-secondary">geschätzt</span>{% endif %}
+                </td>
                 <td class="text-end">{{ usage.cost }} €</td>
               </tr>
             {% empty %}

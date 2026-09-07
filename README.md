@@ -219,6 +219,54 @@ Der Beckenreiter *Geräte* und der Bereich `/geraete/` zeigen dieselben Geräte;
 gepflegt werden sie im Gerätebereich, weil dort auch Anbindung und Steuerung
 liegen.
 
+### Stammdaten, technische Daten, Dokumente und Links
+
+Was ein Gerät gekostet hat, wie lange Garantie darauf ist und wo die Anleitung
+liegt, steht am Gerät selbst — nicht in einem Ordner im Schrank.
+
+Am `Device` stehen **Seriennummer, Lieferant, Kaufdatum, Kaufpreis und
+Garantieende** sowie die typisierten technischen Felder `power_watts`,
+`flow_rate_lph` und `daily_runtime_hours`. Typisiert ist nur, womit die
+Anwendung rechnet; alles Übrige — Lumen, Farbtemperatur, Beckenvolumen —
+kommt als freie Angabe (`DeviceSpec`: Bezeichnung, Wert, Einheit, Reihenfolge).
+Feste Spalten je Geräteart wären zu vier Fünfteln leer: ein Filter hat eine
+Förderleistung, eine Lampe Lumen und Kelvin, ein CO₂-Ventil nichts von beidem.
+
+**Endet die Garantie in den nächsten 30 Tagen**, erscheint das als Warnung auf
+dem Dashboard (`tanks/selectors.warnings()`). Genau dann lohnt der Blick, ob
+das Gerät noch Auffälligkeiten zeigt — danach ist es die eigene Rechnung.
+
+`DeviceDocument` nimmt Dateien auf (Bedienungsanleitung, Rechnung,
+Garantieunterlage, Foto, Sonstiges), `DeviceLink` Verweise (Herstellerseite,
+Ersatzteilshop, Forenthread). Getrennt, weil ein Link keine Datei ist: er
+belegt keinen Speicher, braucht keinen Zugriffsschutz und keine Typprüfung.
+Alle drei Abschnitte werden auf der Gerätedetailseite per HTMX bearbeitet; ohne
+JavaScript kommt dieselbe Seite als vollständiger Aufbau zurück.
+
+#### Gerätedokumente sind nicht öffentlich
+
+`MEDIA_ROOT` wird ausgeliefert, wie es dasteht — wer die Adresse kennt, bekommt
+die Datei. Bei einem Beckenfoto ist das hinnehmbar, bei einer **Rechnung**
+nicht: dort stehen Name, Anschrift und Zahlungsdaten. Eine schwer zu erratende
+Adresse ist dafür kein Schutz, sondern eine Hoffnung.
+
+Gerätedokumente liegen deshalb unter `PRIVATE_MEDIA_ROOT`, **außerhalb** von
+`MEDIA_ROOT` (`core/storage.PrivateStorage`). Sie haben keine öffentliche
+Adresse — `FieldFile.url` wirft dort absichtlich. Der einzige Weg führt über
+`/geraete/<id>/dokumente/<id>/`: die Ansicht holt das Gerät über
+`Device.objects.filter(owner=request.user)`, ein fremdes Dokument endet als
+**404**. Steht nginx davor, liefert der die Bytes über `X-Accel-Redirect` aus
+(`DJANGO_PRIVATE_MEDIA_ACCEL_LOCATION`, z. B. `/geschuetzt/`); die Prüfung
+bleibt in jedem Fall in der Anwendung.
+
+Geprüft werden Endung (PDF, Bilder, Text) und Größe
+(`DEVICE_DOCUMENT_MAX_BYTES`, Default 10 MB). Beim Löschen eines Dokuments —
+und beim Löschen des ganzen Geräts — verschwindet die Datei aus der Ablage
+(`services/signals.py`); Django tut das von sich aus nicht.
+
+Im Betrieb braucht das Verzeichnis ein eigenes, dauerhaftes Volume; in
+`docker-compose.yml` ist es `private_data` auf `/app/privatefiles`.
+
 ## Eheim-Digital-Geräte
 
 Angebunden über die offizielle REST-API der Geräte
@@ -327,8 +375,19 @@ die Kosten mit dem Arbeitspreis aus `ENERGY_PRICE_PER_KWH` (Default 0,35 €/kWh
 Gruppiert wird über die Beckenkennung, nicht über einen Namen: eine Umbenennung
 erzeugt damit keine zweite Gruppe.
 Gespeichert werden Kilowattstunden, keine Beträge. Die Seite rechnet
-ausschließlich aus gespeicherten Messwerten und fragt kein Gerät ab — sie ist
+ausschließlich aus gespeicherten Werten und fragt kein Gerät ab — sie ist
 damit auch dann vollständig, wenn gerade keine Steckdose antwortet.
+
+**Geräte ohne Steckdose werden hochgerechnet.** Beleuchtung, Heizung und
+CO₂-Magnetventil hängen an keiner messenden Dose; eine Auswertung, die nur die
+zwei gemessenen Geräte zeigt, beantwortet die Frage nach den Kosten eines
+Beckens nicht. Aus `power_watts` und `daily_runtime_hours` (leer heißt
+Dauerbetrieb, 24 h) mal den Betriebstagen des Zeitraums entsteht deshalb eine
+Schätzung — begrenzt auf die Zeit seit `installed_on` und höchstens bis heute.
+Ohne hinterlegte Nennleistung wird nichts geraten: dann taucht das Gerät in der
+Auswertung nicht auf. **Geschätzte Werte sind überall als solche
+gekennzeichnet**; `Usage.estimated_kwh` sagt, welcher Anteil einer Beckensumme
+darauf beruht.
 
 Aus dem Code:
 

@@ -1,0 +1,53 @@
+{% comment %}
+Dokumente eines Geräts. Die Dateien liegen außerhalb von MEDIA_ROOT und haben
+keine öffentliche Adresse — jeder Verweis hier führt über die Ansicht, die
+vorher prüft, wem das Gerät gehört.
+{% endcomment %}
+<div class="card mt-3" id="geraet-documents">
+  <div class="card-body">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+      <h2 class="h5 card-title mb-0">Dokumente</h2>
+      <a class="btn btn-sm btn-outline-primary"
+         href="{% url 'services:device_document_create' device.pk %}"
+         hx-get="{% url 'services:device_document_create' device.pk %}"
+         hx-target="#geraet-documents" hx-swap="outerHTML">Dokument hinzufügen</a>
+    </div>
+
+    {% if open_section == "documents" and section_action %}
+      {% include "services/_device_section_form.html" with section_cancel_url="services:device_documents" %}
+    {% endif %}
+
+    {% if documents %}
+      <ul class="list-unstyled mb-0">
+        {% for document in documents %}
+          <li class="border-bottom py-2 d-flex flex-wrap justify-content-between align-items-start gap-2">
+            <div>
+              <a href="{{ document.get_absolute_url }}">{{ document.title }}</a>
+              <div class="small text-body-secondary">
+                {{ document.get_kind_display }}
+                {% if document.extension %} · {{ document.extension|upper }}{% endif %}
+                {% if document.size_bytes %} · {{ document.size_bytes|filesizeformat }}{% endif %}
+                · {{ document.uploaded_at|date:"d.m.Y" }}
+              </div>
+            </div>
+            <span class="text-nowrap">
+              <a class="small" href="{% url 'services:device_document_update' device.pk document.pk %}"
+                 hx-get="{% url 'services:device_document_update' device.pk document.pk %}"
+                 hx-target="#geraet-documents" hx-swap="outerHTML">Bearbeiten</a>
+              <a class="small ms-2" href="{% url 'services:device_document_delete' device.pk document.pk %}"
+                 hx-get="{% url 'services:device_document_delete' device.pk document.pk %}"
+                 hx-target="#geraet-documents" hx-swap="outerHTML">Löschen</a>
+            </span>
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="small text-body-secondary mt-2 mb-0">
+        Die Dateien sind nur für dich abrufbar — auch beim direkten Aufruf der Adresse.
+      </p>
+    {% else %}
+      <p class="text-body-secondary mb-0">
+        Noch keine Dokumente. Hierher gehören Bedienungsanleitung, Rechnung und Garantieunterlage.
+      </p>
+    {% endif %}
+  </div>
+</div>

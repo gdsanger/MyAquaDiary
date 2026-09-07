@@ -3,13 +3,23 @@
 from datetime import datetime, time
 
 from django import forms
+from django.conf import settings
 from django.utils import timezone
 
 from core.forms import BootstrapMixin, DateField
 from tanks.models import Tank
 
 from .eheim import DEFAULT_PASSWORD, DEFAULT_USERNAME
-from .models import AIConfig, AISuggestion, Device, MailConfig, MCPToken
+from .models import (
+    AIConfig,
+    AISuggestion,
+    Device,
+    DeviceDocument,
+    DeviceLink,
+    DeviceSpec,
+    MailConfig,
+    MCPToken,
+)
 from .shelly import GEN2_USERNAME
 
 
@@ -119,6 +129,20 @@ DOCUMENTATION_FIELDS = [
     "last_maintenance_on",
 ]
 
+#: Kaufmännische Stammdaten. Stehen an jedem Gerät, weil die Frage „was hat das
+#: gekostet und wie lange ist Garantie drauf" unabhängig davon ist, ob hinter
+#: dem Gerät eine API steckt.
+COMMERCIAL_FIELDS = [
+    "serial_number",
+    "supplier",
+    "purchased_on",
+    "purchase_price",
+    "warranty_until",
+]
+
+#: Typisierte technische Daten — nur das, womit die Anwendung rechnet.
+TECHNICAL_FIELDS = ["power_watts", "flow_rate_lph", "daily_runtime_hours"]
+
 
 class TankScopedDeviceForm(BootstrapMixin, forms.ModelForm):
     """Basis aller Geräteformulare: das Becken ist Pflicht und ist ein eigenes.
@@ -131,6 +155,8 @@ class TankScopedDeviceForm(BootstrapMixin, forms.ModelForm):
 
     installed_on = DateField(label="In Betrieb seit", required=False)
     last_maintenance_on = DateField(label="Letzte Wartung", required=False)
+    purchased_on = DateField(label="Kaufdatum", required=False)
+    warranty_until = DateField(label="Garantie bis", required=False)
 
     def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -158,7 +184,7 @@ class DeviceForm(TankScopedDeviceForm):
     class Meta:
         model = Device
         fields = ["name", "kind", "tank", "mac_address", "host", "is_active",
-                  *DOCUMENTATION_FIELDS]
+                  *DOCUMENTATION_FIELDS, *COMMERCIAL_FIELDS, *TECHNICAL_FIELDS]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -260,8 +286,8 @@ class ManualDeviceForm(TankScopedDeviceForm):
 
     class Meta:
         model = Device
-        fields = ["name", "kind", "tank", *DOCUMENTATION_FIELDS, "status", "status_message",
-                  "is_active"]
+        fields = ["name", "kind", "tank", *DOCUMENTATION_FIELDS, *COMMERCIAL_FIELDS,
+                  *TECHNICAL_FIELDS, "status", "status_message", "is_active"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -301,7 +327,8 @@ class ShellyDeviceForm(TankScopedDeviceForm):
 
     class Meta:
         model = Device
-        fields = ["name", "host", "tank", "is_active", *DOCUMENTATION_FIELDS]
+        fields = ["name", "host", "tank", "is_active", *DOCUMENTATION_FIELDS,
+                  *COMMERCIAL_FIELDS, *TECHNICAL_FIELDS]
         help_texts = {"host": "IP oder Hostname der Steckdose im lokalen Netz."}
 
     def __init__(self, *args, **kwargs):
@@ -329,6 +356,46 @@ class ShellyDeviceForm(TankScopedDeviceForm):
         if commit:
             device.save()
         return device
+
+
+class DeviceSpecForm(BootstrapMixin, forms.ModelForm):
+    """Eine freie technische Angabe."""
+
+    class Meta:
+        model = DeviceSpec
+        fields = ["label", "value", "unit", "position"]
+
+
+class DeviceLinkForm(BootstrapMixin, forms.ModelForm):
+    """Ein Verweis am Gerät."""
+
+    class Meta:
+        model = DeviceLink
+        fields = ["title", "url", "position"]
+
+
+class DeviceDocumentForm(BootstrapMixin, forms.ModelForm):
+    """Ein Dokument am Gerät.
+
+    Geprüft werden Endung und Größe: die Endung über den Validator am Modell,
+    die Größe hier. Beides ist keine Sicherheitsmaßnahme für sich — die liegt
+    darin, dass die Datei nicht öffentlich ausgeliefert wird —, sondern hält
+    die Ablage sauber und fängt den versehentlich gewählten Film ab, bevor er
+    im Speicher landet.
+    """
+
+    class Meta:
+        model = DeviceDocument
+        fields = ["title", "kind", "file"]
+
+    def clean_file(self):
+        upload = self.cleaned_data["file"]
+        limit = settings.DEVICE_DOCUMENT_MAX_BYTES
+        if upload.size > limit:
+            raise forms.ValidationError(
+                f"Die Datei ist größer als {limit // (1024 * 1024)} MB."
+            )
+        return upload
 
 
 #: Aktion -> (Formularklasse, Anzeigetext). Aktionen ohne Parameter (ein/aus)
