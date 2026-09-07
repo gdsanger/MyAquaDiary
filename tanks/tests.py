@@ -1,13 +1,18 @@
 import tempfile
 from datetime import timedelta
 from decimal import Decimal
+from io import BytesIO, StringIO
+from pathlib import Path
 
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
+from PIL import Image
 
 from core.enums import Status, WaterType
+from core.images import GPS_IFD
 from core.testing import (
     create_animal,
     create_measurement,
@@ -672,8 +677,11 @@ class ObservationWriteTests(TestCase):
         self.record(images=[photo_upload("vorschau.jpg")])
 
         response = self.client.get(f"{self.tank.get_absolute_url()}?reiter=ereignisse")
+        photo = self.tank.photos.get()
         self.assertContains(response, "mad-thumbs")
-        self.assertContains(response, self.tank.photos.get().image.url)
+        # Die Liste lädt die Kachel; das Original hängt nur am Verweis dahinter.
+        self.assertContains(response, photo.thumbnail.url)
+        self.assertNotContains(response, photo.image.url)
 
     def test_the_gallery_names_the_event(self):
         self.record(images=[photo_upload("galerie.jpg")])
@@ -1027,3 +1035,169 @@ class PhotoWriteTests(TestCase):
 
         self.client.post(url, HTTP_HX_REQUEST="true")
         self.assertFalse(TankPhoto.objects.exists())
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class PhotoVariantTests(TestCase):
+    """Was beim Speichern eines Fotos entsteht — und was verschwindet."""
+
+    def setUp(self):
+        self.user = create_user()
+        self.tank = create_tank(self.user)
+
+    def photo(self, **kwargs):
+        upload = kwargs.pop("upload", None) or photo_upload(size=(1200, 800))
+        return TankPhoto.objects.create(
+            tank=self.tank, image=upload, taken_on=timezone.localdate(), **kwargs
+        )
+
+    def opened(self, field):
+        field.open("rb")
+        try:
+            return Image.open(BytesIO(field.read()))
+        finally:
+            field.close()
+
+    def test_both_variants_are_created(self):
+        photo = self.photo()
+
+        self.assertTrue(photo.thumbnail)
+        self.assertTrue(photo.preview)
+        self.assertEqual(self.opened(photo.thumbnail).size, (400, 267))
+
+    def test_the_dimensions_of_the_original_are_recorded(self):
+        photo = self.photo()
+
+        self.assertEqual((photo.width, photo.height), (1200, 800))
+
+    def test_a_small_image_is_not_scaled_up(self):
+        """Die Vorschau ist hier nur eine Kopie — größer als das Original wird nichts."""
+        photo = self.photo(upload=photo_upload(size=(300, 200)))
+
+        self.assertEqual(self.opened(photo.preview).size, (300, 200))
+
+    def test_a_portrait_stands_upright(self):
+        """EXIF-Orientierung 6 heißt: um 90° gedreht aufgenommen."""
+        photo = self.photo(upload=photo_upload(size=(1200, 800), orientation=6))
+
+        self.assertEqual((photo.width, photo.height), (800, 1200))
+        self.assertEqual(self.opened(photo.thumbnail).size, (267, 400))
+
+    def test_the_location_is_removed_everywhere(self):
+        photo = self.photo(upload=photo_upload(size=(1200, 800), located=True))
+
+        for field in (photo.image, photo.thumbnail, photo.preview):
+            with self.subTest(field=field.name):
+                self.assertNotIn(GPS_IFD, self.opened(field).getexif())
+
+    def test_the_original_keeps_its_size(self):
+        """Nur die Koordinaten fallen weg, nicht die Auflösung."""
+        photo = self.photo(upload=photo_upload(size=(1200, 800), located=True))
+
+        self.assertEqual(self.opened(photo.image).size, (1200, 800))
+
+    def test_a_replaced_image_gets_new_variants(self):
+        """Sonst zeigte die Kachel weiter das alte Bild."""
+        photo = self.photo()
+        before = Path(photo.thumbnail.path)
+
+        photo.image = photo_upload("anders.jpg", size=(800, 1200))
+        photo.save()
+
+        self.assertEqual((photo.width, photo.height), (800, 1200))
+        self.assertEqual(self.opened(photo.thumbnail).size, (267, 400))
+        self.assertFalse(before.exists())
+
+    def test_saving_again_does_not_rebuild(self):
+        photo = self.photo()
+        before = photo.thumbnail.name
+
+        photo.caption = "Nach dem Rückschnitt"
+        photo.save()
+
+        self.assertEqual(photo.thumbnail.name, before)
+
+    def test_deleting_removes_every_file(self):
+        photo = self.photo()
+        paths = [Path(field.path) for field in (photo.image, photo.thumbnail, photo.preview)]
+        self.assertTrue(all(path.exists() for path in paths))
+
+        photo.delete()
+
+        self.assertFalse(any(path.exists() for path in paths))
+
+    def test_the_variant_carries_the_scaled_dimensions(self):
+        photo = self.photo()
+
+        self.assertEqual(photo.thumb.url, photo.thumbnail.url)
+        self.assertEqual((photo.thumb.width, photo.thumb.height), (400, 267))
+
+    def test_without_a_variant_the_original_stands_in(self):
+        """Bestandsdaten bleiben sichtbar, solange der Befehl noch nicht lief."""
+        photo = self.photo()
+        photo.thumbnail = ""
+        photo.save(update_fields=["thumbnail"])
+
+        self.assertEqual(photo.thumb.url, photo.image.url)
+        self.assertEqual((photo.thumb.width, photo.thumb.height), (1200, 800))
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class GenerateThumbnailsCommandTests(TestCase):
+    """Der Befehl für die Bestandsdaten."""
+
+    def setUp(self):
+        self.user = create_user()
+        self.tank = create_tank(self.user)
+        self.photo = TankPhoto.objects.create(
+            tank=self.tank, image=photo_upload(size=(1200, 800)), taken_on=timezone.localdate()
+        )
+
+    def strip(self):
+        """Zustand vor der Umstellung: nur das Original, keine Varianten."""
+        TankPhoto.objects.filter(pk=self.photo.pk).update(
+            thumbnail="", preview="", width=None, height=None
+        )
+        self.photo.refresh_from_db()
+
+    def run_command(self, *args):
+        output = StringIO()
+        call_command("generate_thumbnails", *args, stdout=output, stderr=StringIO())
+        self.photo.refresh_from_db()
+        return output.getvalue()
+
+    def test_missing_variants_are_created(self):
+        self.strip()
+
+        self.run_command()
+
+        self.assertTrue(self.photo.thumbnail)
+        self.assertTrue(self.photo.preview)
+        self.assertEqual((self.photo.width, self.photo.height), (1200, 800))
+
+    def test_a_second_run_changes_nothing(self):
+        self.strip()
+        self.run_command()
+        before = self.photo.thumbnail.name
+
+        self.run_command()
+
+        self.assertEqual(self.photo.thumbnail.name, before)
+
+    def test_force_rebuilds_an_existing_variant(self):
+        """Erst am Datensatz vorbei löschen, dann sieht man den Unterschied."""
+        path = Path(self.photo.thumbnail.path)
+        path.unlink()
+
+        self.run_command()
+        self.assertFalse(path.exists())
+
+        self.run_command("--force")
+        self.assertTrue(Path(self.photo.thumbnail.path).exists())
+
+    def test_a_single_model_can_be_named(self):
+        self.strip()
+
+        self.run_command("--model", "catalog.PlantImage")
+
+        self.assertFalse(self.photo.thumbnail)

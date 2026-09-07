@@ -12,8 +12,7 @@ Container die Zielkennung.
       {% for species in species_list %}
         <article class="mad-card">
           {% if species.primary_image %}
-            <img class="mad-thumb" src="{{ species.primary_image.image.url }}"
-                 alt="{{ species.display_name }}" loading="lazy">
+            {% include "partials/image.html" with variant=species.primary_image.thumb alt=species.display_name class="mad-thumb" lazy=True only %}
           {% else %}
             <div class="mad-thumb mad-thumb--empty">Kein Bild</div>
           {% endif %}

@@ -113,9 +113,9 @@
     <section class="mad-card">
       <div class="mad-card__header"><h2 class="mad-card__title">Titelbild</h2></div>
       {% if tank.cover_image %}
-        <img class="mad-thumb" src="{{ tank.cover_image.url }}" alt="Titelbild {{ tank.name }}">
+        {% include "partials/image.html" with variant=tank.large alt="Titelbild "|add:tank.name class="mad-thumb" only %}
       {% elif photo %}
-        <img class="mad-thumb" src="{{ photo.image.url }}" alt="{{ photo.caption|default:'Foto des Beckens' }}">
+        {% include "partials/image.html" with variant=photo.large alt=photo.alt_text class="mad-thumb" only %}
       {% else %}
         <p class="mad-empty mb-0">Kein Bild hinterlegt.</p>
       {% endif %}

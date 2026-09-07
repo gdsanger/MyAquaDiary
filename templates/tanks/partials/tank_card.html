@@ -4,7 +4,7 @@ mit den Zaehlern animal_count, plant_count, open_task_count, last_measured_at.
 {% endcomment %}
 <article class="mad-card mad-tank-edge {{ tank.accent_class }}">
   {% if tank.cover_image %}
-    <img class="mad-thumb" src="{{ tank.cover_image.url }}" alt="Titelbild {{ tank.name }}" loading="lazy">
+    {% include "partials/image.html" with variant=tank.thumb alt="Titelbild "|add:tank.name class="mad-thumb" lazy=True only %}
   {% else %}
     <div class="mad-thumb mad-thumb--empty">Kein Titelbild</div>
   {% endif %}
