@@ -20,6 +20,7 @@
     {% for device in devices %}
       <div class="col">
         <div class="card h-100">
+          {% include "services/_device_cover_image.html" with device=device variant=device.thumb class="mad-thumb" lazy=True only %}
           <div class="card-body">
             <div class="d-flex justify-content-between align-items-start gap-2">
               <div>

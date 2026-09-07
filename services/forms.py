@@ -359,6 +359,25 @@ class ShellyDeviceForm(TankScopedDeviceForm):
         return device
 
 
+class DeviceCoverForm(BootstrapMixin, forms.Form):
+    """Titelbild eines Geräts — hochladen oder ersetzen.
+
+    Kein ``ModelForm``: gespeichert wird über
+    :meth:`core.images.CoverImageMixin.set_cover`, damit das bisherige Bild
+    dabei aus dem Speicher verschwindet. Ein Formular über dem ganzen Gerät
+    würde zudem bei jedem Bildwechsel die Zugangsdaten neu verschlüsseln.
+
+    ``accept`` bietet auf dem Telefon Kamera und Galerie an; dass die Datei
+    wirklich ein Bild ist, prüft Pillow über das ``ImageField``.
+    """
+
+    cover_image = forms.ImageField(
+        label="Titelbild",
+        widget=forms.ClearableFileInput(attrs={"accept": "image/*"}),
+        help_text="Ein Bild des Geräts, an dem es in der Liste zu erkennen ist.",
+    )
+
+
 class DeviceSpecForm(BootstrapMixin, forms.ModelForm):
     """Eine freie technische Angabe."""
 

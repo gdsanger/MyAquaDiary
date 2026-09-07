@@ -1,0 +1,16 @@
+{% comment %}
+Titelbild eines Geräts — oder, solange keines hinterlegt ist, der Platzhalter
+seiner Art. Beide belegen dieselbe Fläche: die Karten in der Geräteliste
+bleiben damit gleich hoch, egal ob ein Bild da ist und welches Format es hat.
+
+Erwartet: device, variant (aus `thumb` oder `large`), class. Optional: lazy.
+{% endcomment %}
+{% if device.has_cover %}
+  {% include "partials/image.html" with variant=variant alt="Titelbild "|add:device.name class=class lazy=lazy only %}
+{% else %}
+  <div class="{{ class }} mad-cover-placeholder" role="img"
+       aria-label="Kein Titelbild hinterlegt – {{ device.get_kind_display }}">
+    {% include "services/_device_symbol.html" with symbol=device.cover_symbol only %}
+    <span>{{ device.get_kind_display }}</span>
+  </div>
+{% endif %}

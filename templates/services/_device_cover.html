@@ -1,0 +1,43 @@
+{% comment %}
+Titelbild auf der Gerätedetailseite: hochladen, ersetzen, entfernen.
+
+Wie die übrigen Abschnitte tauscht HTMX nur diese Karte; ohne JavaScript führt
+jede Schaltfläche auf dieselbe Seite mit dem Formular an dieser Stelle.
+{% endcomment %}
+<div class="card mb-3" id="geraet-cover">
+  <div class="card-body">
+    <div class="d-flex flex-wrap align-items-start gap-3">
+      {% include "services/_device_cover_image.html" with device=device variant=device.large class="mad-cover" only %}
+      <div class="flex-grow-1">
+        <h2 class="h5 card-title">Titelbild</h2>
+        <p class="small text-body-secondary">
+          {% if device.has_cover %}
+            Ein Bild sagt in der Geräteliste schneller als jeder Name, welches Gerät gemeint ist.
+          {% else %}
+            Noch kein Bild hinterlegt; in der Liste steht so lange das Zeichen der Geräteart.
+          {% endif %}
+        </p>
+        <div class="d-flex flex-wrap gap-2">
+          <a class="btn btn-sm btn-outline-primary"
+             href="{% url 'services:device_cover_edit' device.pk %}"
+             hx-get="{% url 'services:device_cover_edit' device.pk %}"
+             hx-target="#geraet-cover" hx-swap="outerHTML">
+            {% if device.has_cover %}Bild ersetzen{% else %}Bild hochladen{% endif %}
+          </a>
+          {% if device.has_cover %}
+            <a class="btn btn-sm btn-outline-secondary"
+               href="{% url 'services:device_cover_delete' device.pk %}"
+               hx-get="{% url 'services:device_cover_delete' device.pk %}"
+               hx-target="#geraet-cover" hx-swap="outerHTML">Entfernen</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    {% if open_section == "cover" and section_action %}
+      <div class="mt-3">
+        {% include "services/_device_section_form.html" with section_cancel_url="services:device_cover" %}
+      </div>
+    {% endif %}
+  </div>
+</div>

@@ -130,8 +130,15 @@ docker compose exec web python manage.py generate_thumbnails --model tanks.TankP
 ```
 
 Der Befehl ist idempotent und arbeitet auf allen Modellen mit Bildvarianten
-(`TankPhoto`, `Tank.cover_image`, Katalogbilder) — ein neues Bildmodell wird ihm
+(`TankPhoto`, `Tank`, `Device`, Katalogbilder) — ein neues Bildmodell wird ihm
 allein dadurch bekannt, dass es `ImageVariantsMixin` verwendet.
+
+**Titelbilder** teilen sich darüber hinaus die Felder: `CoverImageMixin`
+(ebenfalls `core/images.py`) bringt `cover_image` samt Kachel, Vorschau und
+Maßen mit und wird von `Tank` und `Device` verwendet. Das Modell sagt nur, wo
+seine Bilder liegen (`COVER_DIR`). Ein Titelbild ist genau eins je Objekt:
+`set_cover()` ersetzt es und räumt das bisherige aus dem Speicher, `clear_cover()`
+entfernt es ganz — anders als bei einer Galerie soll hier nichts liegen bleiben.
 
 Beim Löschen eines Bildes verschwinden Original und Varianten aus dem Speicher
 (`core/signals.py`) — Django tut das von sich aus nicht.
@@ -218,6 +225,26 @@ Versuche stehen mit dabei.
 Der Beckenreiter *Geräte* und der Bereich `/geraete/` zeigen dieselben Geräte;
 gepflegt werden sie im Gerätebereich, weil dort auch Anbindung und Steuerung
 liegen.
+
+### Titelbild
+
+Zwei Filter derselben Bauart unterscheidet ein Name schlecht. Jedes Gerät trägt
+deshalb ein **Titelbild**: auf der Karte in der Geräteliste und oben auf der
+Detailseite, wo es per HTMX hochgeladen, ersetzt und entfernt wird (ohne
+JavaScript kommt dieselbe Seite vollständig zurück). Verkleinern, EXIF-Orientierung
+und das Entfernen der GPS-Angaben laufen wie bei jedem anderen Bild über
+`CoverImageMixin` — die Logik steht einmal und gilt für Becken und Geräte
+gleichermaßen.
+
+Ohne Bild steht dort der **Platzhalter der Geräteart** (Filter, Heizer,
+Beleuchtung …) auf derselben Fläche wie ein Foto: die Karten bleiben gleich
+hoch, unabhängig vom Bildformat. Angebundene Arten borgen sich das Zeichen
+ihrer Funktion — hinter einem Eheim-Gerät steckt ein Filter, hinter einem
+Shelly eine Steckdose.
+
+Das Titelbild ist kein Dokument. Aufnahmen vom Typenschild, von der
+Anschlussbelegung oder von einem Schaden gehören als `DeviceDocument` der Art
+*Foto* an das Gerät — davon gibt es viele, ein Titelbild gibt es einmal.
 
 ### Stammdaten, technische Daten, Dokumente und Links
 

@@ -1,0 +1,35 @@
+{% comment %}
+Zeichen einer Geräteart für den Platzhalter, wenn kein Titelbild hinterlegt
+ist. Bewusst schlichte Strichzeichnungen in `currentColor`: sie sollen die
+Fläche füllen und die Art andeuten, nicht mit einem Foto konkurrieren.
+
+Inline und nicht als Datei, weil neun Symbole neun weitere Anfragen wären —
+für ein paar Pfade je Karte lohnt das nicht.
+
+Erwartet: symbol (siehe `Device.cover_symbol`).
+{% endcomment %}
+<svg class="mad-cover-symbol" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+     aria-hidden="true" focusable="false">
+  {% if symbol == "filter" %}
+    <rect x="6" y="3" width="12" height="18" rx="3"/><path d="M9 9h6M9 13h6M9 17h6"/>
+  {% elif symbol == "heater" %}
+    <rect x="9" y="2" width="6" height="20" rx="3"/><path d="M12 6v9"/>
+  {% elif symbol == "light" %}
+    <circle cx="12" cy="12" r="4"/>
+    <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.4 1.4M17.6 17.6L19 19M19 5l-1.4 1.4M6.4 17.6L5 19"/>
+  {% elif symbol == "co2" %}
+    <circle cx="9" cy="15" r="3"/><circle cx="15" cy="9" r="2"/><circle cx="13" cy="18" r="1.5"/>
+  {% elif symbol == "pump" %}
+    <circle cx="12" cy="12" r="7"/><path d="M12 5v7l5 3"/>
+  {% elif symbol == "doser" %}
+    <path d="M12 3c0 0 5 6 5 9a5 5 0 0 1-10 0c0-3 5-9 5-9Z"/>
+  {% elif symbol == "sensor" %}
+    <path d="M12 3v9"/><circle cx="12" cy="16" r="4"/>
+  {% elif symbol == "socket" %}
+    <rect x="3" y="6" width="18" height="12" rx="3"/>
+    <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
+  {% else %}
+    <rect x="4" y="4" width="16" height="16" rx="4"/><path d="M9 12h6"/>
+  {% endif %}
+</svg>

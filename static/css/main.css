@@ -482,6 +482,13 @@ img {
   aspect-ratio: 1 / 1;
 }
 
+/* Am Kopf einer Bootstrap-Karte (Geraeteliste) sitzt die Flaeche innerhalb des
+ * Rahmens: dort gilt der innere Radius, sonst blitzt an den oberen Ecken der
+ * Kartenhintergrund durch. */
+.card > .mad-thumb:first-child {
+  border-radius: var(--bs-card-inner-border-radius) var(--bs-card-inner-border-radius) 0 0;
+}
+
 /* Platzhalter, wenn kein Bild hinterlegt ist: ruhige Flaeche, kein Emoji. */
 .mad-thumb--empty {
   display: flex;
@@ -490,6 +497,42 @@ img {
   color: var(--mad-text-muted);
   font-size: 0.8125rem;
   border-bottom: 1px solid var(--mad-border);
+}
+
+/* Titelbild auf einer Detailseite. Dasselbe Seitenverhaeltnis wie die Kachel,
+ * nur begrenzt: ein Geraetefoto soll die Seite nicht ausfuellen. */
+.mad-cover {
+  display: block;
+  width: min(100%, 22rem);
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: var(--mad-radius);
+  background-color: var(--mad-surface-sunken);
+}
+
+/* Platzhalter je Geraeteart: Zeichen und Bezeichnung auf der Flaeche, die
+ * sonst das Bild einnimmt. Er traegt die Geometrie der Stelle, an der er
+ * steht (.mad-thumb in der Kachel, .mad-cover auf der Detailseite), und
+ * ergaenzt nur die Ausrichtung — sonst waeren die Karten unterschiedlich hoch. */
+.mad-cover-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  text-align: center;
+  color: var(--mad-text-muted);
+  font-size: 0.8125rem;
+}
+
+.mad-thumb.mad-cover-placeholder {
+  border-bottom: 1px solid var(--mad-border);
+}
+
+.mad-cover-symbol {
+  width: 2.5rem;
+  height: 2.5rem;
+  opacity: 0.6;
 }
 
 .mad-gallery {

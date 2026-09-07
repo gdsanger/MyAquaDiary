@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from core.enums import Status
 from core.fields import EncryptedTextField
+from core.images import CoverImageMixin
 from core.storage import private_storage
 from services.eheim import (
     DEFAULT_PASSWORD,
@@ -189,7 +190,7 @@ class MailLog(models.Model):
         return f"{self.get_status_display()}: {self.subject or '(ohne Betreff)'}"
 
 
-class Device(models.Model):
+class Device(CoverImageMixin, models.Model):
     """Ein Gerät an einem Becken — angebunden oder nur dokumentiert.
 
     Es gibt genau ein Gerätemodell. Ob hinter einem Gerät eine API steckt, ist
@@ -204,6 +205,11 @@ class Device(models.Model):
 
     Die Zugangsdaten liegen als JSON (``user``, ``password``) verschlüsselt in
     der Datenbank und werden weder angezeigt noch protokolliert.
+
+    Das Titelbild (:class:`core.images.CoverImageMixin`) ist die Wiedererkennung
+    in der Liste: genau eins je Gerät, austauschbar, entfernbar. Aufnahmen vom
+    Typenschild oder von einem Schadensbild sind etwas anderes und gehören als
+    Dokument der Art ``PHOTO`` an das Gerät.
     """
 
     class Kind(models.TextChoices):
@@ -234,6 +240,26 @@ class Device(models.Model):
     DOCUMENTED_KINDS = frozenset(Kind) - CONNECTED_KINDS
     #: Arten mit eigenem Stromzähler. Alles andere wird hochgerechnet.
     METERED_KINDS = SHELLY_KINDS
+
+    #: Ablageort des Titelbilds (siehe :class:`core.images.CoverImageMixin`).
+    COVER_DIR = "devices"
+
+    #: Zeichen des Platzhalters je Geräteart, solange kein Titelbild hinterlegt
+    #: ist. Die angebundenen Arten bekommen kein eigenes: hinter einem
+    #: Eheim-Gerät steckt ein Filter, hinter einem Shelly eine Steckdose.
+    COVER_SYMBOLS = {
+        Kind.EHEIM_CLASSICVARIO: "filter",
+        Kind.EHEIM_OTHER: "filter",
+        Kind.SHELLY_PLUG: "socket",
+        Kind.FILTER: "filter",
+        Kind.HEATER: "heater",
+        Kind.LIGHT: "light",
+        Kind.CO2: "co2",
+        Kind.PUMP: "pump",
+        Kind.DOSER: "doser",
+        Kind.SENSOR: "sensor",
+        Kind.SOCKET: "socket",
+    }
 
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -382,6 +408,18 @@ class Device(models.Model):
             errors["host"] = "Ohne Adresse lässt sich das Gerät nicht erreichen."
         if errors:
             raise ValidationError(errors)
+
+    # -- Titelbild -----------------------------------------------------------
+
+    @property
+    def cover_symbol(self) -> str:
+        """Zeichen des Platzhalters — ohne Bild bleibt die Art die Auskunft.
+
+        Zwei Filter derselben Bauart unterscheidet das nicht; das ist auch
+        nicht der Zweck. Der Platzhalter soll die Karte ruhig füllen und sagen,
+        womit man es zu tun hat, bis jemand ein Bild hinterlegt.
+        """
+        return self.COVER_SYMBOLS.get(self.kind, "other")
 
     # -- Zugangsdaten --------------------------------------------------------
 
