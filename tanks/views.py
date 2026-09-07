@@ -825,4 +825,4 @@ class PhotoDeleteView(TankObjectConfirmView):
     url_name = "tanks:photo-delete"
 
     def describe(self, obj):
-        return obj.caption or f"Foto vom {obj.taken_on:%d.%m.%Y}"
+        return obj.alt_text

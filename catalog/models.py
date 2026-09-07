@@ -5,14 +5,31 @@ from django.db.models.functions import Lower
 from django.urls import reverse
 
 from core.enums import Difficulty, WaterType
+from core.images import ImageVariantsMixin
 
 
 def plant_image_path(instance, filename):
     return f"catalog/plants/{instance.species_id}/{filename}"
 
 
+def plant_thumb_path(instance, filename):
+    return f"catalog/plants/{instance.species_id}/thumbs/{filename}"
+
+
+def plant_preview_path(instance, filename):
+    return f"catalog/plants/{instance.species_id}/preview/{filename}"
+
+
 def animal_image_path(instance, filename):
     return f"catalog/animals/{instance.species_id}/{filename}"
+
+
+def animal_thumb_path(instance, filename):
+    return f"catalog/animals/{instance.species_id}/thumbs/{filename}"
+
+
+def animal_preview_path(instance, filename):
+    return f"catalog/animals/{instance.species_id}/preview/{filename}"
 
 
 class CatalogPermission(models.Model):
@@ -211,8 +228,13 @@ class AnimalSpecies(Species):
         return reverse("catalog:animal-detail", args=[self.slug])
 
 
-class SpeciesImage(models.Model):
+class SpeciesImage(ImageVariantsMixin, models.Model):
     caption = models.CharField("Bildunterschrift", max_length=200, blank=True)
+    # Die Maße gelten für alle Varianten (Seitenverhältnis bleibt erhalten);
+    # die Varianten selbst stehen in den konkreten Modellen, weil sie je Art
+    # in einem anderen Verzeichnis liegen.
+    width = models.PositiveIntegerField("Breite", null=True, blank=True, editable=False)
+    height = models.PositiveIntegerField("Höhe", null=True, blank=True, editable=False)
     is_primary = models.BooleanField("Primärbild", default=False)
     sort_order = models.PositiveSmallIntegerField("Reihenfolge", default=0)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -228,6 +250,12 @@ class SpeciesImage(models.Model):
 class PlantImage(SpeciesImage):
     species = models.ForeignKey(PlantSpecies, related_name="images", on_delete=models.CASCADE)
     image = models.ImageField("Bild", upload_to=plant_image_path)
+    thumbnail = models.ImageField(
+        "Kachel", upload_to=plant_thumb_path, blank=True, editable=False
+    )
+    preview = models.ImageField(
+        "Vorschau", upload_to=plant_preview_path, blank=True, editable=False
+    )
 
     class Meta(SpeciesImage.Meta):
         abstract = False
@@ -238,6 +266,12 @@ class PlantImage(SpeciesImage):
 class AnimalImage(SpeciesImage):
     species = models.ForeignKey(AnimalSpecies, related_name="images", on_delete=models.CASCADE)
     image = models.ImageField("Bild", upload_to=animal_image_path)
+    thumbnail = models.ImageField(
+        "Kachel", upload_to=animal_thumb_path, blank=True, editable=False
+    )
+    preview = models.ImageField(
+        "Vorschau", upload_to=animal_preview_path, blank=True, editable=False
+    )
 
     class Meta(SpeciesImage.Meta):
         abstract = False

@@ -92,17 +92,33 @@ def image_upload(name="foto.png"):
     return SimpleUploadedFile(name, buffer.getvalue(), content_type="image/png")
 
 
-def photo_upload(name="foto.jpg", taken_at=None):
-    """Winziges JPEG mit Aufnahmezeitpunkt im EXIF-Block.
+#: EXIF-Tags, die in Tests gesetzt werden: Aufnahmezeitpunkt, Orientierung
+#: und der Verweis auf den GPS-Block.
+_EXIF_TAKEN_AT = 36867
+_EXIF_ORIENTATION = 274
+_EXIF_GPS = 0x8825
+
+#: Ein Aufnahmeort, wie ihn ein Telefon schreibt (Landshut, gerundet).
+_GPS_BLOCK = {1: "N", 2: (48.0, 32.0, 0.0), 3: "E", 4: (12.0, 9.0, 0.0)}
+
+
+def photo_upload(name="foto.jpg", taken_at=None, size=(2, 2), orientation=None, located=False):
+    """JPEG mit EXIF-Block als Upload.
 
     ``taken_at`` ist ein naives ``datetime`` — genau das, was eine Kamera
-    schreibt: die Ortszeit ihrer eigenen Uhr, ohne Zeitzone.
+    schreibt: die Ortszeit ihrer eigenen Uhr, ohne Zeitzone. ``size`` macht das
+    Bild groß genug, um verkleinert zu werden; ``orientation`` und ``located``
+    hängen Orientierung und Aufnahmeort an, wie ein Telefon es tut.
     """
     exif = Image.Exif()
     if taken_at is not None:
-        exif[36867] = taken_at.strftime("%Y:%m:%d %H:%M:%S")
+        exif[_EXIF_TAKEN_AT] = taken_at.strftime("%Y:%m:%d %H:%M:%S")
+    if orientation is not None:
+        exif[_EXIF_ORIENTATION] = orientation
+    if located:
+        exif[_EXIF_GPS] = dict(_GPS_BLOCK)
     buffer = BytesIO()
-    Image.new("RGB", (2, 2), "white").save(buffer, format="JPEG", exif=exif)
+    Image.new("RGB", size, "white").save(buffer, format="JPEG", exif=exif)
     return SimpleUploadedFile(name, buffer.getvalue(), content_type="image/jpeg")
 
 

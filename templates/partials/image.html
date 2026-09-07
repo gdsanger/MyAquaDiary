@@ -1,0 +1,14 @@
+{% comment %}
+Ein Bild samt reserviertem Platz.
+
+`variant` kommt aus `thumb`, `large` oder `original` am Modell und bringt
+Adresse und Maße gleich mit; fehlt eine Variante, liefert das Modell dort das
+Original. Hier steht deshalb kein Rückfall.
+
+Die Maße stehen als Attribute am Bild, damit der Browser die Fläche vor dem
+Laden kennt und die Seite nicht springt. Sind sie unbekannt (Bestandsdaten vor
+`generate_thumbnails`), bleiben sie weg statt leer.
+
+Erwartet: variant, alt. Optional: class, lazy.
+{% endcomment %}
+<img src="{{ variant.url }}" alt="{{ alt }}"{% if class %} class="{{ class }}"{% endif %}{% if variant.width and variant.height %} width="{{ variant.width }}" height="{{ variant.height }}"{% endif %}{% if lazy %} loading="lazy"{% endif %}>

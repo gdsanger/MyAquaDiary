@@ -4,7 +4,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, override_settings
 
 from core.crypto import DecryptionError, decrypt, encrypt
-from core.images import taken_at
+from core.images import scaled_size, taken_at
 from core.testing import image_upload, photo_upload
 
 
@@ -198,3 +198,28 @@ class ExifTests(SimpleTestCase):
     def test_something_that_is_not_an_image_is_no_error(self):
         broken = SimpleUploadedFile("kein-bild.jpg", b"nur text", content_type="image/jpeg")
         self.assertIsNone(taken_at(broken))
+
+
+class ScaledSizeTests(SimpleTestCase):
+    """Die Maße am ``<img>`` müssen zu der Datei passen, die geladen wird.
+
+    Sie werden nicht gemessen, sondern aus den Maßen des Originals gerechnet —
+    stimmt die Rechnung nicht, reserviert der Browser die falsche Fläche und
+    die Seite springt beim Laden genau so, wie es die Angabe verhindern soll.
+    """
+
+    def test_the_longest_edge_is_capped(self):
+        self.assertEqual(scaled_size(4000, 3000, 400), (400, 300))
+
+    def test_a_portrait_keeps_standing(self):
+        self.assertEqual(scaled_size(3000, 4000, 400), (300, 400))
+
+    def test_a_small_image_keeps_its_size(self):
+        """Hochskaliert wird nicht — auch nicht in der Rechnung."""
+        self.assertEqual(scaled_size(120, 80, 400), (120, 80))
+
+    def test_a_square_stays_square(self):
+        self.assertEqual(scaled_size(2000, 2000, 400), (400, 400))
+
+    def test_without_known_dimensions_there_are_none(self):
+        self.assertEqual(scaled_size(None, None, 400), (None, None))

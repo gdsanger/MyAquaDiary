@@ -12,7 +12,7 @@ Formular — die zugehörigen Adressen antworten für diese Benutzer mit 403.
       <div class="mad-gallery">
         {% for row in image_rows %}
           <figure class="m-0">
-            <img src="{{ row.image.image.url }}" alt="{{ row.image.caption|default:species.display_name }}" loading="lazy">
+            {% include "partials/image.html" with variant=row.image.thumb alt=row.image.caption|default:species.display_name lazy=True only %}
             <figcaption class="mad-list__meta mt-1">
               {{ row.image.caption }}
               {% if row.image.is_primary %}<span class="mad-status mad-status--ok">Primärbild</span>{% endif %}

@@ -94,6 +94,48 @@ In der Zeitleiste bleibt ein Ereignis mit Fotos **ein** Eintrag mit
 Bildvorschau. Sonst schöbe eine Beobachtung mit fünf Bildern alles andere aus
 der Dashboard-Kachel. Einzeln stehen dort nur Fotos ohne Ereignis.
 
+### Bildvarianten
+
+Ein Handyfoto bringt mehrere Megabyte bei 4000 px Kantenlänge mit. Übersichten
+zeigen es in einer Kachel von rund 200 px — ohne Verkleinerung lädt der Browser
+das volle Bild für eine Briefmarke. Beim Speichern entstehen deshalb zwei
+kleinere Ausgaben (`core/images.py`), gerechnet einmal und nicht bei jedem
+Seitenaufruf:
+
+| Variante | Kantenlänge | Verwendung |
+|---|---|---|
+| `thumbnail` | 400 px | Kacheln, Raster, Titelbild, Ereignisliste |
+| `preview` | 1600 px | Einzelansicht, Verweis aus der Ereignisliste |
+| Original | unverändert | Download, KI-Bestimmung |
+
+Das **Original bleibt** — es ist die Belegaufnahme, an der eine Artbestimmung
+hängt. Verkleinert wird nur die Auslieferung. Die Varianten entstehen als WebP
+(JPEG-Rückfall), mit angewandter EXIF-Orientierung und ohne EXIF-Block; kleine
+Bilder werden nicht hochskaliert.
+
+**GPS-Angaben werden entfernt, auch aus dem Original.** Aquarienfotos entstehen
+zu Hause; die Koordinaten haben in einer Datei nichts verloren, die weitergegeben
+werden kann. Angefasst wird das Original nur, wenn tatsächlich Koordinaten darin
+stehen — sonst bleibt es Byte für Byte, wie die Kamera es geschrieben hat.
+
+In den Vorlagen steht `{% include "partials/image.html" %}` mit `photo.thumb`,
+`photo.large` oder `photo.original`. Fehlt eine Variante, liefert das Modell
+dort das Original: Bestandsdaten bleiben sichtbar, solange der Befehl für sie
+noch nicht gelaufen ist.
+
+```bash
+docker compose exec web python manage.py generate_thumbnails
+docker compose exec web python manage.py generate_thumbnails --force
+docker compose exec web python manage.py generate_thumbnails --model tanks.TankPhoto
+```
+
+Der Befehl ist idempotent und arbeitet auf allen Modellen mit Bildvarianten
+(`TankPhoto`, `Tank.cover_image`, Katalogbilder) — ein neues Bildmodell wird ihm
+allein dadurch bekannt, dass es `ImageVariantsMixin` verwendet.
+
+Beim Löschen eines Bildes verschwinden Original und Varianten aus dem Speicher
+(`core/signals.py`) — Django tut das von sich aus nicht.
+
 ### Katalogpflege
 
 Der Katalog ist die Ausnahme: er ist userübergreifend, ein Steckbrief gehört
