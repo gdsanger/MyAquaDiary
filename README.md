@@ -143,6 +143,57 @@ entfernt es ganz — anders als bei einer Galerie soll hier nichts liegen bleibe
 Beim Löschen eines Bildes verschwinden Original und Varianten aus dem Speicher
 (`core/signals.py`) — Django tut das von sich aus nicht.
 
+### Bilddarstellung: der Container gibt das Verhältnis vor
+
+Fotografiert wird hoch und quer durcheinander. Damit ein Raster trotzdem
+gleichmäßig bleibt, steht das **Seitenverhältnis an der Fläche**, nicht am Bild:
+
+| Ort | Klasse | Verhältnis | Verhalten |
+|---|---|---|---|
+| Beckenkarte, Gerätekachel | `.mad-thumb` | 3:2 | `object-fit: cover`, mittig |
+| Galerie-Raster | `.mad-gallery img` | 1:1 | `object-fit: cover`, mittig |
+| Titelbild in einer Kachel | `.mad-cover` | 3:2 | in der Breite begrenzt (22 rem) |
+| Großansicht | `.mad-photo` | frei | `object-fit: contain`, kein Beschnitt |
+
+**In Übersichten wird beschnitten, in der Großansicht nicht.** Ein
+gleichmäßiges Raster ist mehr wert als die vollständige Bildfläche; wer das
+ganze Bild sehen will, öffnet es.
+
+Jede dieser Regeln setzt ausdrücklich `height: auto`, und das ist keine
+Schönheitskorrektur: `partials/image.html` schreibt `width`/`height` ans `<img>`,
+damit der Browser die Fläche vor dem Laden kennt. Beide Attribute sind
+*Presentational Hints* und wirken wie eine Autorenregel mit Spezifität 0.
+`width: 100%` überschreibt den einen — die Pixelhöhe des anderen bliebe ohne
+eigene Regel stehen und machte jedes `aspect-ratio` wirkungslos. Genau das
+sorgte dafür, dass Karten von Bild zu Bild unterschiedlich hoch waren.
+`core/tests.py` (`ImageAspectTests`) hält die Regeln maschinell nach.
+
+Die **EXIF-Orientierung** steckt in den Pixeln der Varianten, nicht mehr in
+einem Tag (`ImageOps.exif_transpose` beim Erzeugen). `width`/`height` bzw.
+`cover_width`/`cover_height` sind die Maße *nach* dieser Drehung — sie passen
+damit zu jeder ausgelieferten Variante, deren Maße `scaled_size()` daraus
+herunterrechnet.
+
+### Großansicht in der Galerie
+
+Ein Klick auf ein Galeriebild öffnet die `preview`-Variante unbeschnitten als
+Overlay (`.mad-lightbox`). Der Inhalt wird per HTMX in `#mad-lightbox`
+**nachgeladen, nicht vorab gerendert**: alle Vorschauen gleich mitzuliefern
+nähme den Kacheln ihren Sinn. Blättern tauscht denselben Container, das Overlay
+bleibt dabei stehen.
+
+Dieselbe Adresse (`tanks:photo-detail`) antwortet ohne HTMX mit einer
+vollständigen Seite (`tanks/photo_detail.html`) — jedes `href` in der Galerie
+führt dorthin, auch ohne Skript. `static/js/lightbox.js` kommt nur obendrauf und
+bringt, was ein Link nicht kann: Esc, Klick auf den Hintergrund, Pfeiltasten,
+Wischgeste und die Fokusführung (beim Öffnen in den Dialog, beim Schließen
+zurück auf das auslösende Bild). Kein Lightbox-Fremdpaket: gebraucht werden ein
+Bild, zwei Pfeile und eine Beschriftung.
+
+Bearbeiten und Löschen sind auch aus der Großansicht erreichbar. Sie tauschen
+den ganzen Reiterbereich — dieselbe Antwort, die das Formular bringt, räumt
+damit das Overlay weg.
+
 ### Katalogpflege
 
 Der Katalog ist die Ausnahme: er ist userübergreifend, ein Steckbrief gehört
@@ -716,5 +767,10 @@ Das Dashboard lädt jede Kachel als eigenes HTMX-Fragment
 Erfassungsformulare liegen als Overlay (`.mad-modal`) innerhalb des
 Reiterbereichs `#tab-area`: Jeder Reiterwechsel und jedes Speichern ersetzt
 diesen Bereich — und räumt das Formular damit ohne eine Zeile JavaScript weg.
+Die Großansicht der Galerie (`.mad-lightbox`) folgt demselben Muster und ist die
+einzige Stelle mit eigenem Skript; siehe [Großansicht in der
+Galerie](#großansicht-in-der-galerie).
+
 Die Oberfläche ist bis 375 px Breite bedienbar; Kartenköpfe, Zeilenaktionen
-und das Overlay brechen dort um, statt zu scrollen.
+und die Overlays brechen dort um, statt zu scrollen. Die Großansicht nimmt dort
+das ganze Display und lässt sich wischen.

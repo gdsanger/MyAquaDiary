@@ -1,0 +1,20 @@
+{% comment %}
+Angaben zu einem Foto: Aufnahmedatum, Bildunterschrift und — falls zugeordnet —
+das Ereignis. Steht im Overlay wie auf der eigenständigen Seite, damit beide
+dasselbe sagen und nicht auseinanderlaufen.
+
+Der Verweis auf das Ereignis ist ein gewöhnlicher Link ohne HTMX: er führt aus
+der Großansicht heraus, und ein Reitertausch stünde auf der eigenständigen
+Seite ohne Ziel da.
+
+Erwartet: photo, tank.
+{% endcomment %}
+<p class="mad-list__meta mb-0">
+  Aufgenommen am {{ photo.taken_on|date:"d.m.Y" }}{% if photo.caption %} · {{ photo.caption }}{% endif %}
+  {% if photo.event %}
+    <br>
+    <a href="{{ tank.get_absolute_url }}?reiter=ereignisse">
+      {{ photo.event.get_category_display }}: {{ photo.event.title }}
+    </a>
+  {% endif %}
+</p>

@@ -469,11 +469,27 @@ img {
 
 /* ---------------------------------------------------------- Bildflaeche */
 
+/* Seitenverhaeltnis gibt der Container vor, nicht das Bild: nur so sind Karten
+ * eines Rasters gleich hoch, egal ob hoch- oder querformatig fotografiert
+ * wurde. Beschnitten wird dabei bewusst — ein gleichmaessiges Raster ist mehr
+ * wert als die vollstaendige Bildflaeche. Wer das ganze Bild sehen will,
+ * oeffnet die Grossansicht (.mad-lightbox), dort wird nichts beschnitten.
+ *
+ * Jede dieser Regeln setzt dafuer ausdruecklich `height: auto`. Grund: die
+ * Vorlage schreibt width/height ans <img>, damit der Browser die Flaeche vor
+ * dem Laden kennt. Diese Attribute sind Presentational Hints und gelten als
+ * Autorenregel mit Spezifitaet 0 — `width: 100%` ueberschreibt den einen Hint,
+ * die Pixelhoehe des anderen bliebe ohne eigene Regel aber stehen und machte
+ * jedes aspect-ratio wirkungslos. Die Kachel waere dann so hoch wie das Bild
+ * gross ist, und damit von Bild zu Bild verschieden. */
+
 .mad-thumb {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 10;
+  height: auto;
+  aspect-ratio: 3 / 2;
   object-fit: cover;
+  object-position: center;
   background-color: var(--mad-surface-sunken);
   border-radius: var(--mad-radius) var(--mad-radius) 0 0;
 }
@@ -499,13 +515,17 @@ img {
   border-bottom: 1px solid var(--mad-border);
 }
 
-/* Titelbild auf einer Detailseite. Dasselbe Seitenverhaeltnis wie die Kachel,
- * nur begrenzt: ein Geraetefoto soll die Seite nicht ausfuellen. */
+/* Titelbild in einer Kachel oder auf einer Detailseite. Dasselbe
+ * Seitenverhaeltnis wie das Raster, nur in der Breite begrenzt — daraus ergibt
+ * sich die begrenzte Hoehe: ein Becken- oder Geraetefoto soll die Spalte
+ * schmuecken, nicht die Seite ausfuellen. */
 .mad-cover {
   display: block;
   width: min(100%, 22rem);
-  aspect-ratio: 16 / 10;
+  height: auto;
+  aspect-ratio: 3 / 2;
   object-fit: cover;
+  object-position: center;
   border-radius: var(--mad-radius);
   background-color: var(--mad-surface-sunken);
 }
@@ -541,13 +561,33 @@ img {
   gap: 0.75rem;
 }
 
+/* Quadratisch, weil im Raster hoch- und querformatige Aufnahmen nebeneinander
+ * stehen: jedes andere Verhaeltnis bevorzugt eine der beiden Lagen. */
 .mad-gallery img {
   width: 100%;
-  aspect-ratio: 4 / 3;
+  height: auto;
+  aspect-ratio: 1 / 1;
   object-fit: cover;
+  object-position: center;
   border-radius: var(--mad-radius-sm);
   border: 1px solid var(--mad-border);
   background-color: var(--mad-surface-sunken);
+}
+
+/* Ein Foto in voller Groesse: `object-fit: contain` statt `cover`, und keine
+ * Vorgabe zum Seitenverhaeltnis — hier zaehlt die vollstaendige Aufnahme, nicht
+ * das gleichmaessige Raster. `width`/`height: auto` heben wie bei den Kacheln
+ * die Presentational Hints des <img> auf; begrenzt wird ueber max-*. */
+.mad-photo {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  /* Deckel, damit die Grossansicht ohne Scrollen auf den Schirm passt. */
+  max-height: min(70vh, 40rem);
+  margin-inline: auto;
+  object-fit: contain;
+  border-radius: var(--mad-radius-sm);
 }
 
 /* Bildvorschau in einer Listenzeile (Ereignis, Aktivitaetsleiste). Feste
@@ -847,6 +887,134 @@ img {
   border-bottom-right-radius: var(--mad-radius);
 }
 
+/* ------------------------------------------------------------ Grossansicht */
+
+/* Das Galeriebild oeffnet die Grossansicht. Der Link traegt keine eigene Optik
+ * — er ist die Bildflaeche, und die bringt ihre Gestaltung schon mit. */
+.mad-gallery__link {
+  display: block;
+  border-radius: var(--mad-radius-sm);
+}
+
+.mad-gallery__link:focus-visible {
+  outline: 2px solid var(--mad-primary);
+  outline-offset: 2px;
+}
+
+/*
+ * Ein Foto in voller Groesse ueber der Galerie. Anders als beim
+ * Formular-Overlay ist die Flaeche dunkel und breiter: hier zaehlt das Bild,
+ * nicht das Formular daneben. Das Bild wird nicht beschnitten — dafuer gibt es
+ * die Raster.
+ */
+.mad-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1060;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  overflow-y: auto;
+  background-color: rgba(31, 41, 51, 0.82);
+}
+
+.mad-lightbox__dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(64rem, 100%);
+  max-height: 100%;
+  background-color: var(--mad-surface);
+  border-radius: var(--mad-radius);
+  box-shadow: var(--mad-shadow);
+}
+
+.mad-lightbox__dialog:focus {
+  outline: none;
+}
+
+.mad-lightbox__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--mad-border);
+}
+
+/* Die Bildbuehne traegt den Beschnitt-freien Platz: das Bild passt sich ihr an,
+ * nicht umgekehrt. `min-height: 0` erlaubt dem Flex-Kind zu schrumpfen — sonst
+ * waechst der Dialog bei hochformatigen Aufnahmen ueber den Bildschirm hinaus. */
+.mad-lightbox__stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Waechst in den freien Platz und darf dabei schrumpfen. Ohne `min-height: 0`
+   * verweigert ein Flex-Kind das Schrumpfen unter seine Inhaltsgroesse — der
+   * Dialog waere bei hochformatigen Aufnahmen hoeher als der Bildschirm. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.75rem;
+  background-color: var(--mad-surface-sunken);
+}
+
+/* Blaettern liegt auf der Bildflaeche: auf dem Telefon sind die Raender die
+ * Stelle, an der der Daumen ohnehin liegt. */
+.mad-lightbox__step {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: 1px solid var(--mad-border);
+  border-radius: 50%;
+  background-color: var(--mad-surface);
+  color: var(--mad-text);
+  font-size: 1.25rem;
+  line-height: 1;
+  text-decoration: none;
+  box-shadow: var(--mad-shadow);
+}
+
+.mad-lightbox__step:hover {
+  background-color: var(--mad-primary-tint);
+  color: var(--mad-primary-strong);
+}
+
+.mad-lightbox__step--prev { left: 0.75rem; }
+.mad-lightbox__step--next { right: 0.75rem; }
+
+.mad-lightbox__body {
+  padding: 0.75rem 1rem;
+}
+
+.mad-lightbox__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--mad-border);
+  background-color: var(--mad-surface-sunken);
+  border-bottom-left-radius: var(--mad-radius);
+  border-bottom-right-radius: var(--mad-radius);
+}
+
+.mad-lightbox__spacer {
+  flex: 1 1 auto;
+}
+
+/* Solange die Grossansicht offen ist, scrollt der Hintergrund nicht mit. */
+.mad-no-scroll {
+  overflow: hidden;
+}
+
 /* -------------------------------------------------------------- Buttons */
 
 .btn-primary {
@@ -990,6 +1158,35 @@ img {
   /* Aktionen fuellen die Zeile, statt als Streifen nebeneinander zu kleben. */
   .mad-actions .btn {
     flex: 1 1 auto;
+  }
+
+  /* Die Grossansicht nimmt das ganze Display. Die Schaltflaechen zum Blaettern
+   * ruecken an den Rand und bleiben mindestens 44 px gross — kleiner trifft
+   * der Daumen nicht zuverlaessig. Gewischt wird ohnehin lieber. */
+  .mad-lightbox {
+    padding: 0;
+  }
+
+  .mad-lightbox__dialog {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+  }
+
+  .mad-lightbox .mad-photo {
+    max-height: 100%;
+  }
+
+  .mad-lightbox__step--prev { left: 0.25rem; }
+  .mad-lightbox__step--next { right: 0.25rem; }
+
+  .mad-lightbox__footer .btn {
+    flex: 1 1 auto;
+  }
+
+  .mad-lightbox__spacer {
+    display: none;
   }
 }
 

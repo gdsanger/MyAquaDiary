@@ -85,6 +85,31 @@ def tank_measurements(tank, limit=50):
     return annotate_status(measurements, target_map([tank]))
 
 
+def photo_neighbours(tank, photo):
+    """Nachbarn eines Fotos in der Reihenfolge der Galerie, als Primärschlüssel.
+
+    Gibt ``(vorheriges, nächstes)`` zurück; wo es keinen Nachbarn gibt, steht
+    ``None`` — das erste und das letzte Bild sind die Enden, nicht Teil eines
+    Kreises. Beim Blättern gäbe ein Rundlauf sonst keinen Hinweis darauf, dass
+    man wieder am Anfang ist.
+
+    Die Anzeigereihenfolge ist zweistufig (``-taken_on``, dann ``-pk``) und
+    steht in ``TankPhoto.Meta.ordering``. Sie hier als Filterbedingung
+    nachzubauen hieße, sie ein zweites Mal zu pflegen; stattdessen wird die
+    Reihenfolge einmal abgefragt und darin gesucht. Eine Beckengalerie hat
+    Dutzende Bilder, keine Millionen — und geladen werden nur die Schlüssel.
+    """
+    order = list(tank.photos.values_list("pk", flat=True))
+    try:
+        index = order.index(photo.pk)
+    except ValueError:  # das Foto gehört zu einem anderen Becken
+        return None, None
+    return (
+        order[index - 1] if index > 0 else None,
+        order[index + 1] if index + 1 < len(order) else None,
+    )
+
+
 def open_tasks_for_tank(tank, horizon_days=UPCOMING_DAYS):
     today = timezone.localdate()
     return list(

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}{{ tank.name }} – MyAquaDiary{% endblock %}
 
@@ -28,4 +29,13 @@
 </div>
 
 {% include "tanks/partials/tab_area.html" %}
+{% endblock %}
+
+{% comment %}
+Das Skript liegt an der Seite, nicht am Reiter: der Reiterbereich wird per HTMX
+laufend getauscht, das Seitengerüst bleibt. Es hängt an keinem Element, sondern
+lauscht am Dokument — und tut nichts, solange keine Großansicht offen ist.
+{% endcomment %}
+{% block extra_scripts %}
+<script src="{% static 'js/lightbox.js' %}" defer></script>
 {% endblock %}

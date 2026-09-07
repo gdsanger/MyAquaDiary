@@ -100,6 +100,7 @@ urlpatterns = [
     ),
     # Fotos
     path("<slug:slug>/fotos/neu/", views.PhotoCreateView.as_view(), name="photo-create"),
+    path("<slug:slug>/fotos/<int:pk>/", views.PhotoDetailView.as_view(), name="photo-detail"),
     path(
         "<slug:slug>/fotos/<int:pk>/bearbeiten/",
         views.PhotoUpdateView.as_view(),

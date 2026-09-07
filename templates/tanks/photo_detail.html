@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% comment %}
+Dieselbe Großansicht ohne JavaScript: eine eigene Seite statt eines Overlays.
+
+Sie ist kein Notbehelf, sondern das Ziel jedes `href` in der Galerie — mit HTMX
+wird sie abgefangen und als Overlay geladen, ohne HTMX ruft der Browser sie auf.
+Blättern, Bearbeiten, Löschen und das Original sind hier dieselben Adressen wie
+im Overlay, nur als gewöhnliche Links.
+{% endcomment %}
+
+{% block title %}{{ photo.alt_text }} – {{ tank.name }} – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="mad-page-header">
+  <div>
+    <h1 class="mad-page-title">{{ photo.alt_text }}</h1>
+    <p class="mad-page-subtitle">{{ tank.name }}</p>
+  </div>
+  <div class="mad-actions">
+    <a class="btn btn-outline-secondary btn-sm" href="{{ gallery_href }}">Zur Galerie</a>
+  </div>
+</div>
+
+<section class="mad-card">
+  <div class="mad-card__body">
+    {% include "partials/image.html" with variant=photo.large alt=photo.alt_text class="mad-photo" only %}
+    <div class="mt-3">
+      {% include "tanks/partials/_photo_meta.html" with photo=photo tank=tank only %}
+    </div>
+  </div>
+  <div class="mad-card__body mad-actions">
+    {% if previous_pk %}
+      <a class="btn btn-outline-secondary btn-sm"
+         href="{% url 'tanks:photo-detail' tank.slug previous_pk %}">&lsaquo; Voriges Bild</a>
+    {% endif %}
+    {% if next_pk %}
+      <a class="btn btn-outline-secondary btn-sm"
+         href="{% url 'tanks:photo-detail' tank.slug next_pk %}">Nächstes Bild &rsaquo;</a>
+    {% endif %}
+    <a class="btn btn-outline-secondary btn-sm" href="{{ photo.original.url }}"
+       target="_blank" rel="noopener">Original in voller Auflösung</a>
+    <a class="btn btn-outline-secondary btn-sm"
+       href="{% url 'tanks:photo-update' tank.slug photo.pk %}">Bearbeiten</a>
+    <a class="btn btn-outline-secondary btn-sm"
+       href="{% url 'tanks:photo-delete' tank.slug photo.pk %}">Löschen</a>
+  </div>
+</section>
+{% endblock %}
