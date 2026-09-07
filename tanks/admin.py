@@ -69,14 +69,17 @@ class TankAdmin(admin.ModelAdmin):
 
 @admin.register(Parameter)
 class ParameterAdmin(admin.ModelAdmin):
-    list_display = ["name", "key", "unit", "default_min", "default_max", "is_key_parameter", "sort_order"]
+    list_display = [
+        "name", "key", "unit", "default_min", "default_max",
+        "detection_limit", "is_key_parameter", "sort_order",
+    ]
     list_editable = ["is_key_parameter", "sort_order"]
     prepopulated_fields = {"key": ["name"]}
 
 
 @admin.register(Measurement)
 class MeasurementAdmin(admin.ModelAdmin):
-    list_display = ["tank", "parameter", "value", "measured_at"]
+    list_display = ["tank", "parameter", "value", "below_detection", "measured_at"]
     list_filter = ["tank", "parameter"]
     date_hierarchy = "measured_at"
 

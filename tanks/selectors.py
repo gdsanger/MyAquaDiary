@@ -25,6 +25,7 @@ from .models import (
     TankDerivedTarget,
     TankParameterTarget,
     TankPhoto,
+    classify_below_detection,
     classify_value,
 )
 
@@ -67,7 +68,12 @@ def annotate_status(measurements, targets):
         measurement.target_minimum = minimum
         measurement.target_maximum = maximum
         measurement.target_label = measurement.parameter.format_range(minimum, maximum)
-        measurement.status_code = classify_value(measurement.value, minimum, maximum)
+        if measurement.below_detection:
+            measurement.status_code = classify_below_detection(
+                minimum, maximum, measurement.parameter.detection_limit
+            )
+        else:
+            measurement.status_code = classify_value(measurement.value, minimum, maximum)
         measurement.status_label = Status(measurement.status_code).label
     return measurements
 
