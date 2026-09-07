@@ -2,6 +2,7 @@ import tempfile
 from datetime import timedelta
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
@@ -15,8 +16,10 @@ from core.testing import (
     create_task,
     create_user,
     image_upload,
+    photo_upload,
     stock,
 )
+from tanks import selectors
 from tanks.charts import parameter_series
 from tanks.models import (
     CareTask,
@@ -560,6 +563,266 @@ class EventWriteTests(TestCase):
 
         self.client.post(reverse("tanks:event-delete", args=[self.tank.slug, event.pk]))
         self.assertFalse(Event.objects.exists())
+
+    def test_the_category_named_in_the_mcp_schema_exists(self):
+        """``services.mcp.write`` nennt ``observation`` als Beispiel.
+
+        Fehlte sie im Modell, verwürfe ``arguments.choice()`` den Wert still
+        und legte ein „Sonstiges“ an — Beschreibung und Modell liefen
+        auseinander, ohne dass es jemand merkt.
+        """
+        self.assertIn("observation", Event.Category.values)
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class ObservationWriteTests(TestCase):
+    """Beobachtung erfassen: Kategorie, Bilder und Zeitpunkt in einem Vorgang."""
+
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.tank = create_tank(self.user)
+
+    def record(self, **extra):
+        payload = {
+            "occurred_at": "",
+            "category": Event.Category.OBSERVATION,
+            "title": "Cryptocoryne schiebt neue Blätter",
+            "description": "",
+        }
+        payload.update(extra)
+        return self.client.post(
+            reverse("tanks:observation-create", args=[self.tank.slug]), payload
+        )
+
+    def test_the_form_offers_the_category_and_the_images(self):
+        response = self.client.get(reverse("tanks:observation-create", args=[self.tank.slug]))
+        self.assertContains(response, 'value="observation" selected')
+        self.assertContains(response, 'name="images"')
+        self.assertContains(response, "multipart/form-data")
+
+    def test_observation_and_images_are_recorded_in_one_step(self):
+        self.record(images=[photo_upload("eins.jpg"), photo_upload("zwei.jpg")])
+
+        event = self.tank.events.get()
+        self.assertEqual(event.category, Event.Category.OBSERVATION)
+        self.assertEqual(event.photos.count(), 2)
+        # Die Fotos hängen weiterhin am Becken und stehen damit in der Galerie.
+        self.assertEqual(self.tank.photos.count(), 2)
+
+    def test_the_shot_time_comes_from_the_exif(self):
+        shot = (timezone.localtime() - timedelta(days=3)).replace(microsecond=0)
+        self.record(images=[photo_upload("alt.jpg", taken_at=shot.replace(tzinfo=None))])
+
+        photo = self.tank.photos.get()
+        self.assertEqual(photo.taken_on, shot.date())
+        # Ohne eigene Angabe leitet sich der Zeitpunkt des Ereignisses daraus ab.
+        self.assertEqual(timezone.localtime(photo.event.occurred_at), shot)
+
+    def test_the_earliest_shot_wins_for_the_event(self):
+        early = (timezone.localtime() - timedelta(days=5)).replace(microsecond=0)
+        late = (timezone.localtime() - timedelta(days=1)).replace(microsecond=0)
+        self.record(
+            images=[
+                photo_upload("spaet.jpg", taken_at=late.replace(tzinfo=None)),
+                photo_upload("frueh.jpg", taken_at=early.replace(tzinfo=None)),
+            ]
+        )
+
+        self.assertEqual(timezone.localtime(self.tank.events.get().occurred_at), early)
+
+    def test_without_exif_the_date_comes_from_the_event(self):
+        moment = (timezone.localtime() - timedelta(days=2)).replace(microsecond=0)
+        self.record(occurred_at=moment.strftime("%Y-%m-%dT%H:%M"), images=[photo_upload()])
+
+        self.assertEqual(self.tank.photos.get().taken_on, moment.date())
+
+    def test_a_camera_clock_in_the_future_is_ignored(self):
+        """Eine falsch gestellte Kameradatum soll kein Foto in der Zukunft ablegen."""
+        future = (timezone.localtime() + timedelta(days=30)).replace(tzinfo=None)
+        before = timezone.now()
+
+        self.record(images=[photo_upload("zukunft.jpg", taken_at=future)])
+
+        self.assertGreaterEqual(self.tank.events.get().occurred_at, before)
+        self.assertEqual(self.tank.photos.get().taken_on, timezone.localdate())
+
+    def test_without_images_and_without_a_time_it_is_now(self):
+        before = timezone.now()
+        self.record()
+
+        self.assertGreaterEqual(self.tank.events.get().occurred_at, before)
+
+    def test_a_plain_event_still_takes_images(self):
+        """Die Bilder hängen am Ereignis, nicht an der Kategorie."""
+        self.client.post(
+            reverse("tanks:event-create", args=[self.tank.slug]),
+            {
+                "occurred_at": "",
+                "category": Event.Category.TREATMENT,
+                "title": "Zweite Gabe",
+                "description": "",
+                "images": [photo_upload("verlauf.jpg")],
+            },
+        )
+
+        self.assertEqual(self.tank.events.get().photos.count(), 1)
+
+    def test_the_event_list_shows_the_previews(self):
+        self.record(images=[photo_upload("vorschau.jpg")])
+
+        response = self.client.get(f"{self.tank.get_absolute_url()}?reiter=ereignisse")
+        self.assertContains(response, "mad-thumbs")
+        self.assertContains(response, self.tank.photos.get().image.url)
+
+    def test_the_gallery_names_the_event(self):
+        self.record(images=[photo_upload("galerie.jpg")])
+
+        response = self.client.get(f"{self.tank.get_absolute_url()}?reiter=galerie")
+        self.assertContains(response, "Cryptocoryne schiebt neue Blätter")
+
+    def test_deleting_the_event_keeps_the_photos(self):
+        self.record(images=[photo_upload("bleibt.jpg")])
+        event = self.tank.events.get()
+
+        self.client.post(reverse("tanks:event-delete", args=[self.tank.slug, event.pk]))
+
+        photo = self.tank.photos.get()
+        self.assertIsNone(photo.event_id)
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class PhotoAssignmentTests(TestCase):
+    """Nachträgliche Zuordnung eines vorhandenen Fotos zu einem Ereignis."""
+
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.tank = create_tank(self.user)
+        self.photo = TankPhoto.objects.create(
+            tank=self.tank, image=image_upload(), taken_on=timezone.localdate()
+        )
+        self.event = Event.objects.create(
+            tank=self.tank,
+            title="Trübung nach dem Aufwirbeln",
+            occurred_at=timezone.now(),
+            category=Event.Category.INCIDENT,
+        )
+
+    def assign(self, event_pk):
+        return self.client.post(
+            reverse("tanks:photo-update", args=[self.tank.slug, self.photo.pk]),
+            {
+                "caption": "",
+                "taken_on": self.photo.taken_on.isoformat(),
+                "event": event_pk,
+            },
+        )
+
+    def test_an_existing_photo_finds_its_event(self):
+        self.assign(self.event.pk)
+
+        self.photo.refresh_from_db()
+        self.assertEqual(self.photo.event_id, self.event.pk)
+
+    def test_the_assignment_can_be_undone(self):
+        self.photo.event = self.event
+        self.photo.save(update_fields=["event"])
+
+        self.assign("")
+
+        self.photo.refresh_from_db()
+        self.assertIsNone(self.photo.event_id)
+
+    def test_only_events_of_the_same_tank_are_offered(self):
+        other = create_tank(self.user, name="Nano", slug="nano")
+        elsewhere = Event.objects.create(
+            tank=other, title="Woanders", occurred_at=timezone.now()
+        )
+
+        response = self.client.get(
+            reverse("tanks:photo-update", args=[self.tank.slug, self.photo.pk])
+        )
+        self.assertContains(response, "Trübung nach dem Aufwirbeln")
+        self.assertNotContains(response, "Woanders")
+
+        self.assign(elsewhere.pk)
+        self.photo.refresh_from_db()
+        self.assertIsNone(self.photo.event_id)
+
+    def test_a_foreign_event_is_refused(self):
+        foreign = Event.objects.create(
+            tank=create_tank(create_user("fremd"), slug="fremd"),
+            title="Fremd",
+            occurred_at=timezone.now(),
+        )
+
+        self.assign(foreign.pk)
+
+        self.photo.refresh_from_db()
+        self.assertIsNone(self.photo.event_id)
+
+    def test_the_model_itself_refuses_a_foreign_event(self):
+        """Auch am Admin vorbei — die Regel steht am Modell, nicht im Formular."""
+        elsewhere = Event.objects.create(
+            tank=create_tank(self.user, name="Nano", slug="nano"),
+            title="Woanders",
+            occurred_at=timezone.now(),
+        )
+        self.photo.event = elsewhere
+
+        with self.assertRaises(ValidationError):
+            self.photo.full_clean()
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class ActivityGroupingTests(TestCase):
+    """Ein Ereignis mit Fotos ist **ein** Eintrag der Zeitleiste."""
+
+    def setUp(self):
+        self.user = create_user()
+        self.tank = create_tank(self.user)
+
+    def event_with_photos(self, count):
+        event = Event.objects.create(
+            tank=self.tank,
+            title="Balzende Panzerwelse",
+            occurred_at=timezone.now(),
+            category=Event.Category.OBSERVATION,
+        )
+        for index in range(count):
+            TankPhoto.objects.create(
+                tank=self.tank,
+                event=event,
+                image=image_upload(f"{index}.png"),
+                taken_on=timezone.localdate(),
+            )
+        return event
+
+    def test_an_event_with_photos_stays_one_entry(self):
+        self.event_with_photos(3)
+
+        entries = selectors.recent_activity(self.user)
+
+        self.assertEqual([entry["kind"] for entry in entries], ["event"])
+        self.assertEqual(entries[0]["photo_count"], 3)
+
+    def test_five_images_do_not_flood_the_tile(self):
+        self.event_with_photos(5)
+
+        entry = selectors.recent_activity(self.user)[0]
+
+        self.assertEqual(entry["photo_count"], 5)
+        self.assertEqual(len(entry["photos"]), selectors.ACTIVITY_PREVIEW_PHOTOS)
+
+    def test_a_photo_without_an_event_remains_its_own_entry(self):
+        TankPhoto.objects.create(
+            tank=self.tank, image=image_upload(), taken_on=timezone.localdate()
+        )
+
+        entries = selectors.recent_activity(self.user)
+
+        self.assertEqual([entry["kind"] for entry in entries], ["photo"])
 
 
 class StockingWriteTests(TestCase):

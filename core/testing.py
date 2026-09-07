@@ -92,6 +92,20 @@ def image_upload(name="foto.png"):
     return SimpleUploadedFile(name, buffer.getvalue(), content_type="image/png")
 
 
+def photo_upload(name="foto.jpg", taken_at=None):
+    """Winziges JPEG mit Aufnahmezeitpunkt im EXIF-Block.
+
+    ``taken_at`` ist ein naives ``datetime`` — genau das, was eine Kamera
+    schreibt: die Ortszeit ihrer eigenen Uhr, ohne Zeitzone.
+    """
+    exif = Image.Exif()
+    if taken_at is not None:
+        exif[36867] = taken_at.strftime("%Y:%m:%d %H:%M:%S")
+    buffer = BytesIO()
+    Image.new("RGB", (2, 2), "white").save(buffer, format="JPEG", exif=exif)
+    return SimpleUploadedFile(name, buffer.getvalue(), content_type="image/jpeg")
+
+
 def stock(tank, species, quantity=12, days_ago=30):
     return Stocking.objects.create(
         tank=tank,

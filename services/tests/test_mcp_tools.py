@@ -473,6 +473,17 @@ class CreateEventTests(ToolTestCase):
 
         self.assertEqual(StubEvent.objects.get().category, "other")
 
+    def test_an_observation_is_taken_as_such(self):
+        """Das Schema nennt ``observation`` — dann muss es auch ankommen."""
+        self.call(
+            "create_event",
+            tank_id=self.tank.pk,
+            title="Balzende Panzerwelse",
+            category="observation",
+        )
+
+        self.assertEqual(StubEvent.objects.get().category, "observation")
+
     def test_a_title_is_required(self):
         with self.assertRaises(ToolError):
             self.call("create_event", tank_id=self.tank.pk)
