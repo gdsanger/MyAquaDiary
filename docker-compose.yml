@@ -35,6 +35,7 @@ services:
 
   # MCP-Endpunkt für externe KI-Clients — eigener Dienst, gleiches Abbild und
   # dieselbe Datenbank. Die Migrationen laufen im Web-Dienst, hier nicht.
+  # Erreichbar unter http://localhost:8001/mcp/?token=<Token>.
   mcp:
     build:
       context: .

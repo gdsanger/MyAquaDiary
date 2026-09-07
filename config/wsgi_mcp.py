@@ -3,15 +3,22 @@
 Startet den MCP-Endpunkt als eigenen Dienst neben der Web-App::
 
     gunicorn config.wsgi_mcp:application \\
-        --bind 0.0.0.0:8001 --worker-class gthread --threads 16 --timeout 0
+        --bind 0.0.0.0:8001 --workers 3 \\
+        --access-logformat '%(h)s "%(r)s" %(s)s %(b)s %(M)sms'
 
-Die Optionen sind kein Beiwerk: Ein SSE-Strom belegt seinen Worker, solange der
-Client verbunden ist. Mit Threads bedient ein Prozess mehrere Ströme, und
-``--timeout 0`` verhindert, dass gunicorn eine ruhige, aber völlig gesunde
-Verbindung für aufgehängt hält.
+Zwei Dinge sind daran Absicht:
 
-Ein Prozess ist Absicht, kein Kompromiss: die offenen Sitzungen liegen im
-Arbeitsspeicher (siehe :mod:`services.mcp.sessions`).
+**Mehrere Worker sind erlaubt.** Der Transport *Streamable HTTP* antwortet
+direkt auf den POST; es gibt keinen Zustand im Prozess, den ein zweiter Worker
+nicht kennen würde. Nur solange der alte SSE-Transport noch bedient wird
+(``MCP_LEGACY_SSE``), hängen dessen offene Sitzungen im Arbeitsspeicher und
+verlangen einen einzelnen Prozess.
+
+**Das Zugriffsprotokoll lässt den Query-String weg.** Im Standardformat steckt
+``%(q)s`` — und darin stünde der Token. Dasselbe gilt für den Proxy davor.
+
+Der eigene Entrypoint bleibt, was er war: die Trennung der Oberflächen. Admin,
+Login und Beckenverwaltung sind über diesen Port nicht erreichbar.
 """
 
 import os

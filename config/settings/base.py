@@ -181,20 +181,40 @@ SITE_URL = env("SITE_URL", default="http://localhost:8000")
 
 # Öffentliche Adresse des MCP-Endpunkts. Steht getrennt neben SITE_URL, weil
 # der MCP-Server ein eigener Dienst auf einem eigenen Port ist — und die
-# Beispielkonfiguration auf der Token-Seite die Adresse nennen muss, die der
-# Client wirklich erreicht.
+# Adresse auf der Token-Seite die sein muss, die der Client wirklich erreicht.
 MCP_PUBLIC_URL = env("MCP_PUBLIC_URL", default="http://localhost:8001")
 
 # Aufrufe je MCP-Token und Minute. Schützt vor einem fehlkonfigurierten Client,
 # der in einer Schleife schreibt. 0 schaltet die Prüfung ab.
 MCP_RATE_LIMIT_PER_MINUTE = env.int("MCP_RATE_LIMIT_PER_MINUTE", default=60)
 
-# Abstand der Keep-alive-Zeilen im SSE-Strom. Kurz genug, dass kein Proxy die
-# ruhige Verbindung für tot hält.
+# Herkünfte, die den MCP-Endpunkt aus einem Browser ansprechen dürfen. Leer =
+# keine: Der Endpunkt ist für native Clients gedacht, und die schicken gar
+# keinen Origin-Header — der ist ausdrücklich zulässig. Die Prüfung richtet
+# sich gegen DNS-Rebinding, also gegen eine fremde Webseite, die den lokal
+# erreichbaren Dienst im Namen des Browsers anspricht.
+MCP_ALLOWED_ORIGINS = env.list("MCP_ALLOWED_ORIGINS", default=[])
+
+# Vorbelegte Laufzeit eines neuen Zugangs in Tagen. Ein Token in einer Adresse
+# ist schwerer geheim zu halten als einer in einem Header — er soll deshalb von
+# selbst ablaufen und nicht erst, wenn jemand daran denkt.
+MCP_TOKEN_DEFAULT_DAYS = env.int("MCP_TOKEN_DEFAULT_DAYS", default=90)
+
+# Der alte HTTP+SSE-Transport (/mcp/sse/, /mcp/messages/). Vorerst an, damit
+# bestehende Konfigurationen weiterlaufen. Erst ausgeschaltet ist der Dienst
+# wirklich zustandslos und darf auf mehreren Workern laufen.
+MCP_LEGACY_SSE = env.bool("MCP_LEGACY_SSE", default=True)
+
+# Abschalttermin des alten Transports. Steht als Sunset-Header an dessen
+# Antworten.
+MCP_LEGACY_SUNSET = env("MCP_LEGACY_SUNSET", default="2026-12-31")
+
+# Abstand der Keep-alive-Zeilen im alten SSE-Strom. Kurz genug, dass kein Proxy
+# die ruhige Verbindung für tot hält.
 MCP_KEEPALIVE_SECONDS = env.int("MCP_KEEPALIVE_SECONDS", default=15)
 
-# So lange darf eine SSE-Sitzung ohne Lebenszeichen im Speicher liegen, bevor
-# sie beim nächsten Verbindungsaufbau aufgeräumt wird.
+# So lange darf eine SSE-Sitzung des alten Transports ohne Lebenszeichen im
+# Speicher liegen, bevor sie beim nächsten Verbindungsaufbau aufgeräumt wird.
 MCP_SESSION_IDLE_TIMEOUT = env.int("MCP_SESSION_IDLE_TIMEOUT", default=3600)
 
 LOGGING = {
@@ -203,8 +223,19 @@ LOGGING = {
     "formatters": {
         "simple": {"format": "{levelname} {asctime} {name} {message}", "style": "{"},
     },
+    # Der MCP-Token darf im Query-String stehen — im Protokoll nicht. Der
+    # Filter hängt am Handler und nicht an einzelnen Aufrufen: die gefährliche
+    # Zeile kommt von django.request („Not Found: /mcp/?token=…“), also nicht
+    # aus unserem Code.
+    "filters": {
+        "mask_mcp_tokens": {"()": "services.masking.MaskTokens"},
+    },
     "handlers": {
-        "console": {"class": "logging.StreamHandler", "formatter": "simple"},
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "simple",
+            "filters": ["mask_mcp_tokens"],
+        },
     },
     "root": {"handlers": ["console"], "level": "WARNING"},
     "loggers": {

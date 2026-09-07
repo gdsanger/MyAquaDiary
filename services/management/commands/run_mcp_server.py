@@ -13,13 +13,13 @@ from services.mcp.wsgi import MCPHandler
 
 
 class Command(RunserverCommand):
-    help = "Startet den MCP-Endpunkt (SSE) als eigenen Server."
+    help = "Startet den MCP-Endpunkt (Streamable HTTP) als eigenen Server."
     default_port = "8001"
 
     def get_handler(self, *args, **options):
         """Der MCP-Handler statt der Web-App.
 
-        Ohne Statik-Auslieferung: der MCP-Endpunkt liefert JSON und einen
-        Ereignisstrom, keine Dateien.
+        Ohne Statik-Auslieferung: der MCP-Endpunkt liefert JSON, keine
+        Dateien.
         """
         return MCPHandler()

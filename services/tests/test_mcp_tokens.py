@@ -15,6 +15,10 @@ from django.utils import timezone
 from services.models import MCP_TOKEN_PREFIX, MCPToken
 
 
+def tomorrow():
+    return (timezone.localdate() + timedelta(days=1)).isoformat()
+
+
 def make_user(username="greta"):
     return get_user_model().objects.create_user(
         username=username, email=f"{username}@example.com", password="geheim"
@@ -110,7 +114,9 @@ class MCPTokenPageTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
     def test_creating_a_token_shows_the_key_exactly_once(self):
-        response = self.client.post(self.url, {"name": "Claude Desktop"})
+        response = self.client.post(
+            self.url, {"name": "Claude Desktop", "expires_at": tomorrow()}
+        )
 
         self.assertEqual(response.status_code, 200)
         key = response.context["issued_key"]
@@ -122,17 +128,57 @@ class MCPTokenPageTests(TestCase):
         self.assertEqual(again.context["issued_key"], "")
         self.assertNotContains(again, key)
 
-    def test_the_page_shows_an_example_configuration(self):
-        """Mit der Adresse des MCP-Dienstes, nicht der der Web-App."""
+    def test_the_page_shows_the_finished_address(self):
+        """Adresse des MCP-Dienstes, Token darin — mehr braucht kein Client."""
         with override_settings(MCP_PUBLIC_URL="https://tagebuch.example.com:8001"):
-            response = self.client.post(self.url, {"name": "Claude Desktop"})
+            response = self.client.post(
+                self.url, {"name": "Claude Desktop", "expires_at": tomorrow()}
+            )
 
-        self.assertContains(response, "mcp-remote")
-        self.assertContains(response, "https://tagebuch.example.com:8001/mcp/sse/")
+        key = response.context["issued_key"]
+        self.assertEqual(
+            response.context["client_url"],
+            f"https://tagebuch.example.com:8001/mcp/?token={key}",
+        )
+        self.assertContains(response, "https://tagebuch.example.com:8001/mcp/?token=")
+
+    def test_the_page_warns_that_the_address_is_a_secret(self):
+        response = self.client.post(
+            self.url, {"name": "Claude Desktop", "expires_at": tomorrow()}
+        )
+
+        self.assertContains(response, "ist ein Passwort")
+
+    def test_the_page_no_longer_advertises_the_node_bridge(self):
+        """Die npx-Konfiguration ist der Grund, warum es diesen Umbau gab."""
+        response = self.client.post(
+            self.url, {"name": "Claude Desktop", "expires_at": tomorrow()}
+        )
+
+        self.assertNotContains(response, "mcp-remote")
+        self.assertNotContains(response, "npx")
+
+    def test_the_expiry_is_prefilled(self):
+        """Ein Token in einer Adresse soll von selbst ablaufen."""
+        with override_settings(MCP_TOKEN_DEFAULT_DAYS=30):
+            response = self.client.get(self.url)
+
+        expected = timezone.localdate() + timedelta(days=30)
+        self.assertEqual(response.context["form"]["expires_at"].value(), expected)
+        self.assertContains(response, expected.isoformat())
+
+    def test_a_token_without_an_expiry_is_refused(self):
+        response = self.client.post(self.url, {"name": "Für immer"})
+
+        self.assertFalse(MCPToken.objects.exists())
+        self.assertIn("expires_at", response.context["form"].errors)
 
     def test_write_access_is_only_granted_when_asked_for(self):
-        self.client.post(self.url, {"name": "Nur lesen"})
-        self.client.post(self.url, {"name": "Auch schreiben", "allow_write": "on"})
+        self.client.post(self.url, {"name": "Nur lesen", "expires_at": tomorrow()})
+        self.client.post(
+            self.url,
+            {"name": "Auch schreiben", "allow_write": "on", "expires_at": tomorrow()},
+        )
 
         self.assertFalse(MCPToken.objects.get(name="Nur lesen").allow_write)
         self.assertTrue(MCPToken.objects.get(name="Auch schreiben").allow_write)

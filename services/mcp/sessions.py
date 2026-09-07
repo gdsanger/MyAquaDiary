@@ -1,4 +1,4 @@
-"""Offene SSE-Sitzungen.
+"""Offene SSE-Sitzungen — **nur noch für den alten Transport**.
 
 Der SSE-Transport des MCP besteht aus zwei Requests: der Client hält einen
 GET-Strom offen und schickt seine Anfragen per POST an eine zweite Adresse. Die
@@ -7,8 +7,14 @@ vermitteln — diese Warteschlange.
 
 Sie liegt im Prozess und nicht im Cache oder in der Datenbank, denn sie hängt
 an einer offenen Verbindung: ein anderer Prozess könnte mit der Antwort nichts
-anfangen. Genau deshalb ist der MCP-Server ein eigener Entrypoint mit einem
-Prozess (siehe ``config/wsgi_mcp.py``) und kein weiterer Worker der Web-App.
+anfangen. Solange dieses Modul benutzt wird, ist der MCP-Dienst deshalb an
+**einen** Prozess gebunden.
+
+Der neue Transport (Streamable HTTP, ``POST /mcp/``) braucht das alles nicht:
+er antwortet in derselben Antwort, es gibt nichts zu vermitteln. Dieses Modul
+lebt nur noch, damit bestehende Konfigurationen bis zum Abschalttermin
+weiterlaufen (``MCP_LEGACY_SSE``), und verschwindet mit ihnen — samt
+Aufräumlogik, Keep-alive-Takt und Obergrenze offener Sitzungen.
 
 Am Eintrag steht nur die Token-Kennung, nicht der Token selbst: ob ein Zugang
 noch gilt, wird bei jedem POST neu geprüft. Ein Widerruf wirkt damit sofort,
