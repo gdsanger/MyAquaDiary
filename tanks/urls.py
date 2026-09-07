@@ -70,6 +70,49 @@ urlpatterns = [
         views.PlantingDeleteView.as_view(),
         name="planting-delete",
     ),
+    # Einrichtung: Bodengrund
+    path(
+        "<slug:slug>/bodengrund/neu/",
+        views.SubstrateLayerCreateView.as_view(),
+        name="substrate-create",
+    ),
+    path(
+        "<slug:slug>/bodengrund/<int:pk>/bearbeiten/",
+        views.SubstrateLayerUpdateView.as_view(),
+        name="substrate-update",
+    ),
+    path(
+        "<slug:slug>/bodengrund/<int:pk>/verschieben/",
+        views.SubstrateLayerMoveView.as_view(),
+        name="substrate-move",
+    ),
+    path(
+        "<slug:slug>/bodengrund/<int:pk>/erinnerung/",
+        views.SubstrateReminderView.as_view(),
+        name="substrate-reminder",
+    ),
+    path(
+        "<slug:slug>/bodengrund/<int:pk>/loeschen/",
+        views.SubstrateLayerDeleteView.as_view(),
+        name="substrate-delete",
+    ),
+    # Einrichtung: Hardscape
+    path("<slug:slug>/hardscape/neu/", views.HardscapeCreateView.as_view(), name="hardscape-create"),
+    path(
+        "<slug:slug>/hardscape/<int:pk>/bearbeiten/",
+        views.HardscapeUpdateView.as_view(),
+        name="hardscape-update",
+    ),
+    path(
+        "<slug:slug>/hardscape/<int:pk>/entfernt/",
+        views.HardscapeRemoveView.as_view(),
+        name="hardscape-remove",
+    ),
+    path(
+        "<slug:slug>/hardscape/<int:pk>/erinnerung/",
+        views.HardscapeReminderView.as_view(),
+        name="hardscape-reminder",
+    ),
     # Termine
     path("<slug:slug>/termine/neu/", views.CareTaskCreateView.as_view(), name="task-create"),
     path(

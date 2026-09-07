@@ -8,6 +8,7 @@ erhalten, und jede Ansicht ist auch ohne JavaScript bedienbar.
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db.models import prefetch_related_objects
 from django.http import Http404, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
@@ -20,6 +21,8 @@ from .charts import key_parameter_charts
 from .forms import (
     CareTaskForm,
     EventForm,
+    HardscapeItemForm,
+    HardscapeRemovalForm,
     MeasurementForm,
     MeasurementSeriesForm,
     PhotoForm,
@@ -27,6 +30,7 @@ from .forms import (
     PlantingForm,
     StockingForm,
     StockingRemovalForm,
+    SubstrateLayerForm,
     TankDissolveForm,
     TankForm,
     TankParameterTargetForm,
@@ -34,12 +38,15 @@ from .forms import (
 from .models import (
     CareTask,
     Event,
+    HardscapeItem,
     Measurement,
     Planting,
     Stocking,
+    SubstrateLayer,
     Tank,
     TankParameterTarget,
     TankPhoto,
+    format_cm,
 )
 
 #: Registerkarten des Beckendetails in Anzeigereihenfolge.
@@ -49,6 +56,7 @@ TABS = [
     ("ereignisse", "Ereignisse"),
     ("besatz", "Besatz"),
     ("pflanzen", "Pflanzen"),
+    ("einrichtung", "Einrichtung"),
     ("termine", "Termine"),
     ("geraete", "Geräte"),
     ("galerie", "Galerie"),
@@ -70,7 +78,13 @@ class TankListView(LoginRequiredMixin, NavSectionMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        tanks = Tank.objects.for_user(self.request.user).with_overview()
+        # Die Zusammenfassung der Einrichtung zählt Schichten und Hardscape je
+        # Karte; ohne Vorladung wären das zwei Abfragen pro Becken.
+        tanks = (
+            Tank.objects.for_user(self.request.user)
+            .with_overview()
+            .prefetch_related("substrate_layers", "hardscape")
+        )
         context["active_tanks"] = list(tanks.active())
         context["dissolved_tanks"] = list(tanks.dissolved().order_by("-dissolved_on"))
         return context
@@ -107,6 +121,16 @@ def tab_context(tank, tab):
         return {"stockings": tank.stockings.select_related("species").prefetch_related("species__images")}
     if tab == "pflanzen":
         return {"plantings": tank.plantings.select_related("species").prefetch_related("species__images")}
+    if tab == "einrichtung":
+        # Einmal vorladen: Schichtstapel, Gesamthöhe und Zusammenfassung
+        # arbeiten danach auf denselben Objekten statt auf drei Abfragen.
+        prefetch_related_objects([tank], "substrate_layers", "hardscape")
+        return {
+            # Von oben nach unten — so schaut man in ein Becken hinein.
+            "layers": list(tank.substrate_layers.all())[::-1],
+            "substrate_depth": format_cm(tank.substrate_depth_cm),
+            "hardscape": tank.hardscape.all(),
+        }
     if tab == "termine":
         return {"tasks": tank.tasks.order_by("-is_active", "due_on")}
     if tab == "geraete":
@@ -719,6 +743,173 @@ class CareTaskToggleView(TankObjectConfirmView):
         task.is_active = not task.is_active
         task.save(update_fields=["is_active"])
         return f"„{task.title}“ {'aktiviert' if task.is_active else 'deaktiviert'}."
+
+
+# --- Einrichtung ----------------------------------------------------------
+
+
+def reminder_modal(view, source, url_name):
+    """Overlay, das einen Termin vorschlägt — vorbelegt aus der Einrichtung.
+
+    Angeboten, nicht angelegt: ein selbsttätig erscheinender Termin, den
+    niemand wollte, untergräbt das Vertrauen in die Terminliste. Abgelehnt wird
+    das Angebot durch „Abbrechen“, und dann bleibt es dabei.
+    """
+    return view.modal(
+        title="Termin anlegen?",
+        action=reverse(url_name, args=[view.tank.slug, source.pk]),
+        body_template="tanks/partials/form_modal.html",
+        form=CareTaskForm(initial=source.reminder_defaults()),
+        modal_submit="Termin anlegen",
+        modal_hint=(
+            "Diese Angabe hat eine Standzeit. Der Termin ist vorbelegt und "
+            "änderbar — angelegt wird er nur, wenn du das hier bestätigst."
+        ),
+    )
+
+
+class ReminderOfferMixin:
+    """Bietet nach dem Anlegen den passenden Termin an.
+
+    Nur beim Anlegen: beim Bearbeiten stünde das Angebot erneut im Weg,
+    obwohl es beim ersten Mal vielleicht abgelehnt wurde. Nachträglich führt
+    die Zeilenaktion *Erinnerung* zum selben Formular.
+    """
+
+    reminder_url_name = ""
+
+    def post(self, request, **kwargs):
+        form = self.get_form(request.POST)
+        if not form.is_valid():
+            return self.render_tab(self.form_context(form))
+        obj = self.save(form)
+        if obj.suggests_reminder:
+            return self.render_tab(reminder_modal(self, obj, self.reminder_url_name))
+        return self.done(self.success_message(obj))
+
+
+class ReminderCreateView(TankFragmentView):
+    """Der Termin zu einer Einrichtungsposition, vorbelegt aus deren Standzeit.
+
+    Ein eigener Weg statt ``task-create``, weil die Vorbelegung aus der
+    Bodengrundschicht bzw. dem Hardscape kommt und die Antwort im Reiter
+    *Einrichtung* bleiben soll.
+    """
+
+    tab = "einrichtung"
+    #: URL-Name dieser Ansicht — für die Formularadresse des Overlays.
+    url_name = ""
+
+    def get(self, request, **kwargs):
+        return self.render_tab(reminder_modal(self, self.get_object(), self.url_name))
+
+    def post(self, request, **kwargs):
+        source = self.get_object()
+        form = CareTaskForm(request.POST)
+        if not form.is_valid():
+            context = reminder_modal(self, source, self.url_name)
+            context["form"] = form
+            return self.render_tab(context)
+        task = form.save(commit=False)
+        task.tank = self.tank
+        task.save()
+        return self.done(f"Termin „{task.title}“ angelegt.")
+
+
+class SubstrateLayerCreateView(ReminderOfferMixin, TankObjectFormView):
+    model = SubstrateLayer
+    tab = "einrichtung"
+    form_class = SubstrateLayerForm
+    create_title = "Bodengrundschicht anlegen"
+    create_url_name = "tanks:substrate-create"
+    reminder_url_name = "tanks:substrate-reminder"
+    hint = "Die Schicht kommt oben auf den Stapel; verschieben lässt sie sich danach."
+
+    def save(self, form):
+        # Aufgefüllt wird von oben — und die Positionen sind lückenlos, dafür
+        # sorgt :meth:`SubstrateLayer.move`.
+        form.instance.position = self.tank.substrate_layers.count()
+        return super().save(form)
+
+
+class SubstrateLayerUpdateView(TankObjectFormView):
+    model = SubstrateLayer
+    tab = "einrichtung"
+    form_class = SubstrateLayerForm
+    update_title = "Bodengrundschicht bearbeiten"
+    update_url_name = "tanks:substrate-update"
+
+
+class SubstrateLayerDeleteView(TankObjectConfirmView):
+    model = SubstrateLayer
+    tab = "einrichtung"
+    title = "Schicht löschen"
+    question = "Diese Schicht wird gelöscht. Fortfahren?"
+    url_name = "tanks:substrate-delete"
+
+
+class SubstrateLayerMoveView(TankFragmentView):
+    """Schicht im Stapel verschieben.
+
+    Nur ``POST`` — die Reihenfolge ist eine Angabe und ändert Daten. Eine
+    Rückfrage gibt es trotzdem nicht: der Gegenpfeil nimmt den Schritt zurück.
+    """
+
+    model = SubstrateLayer
+    tab = "einrichtung"
+
+    def post(self, request, **kwargs):
+        self.get_object().move(1 if request.POST.get("richtung") == "hoch" else -1)
+        return self.done()
+
+
+class HardscapeCreateView(ReminderOfferMixin, TankObjectFormView):
+    model = HardscapeItem
+    tab = "einrichtung"
+    form_class = HardscapeItemForm
+    create_title = "Hardscape erfassen"
+    create_url_name = "tanks:hardscape-create"
+    reminder_url_name = "tanks:hardscape-reminder"
+    hint = (
+        "Was die Wasserwerte beeinflusst, gehört angehakt: bei einer "
+        "unerklärten Veränderung ist die Einrichtung der erste Verdächtige."
+    )
+
+
+class HardscapeUpdateView(TankObjectFormView):
+    model = HardscapeItem
+    tab = "einrichtung"
+    form_class = HardscapeItemForm
+    update_title = "Hardscape bearbeiten"
+    update_url_name = "tanks:hardscape-update"
+
+
+class HardscapeRemoveView(TankObjectFormView):
+    """Als entfernt markieren statt löschen."""
+
+    model = HardscapeItem
+    tab = "einrichtung"
+    form_class = HardscapeRemovalForm
+    update_title = "Als entfernt markieren"
+    update_url_name = "tanks:hardscape-remove"
+    submit_label = "Entfernt buchen"
+    hint = (
+        "Die Position bleibt mit Datum in der Beckengeschichte stehen — sie "
+        "erklärt womöglich einen Verlauf, der später auffällt."
+    )
+
+    def success_message(self, obj):
+        return f"{obj.name} als entfernt gebucht."
+
+
+class SubstrateReminderView(ReminderCreateView):
+    model = SubstrateLayer
+    url_name = "tanks:substrate-reminder"
+
+
+class HardscapeReminderView(ReminderCreateView):
+    model = HardscapeItem
+    url_name = "tanks:hardscape-reminder"
 
 
 # --- Zielbereiche ---------------------------------------------------------

@@ -3,10 +3,12 @@ from django.contrib import admin
 from .models import (
     CareTask,
     Event,
+    HardscapeItem,
     Measurement,
     Parameter,
     Planting,
     Stocking,
+    SubstrateLayer,
     Tank,
     TankParameterTarget,
     TankPhoto,
@@ -17,6 +19,20 @@ from .models import (
 class TankParameterTargetInline(admin.TabularInline):
     model = TankParameterTarget
     extra = 1
+
+
+class SubstrateLayerInline(admin.TabularInline):
+    model = SubstrateLayer
+    extra = 0
+    # Im Admin gibt es die Pfeile der Oberfläche nicht — hier ist die Position
+    # eine Zahl, die man hinschreibt.
+    fields = ["position", "kind", "product", "grain_size", "depth_cm", "added_on", "depleted_on"]
+
+
+class HardscapeItemInline(admin.TabularInline):
+    model = HardscapeItem
+    extra = 0
+    fields = ["kind", "name", "quantity", "added_on", "removed_on", "affects_water", "water_effect"]
 
 
 class TankPhotoInline(admin.TabularInline):
@@ -30,7 +46,12 @@ class TankAdmin(admin.ModelAdmin):
     list_filter = ["water_type", "owner"]
     search_fields = ["name"]
     prepopulated_fields = {"slug": ["name"]}
-    inlines = [TankParameterTargetInline, TankPhotoInline]
+    inlines = [
+        TankParameterTargetInline,
+        SubstrateLayerInline,
+        HardscapeItemInline,
+        TankPhotoInline,
+    ]
 
 
 @admin.register(Parameter)

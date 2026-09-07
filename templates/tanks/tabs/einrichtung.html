@@ -1,0 +1,130 @@
+{% comment %}
+Einrichtung: Bodengrund als Schichtstapel, Hardscape als Liste.
+
+Der Stapel steht von oben nach unten — so, wie man in ein Becken hineinschaut.
+Die Ansicht dreht die Reihenfolge dafür um; gespeichert ist sie aufsteigend mit
+0 als unterster Schicht.
+{% endcomment %}
+<div class="row g-4">
+  <div class="col-12 col-lg-6">
+    <section class="mad-card">
+      <div class="mad-card__header">
+        <h2 class="mad-card__title">
+          Bodengrund{% if substrate_depth %} <span class="mad-muted">· {{ substrate_depth }} cm gesamt</span>{% endif %}
+        </h2>
+        <a class="btn btn-primary btn-sm" href="{% url 'tanks:substrate-create' tank.slug %}"
+           hx-get="{% url 'tanks:substrate-create' tank.slug %}"
+           hx-target="#tab-area" hx-swap="outerHTML">Schicht anlegen</a>
+      </div>
+      <ul class="mad-list mad-stack">
+        {% for layer in layers %}
+          <li>
+            <div class="mad-list__row">
+              <div class="mad-list__main">
+                <p class="mad-list__title">
+                  {% if layer.depth_display %}{{ layer.depth_display }} {% endif %}{{ layer.get_kind_display }}
+                </p>
+                <p class="mad-list__meta">
+                  {% if layer.product %}{{ layer.product }} · {% endif %}
+                  {% if layer.grain_size %}Körnung {{ layer.grain_size }} · {% endif %}
+                  {% if layer.added_on %}eingebracht {{ layer.added_on|date:"d.m.Y" }}{% else %}ohne Datum{% endif %}
+                </p>
+                {% if layer.note %}<p class="mad-list__meta">{{ layer.note }}</p>{% endif %}
+              </div>
+              {% if layer.depleted_on %}
+                <span class="mad-status mad-status--{{ layer.status_value }}">{{ layer.depletion_label }}</span>
+              {% endif %}
+              {% comment %}
+              Verschieben ändert Daten und ist deshalb POST — aber ohne
+              Rückfrage: der Gegenpfeil nimmt den Schritt zurück. Die Richtung
+              steht als verstecktes Feld und nicht am Knopf, damit sie auch
+              ohne JavaScript mitgesendet wird.
+              {% endcomment %}
+              <div class="mad-actions">
+                {% url 'tanks:substrate-move' tank.slug layer.pk as move_url %}
+                <form method="post" action="{{ move_url }}" class="mad-actions"
+                      hx-post="{{ move_url }}" hx-target="#tab-area" hx-swap="outerHTML">
+                  {% csrf_token %}
+                  <input type="hidden" name="richtung" value="hoch">
+                  <button type="submit" class="btn btn-outline-secondary btn-sm"
+                          {% if forloop.first %}disabled{% endif %}
+                          aria-label="{{ layer }} nach oben">↑</button>
+                </form>
+                <form method="post" action="{{ move_url }}" class="mad-actions"
+                      hx-post="{{ move_url }}" hx-target="#tab-area" hx-swap="outerHTML">
+                  {% csrf_token %}
+                  <input type="hidden" name="richtung" value="runter">
+                  <button type="submit" class="btn btn-outline-secondary btn-sm"
+                          {% if forloop.last %}disabled{% endif %}
+                          aria-label="{{ layer }} nach unten">↓</button>
+                </form>
+              </div>
+              {% url 'tanks:substrate-update' tank.slug layer.pk as edit_url %}
+              {% url 'tanks:substrate-delete' tank.slug layer.pk as delete_url %}
+              {% url 'tanks:substrate-reminder' tank.slug layer.pk as reminder_url %}
+              {% if layer.suggests_reminder %}
+                {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=delete_url third_url=reminder_url third_label="Erinnerung" %}
+              {% else %}
+                {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=delete_url %}
+              {% endif %}
+            </div>
+          </li>
+        {% empty %}
+          <li class="mad-empty">Noch kein Bodengrund erfasst.</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <section class="mad-card">
+      <div class="mad-card__header">
+        <h2 class="mad-card__title">Hardscape</h2>
+        <a class="btn btn-primary btn-sm" href="{% url 'tanks:hardscape-create' tank.slug %}"
+           hx-get="{% url 'tanks:hardscape-create' tank.slug %}"
+           hx-target="#tab-area" hx-swap="outerHTML">Hardscape erfassen</a>
+      </div>
+      <ul class="mad-list">
+        {% for item in hardscape %}
+          {# Entferntes bleibt stehen, tritt aber zurück: es erklärt Verläufe von früher. #}
+          <li{% if not item.is_active %} class="mad-past"{% endif %}>
+            <div class="mad-list__row">
+              <div class="mad-list__main">
+                <p class="mad-list__title">
+                  {% if item.quantity %}{{ item.quantity }}× {% endif %}{{ item.name }}
+                </p>
+                <p class="mad-list__meta">
+                  {{ item.get_kind_display }}
+                  {% if item.added_on %}· eingebracht {{ item.added_on|date:"d.m.Y" }}{% endif %}
+                  {% if item.removed_on %}· entfernt {{ item.removed_on|date:"d.m.Y" }}{% endif %}
+                  {% if item.expected_depletion %}· erschöpft ca. {{ item.expected_depletion|date:"d.m.Y" }}{% endif %}
+                </p>
+                {% if item.note %}<p class="mad-list__meta">{{ item.note }}</p>{% endif %}
+              </div>
+              {% if item.affects_water %}
+                <span class="mad-status mad-status--warn">{{ item.effect_label }}</span>
+              {% endif %}
+              {% if not item.is_active %}
+                <span class="mad-status">Nicht mehr im Becken</span>
+              {% endif %}
+              {% url 'tanks:hardscape-update' tank.slug item.pk as edit_url %}
+              {% url 'tanks:hardscape-remove' tank.slug item.pk as remove_url %}
+              {% url 'tanks:hardscape-reminder' tank.slug item.pk as reminder_url %}
+              {% if item.is_active %}
+                {% if item.suggests_reminder %}
+                  {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=remove_url second_label="Entfernt" third_url=reminder_url third_label="Erinnerung" %}
+                {% else %}
+                  {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=remove_url second_label="Entfernt" %}
+                {% endif %}
+              {% else %}
+                {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url="" %}
+              {% endif %}
+            </div>
+          </li>
+        {% empty %}
+          <li class="mad-empty">Noch kein Hardscape erfasst.</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+</div>

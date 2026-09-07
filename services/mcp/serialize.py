@@ -81,11 +81,14 @@ def tank(instance) -> dict:
 
 
 def tank_detail(instance) -> dict:
-    """Becken mit allem, was daran hängt: Zielbereiche, Besatz, Bepflanzung.
+    """Becken mit allem, was daran hängt: Zielbereiche, Besatz, Bepflanzung
+    und die Einrichtung (Bodengrund, Hardscape).
 
-    Einen Technikblock gibt es nicht: Bodengrund, Filterung, Beleuchtung, CO₂
-    und Düngung stehen nicht am Becken. Was an Technik erfasst ist, hängt als
-    Gerät daran — und Geräte bleiben über MCP bewusst außen vor (#1226).
+    Einen Technikblock gibt es weiterhin nicht: Filterung, Beleuchtung, CO₂ und
+    Düngung hängen als Gerät am Becken — und Geräte bleiben über MCP bewusst
+    außen vor (#1226). Bodengrund und Hardscape sind keine Technik: sie haben
+    keinen Betriebszustand, sondern eine Standzeit und eine Wirkung auf die
+    Wasserwerte. Genau die wird gebraucht, wenn ein Verlauf erklärt werden soll.
     """
     detail = tank(instance)
     detail.update(
@@ -94,6 +97,10 @@ def tank_detail(instance) -> dict:
             "parameter_targets": [target(item) for item in instance.parameter_targets.all()],
             "animals": [stocking(item) for item in instance.stockings.all()],
             "plants": [planting(item) for item in instance.plantings.all()],
+            # Von unten nach oben, wie der Bodengrund eingefüllt wurde.
+            "substrate": [substrate_layer(item) for item in instance.substrate_layers.all()],
+            "substrate_depth_cm": number(instance.substrate_depth_cm),
+            "hardscape": [hardscape_item(item) for item in instance.hardscape.all()],
         }
     )
     return detail
@@ -242,6 +249,58 @@ def planting(instance) -> dict:
         "planted_on": moment(instance.planted_on),
         "removed_on": moment(instance.removed_on),
         "is_active": instance.is_active,
+        "note": instance.note,
+    }
+
+
+# --------------------------------------------------------------------------
+# Einrichtung
+# --------------------------------------------------------------------------
+
+
+def substrate_layer(instance) -> dict:
+    """Eine Bodengrundschicht.
+
+    ``position`` zählt von unten: 0 ist die unterste Schicht. Ohne diese Angabe
+    wäre die Liste eine Menge und keine Schichtung.
+    """
+    status, status_label = _status(instance.depletion_status())
+    return {
+        "layer_id": instance.pk,
+        "tank_id": instance.tank_id,
+        "position": instance.position,
+        "kind": instance.kind,
+        "kind_label": _display(instance, "kind"),
+        "product": instance.product,
+        "grain_size": instance.grain_size,
+        "depth_cm": number(instance.depth_cm),
+        "added_on": moment(instance.added_on),
+        "depleted_on": moment(instance.depleted_on),
+        "status": status,
+        "status_label": status_label,
+        "note": instance.note,
+    }
+
+
+def hardscape_item(instance) -> dict:
+    """Eine Einrichtungsposition: Wurzel, Stein, Botanik, Rückwand.
+
+    ``affects_water`` kommt aus der Erfassung und nicht aus ``kind``: ob ein
+    Stein auslaugt, hängt vom Gestein ab. ``water_effect`` sagt, wie.
+    """
+    return {
+        "hardscape_id": instance.pk,
+        "tank_id": instance.tank_id,
+        "kind": instance.kind,
+        "kind_label": _display(instance, "kind"),
+        "name": instance.name,
+        "quantity": instance.quantity,
+        "added_on": moment(instance.added_on),
+        "removed_on": moment(instance.removed_on),
+        "expected_depletion": moment(instance.expected_depletion),
+        "is_active": instance.is_active,
+        "affects_water": instance.affects_water,
+        "water_effect": instance.water_effect,
         "note": instance.note,
     }
 

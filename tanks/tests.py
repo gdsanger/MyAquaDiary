@@ -27,11 +27,15 @@ from core.testing import (
 from tanks import selectors
 from tanks.charts import parameter_series
 from tanks.models import (
+    BOTANICALS_DAYS,
+    NUTRIENT_DEPOT_DAYS,
     CareTask,
     Event,
+    HardscapeItem,
     Measurement,
     Parameter,
     Planting,
+    SubstrateLayer,
     Tank,
     TankParameterTarget,
     TankPhoto,
@@ -259,6 +263,12 @@ class TankScopeTests(TestCase):
             tank=self.foreign_tank, title="Fremd", occurred_at=timezone.now()
         )
         self.foreign_task = create_task(self.foreign_tank)
+        self.foreign_layer = SubstrateLayer.objects.create(
+            tank=self.foreign_tank, kind=SubstrateLayer.Kind.SAND
+        )
+        self.foreign_hardscape = HardscapeItem.objects.create(
+            tank=self.foreign_tank, kind=HardscapeItem.Kind.WOOD, name="Fremde Wurzel"
+        )
 
     def foreign_slug_urls(self):
         slug = self.foreign_tank.slug
@@ -273,6 +283,8 @@ class TankScopeTests(TestCase):
             reverse("tanks:task-create", args=[slug]),
             reverse("tanks:target-create", args=[slug]),
             reverse("tanks:photo-create", args=[slug]),
+            reverse("tanks:substrate-create", args=[slug]),
+            reverse("tanks:hardscape-create", args=[slug]),
         ]
 
     def test_foreign_slug_is_not_found(self):
@@ -290,11 +302,21 @@ class TankScopeTests(TestCase):
             reverse("tanks:event-delete", args=[self.tank.slug, self.foreign_event.pk]),
             reverse("tanks:task-update", args=[self.tank.slug, self.foreign_task.pk]),
             reverse("tanks:task-toggle", args=[self.tank.slug, self.foreign_task.pk]),
+            reverse("tanks:substrate-update", args=[self.tank.slug, self.foreign_layer.pk]),
+            reverse("tanks:substrate-delete", args=[self.tank.slug, self.foreign_layer.pk]),
+            reverse("tanks:substrate-reminder", args=[self.tank.slug, self.foreign_layer.pk]),
+            reverse("tanks:hardscape-update", args=[self.tank.slug, self.foreign_hardscape.pk]),
+            reverse("tanks:hardscape-remove", args=[self.tank.slug, self.foreign_hardscape.pk]),
+            reverse("tanks:hardscape-reminder", args=[self.tank.slug, self.foreign_hardscape.pk]),
         ]
         for url in urls:
             with self.subTest(url=url):
                 self.assertEqual(self.client.get(url).status_code, 404)
                 self.assertEqual(self.client.post(url, {}).status_code, 404)
+
+        # Das Verschieben einer Schicht gibt es nur als POST.
+        move = reverse("tanks:substrate-move", args=[self.tank.slug, self.foreign_layer.pk])
+        self.assertEqual(self.client.post(move, {}).status_code, 404)
 
     def test_foreign_data_survives_the_attempt(self):
         self.client.post(
@@ -901,6 +923,400 @@ class PlantingWriteTests(TestCase):
 
         self.client.post(reverse("tanks:planting-delete", args=[self.tank.slug, planting.pk]))
         self.assertFalse(Planting.objects.exists())
+
+
+class SubstrateModelTests(TestCase):
+    """Schichtung, Gesamthöhe und die Standzeit eines Depots."""
+
+    def setUp(self):
+        self.user = create_user()
+        self.tank = create_tank(self.user)
+        self.today = timezone.localdate()
+
+    def layer(self, kind=SubstrateLayer.Kind.SAND, position=0, depth="4.0", **extra):
+        return SubstrateLayer.objects.create(
+            tank=self.tank,
+            kind=kind,
+            position=position,
+            depth_cm=Decimal(depth) if depth is not None else None,
+            **extra,
+        )
+
+    def test_the_total_is_the_sum_of_the_layers(self):
+        self.layer(SubstrateLayer.Kind.NUTRIENT, position=0, depth="2.0")
+        self.layer(SubstrateLayer.Kind.SAND, position=1, depth="4.5")
+        self.assertEqual(self.tank.substrate_depth_cm, Decimal("6.5"))
+
+    def test_a_layer_without_a_depth_is_not_counted_as_zero(self):
+        self.layer(depth=None)
+        self.assertIsNone(self.tank.substrate_depth_cm)
+
+    def test_the_summary_names_substrate_and_hardscape(self):
+        self.layer(depth="6.0")
+        HardscapeItem.objects.create(
+            tank=self.tank, kind=HardscapeItem.Kind.WOOD, name="Moorkienwurzel", quantity=3
+        )
+        HardscapeItem.objects.create(
+            tank=self.tank, kind=HardscapeItem.Kind.STONE, name="Lavastein", quantity=5
+        )
+        self.assertEqual(self.tank.setup_summary, "6 cm Bodengrund · 3 Wurzeln · 5 Steine")
+
+    def test_removed_hardscape_leaves_the_summary(self):
+        HardscapeItem.objects.create(
+            tank=self.tank,
+            kind=HardscapeItem.Kind.WOOD,
+            name="Moorkienwurzel",
+            quantity=1,
+            removed_on=self.today,
+        )
+        self.assertEqual(self.tank.setup_summary, "")
+
+    def test_only_a_depot_gets_a_calculated_end(self):
+        depot = SubstrateLayer(kind=SubstrateLayer.Kind.NUTRIENT, added_on=self.today)
+        self.assertEqual(
+            depot.default_depleted_on(), self.today + timedelta(days=NUTRIENT_DEPOT_DAYS)
+        )
+        sand = SubstrateLayer(kind=SubstrateLayer.Kind.SAND, added_on=self.today)
+        self.assertIsNone(sand.default_depleted_on())
+
+    def test_an_expired_depot_is_a_warning(self):
+        expired = self.layer(
+            SubstrateLayer.Kind.NUTRIENT, depleted_on=self.today - timedelta(days=1)
+        )
+        running = self.layer(
+            SubstrateLayer.Kind.NUTRIENT, position=1, depleted_on=self.today + timedelta(days=30)
+        )
+        self.assertEqual(expired.depletion_status(), Status.WARN)
+        self.assertEqual(running.depletion_status(), Status.OK)
+        self.assertEqual(self.layer(position=2).depletion_status(), Status.UNKNOWN)
+
+    def test_moving_a_layer_renumbers_the_whole_stack(self):
+        """Lücken in den Positionen dürfen das Verschieben nicht stören."""
+        bottom = self.layer(position=0)
+        middle = self.layer(position=5)
+        top = self.layer(position=9)
+
+        self.assertTrue(middle.move(1))
+
+        self.assertEqual(
+            list(self.tank.substrate_layers.values_list("pk", flat=True)),
+            [bottom.pk, top.pk, middle.pk],
+        )
+        self.assertEqual(
+            sorted(self.tank.substrate_layers.values_list("position", flat=True)), [0, 1, 2]
+        )
+
+    def test_at_the_edge_of_the_stack_nothing_happens(self):
+        bottom = self.layer(position=0)
+        self.layer(position=1)
+        self.assertFalse(bottom.move(-1))
+        bottom.refresh_from_db()
+        self.assertEqual(bottom.position, 0)
+
+
+class SubstrateWriteTests(TestCase):
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.tank = create_tank(self.user)
+        self.today = timezone.localdate()
+
+    def payload(self, **overrides):
+        data = {
+            "kind": SubstrateLayer.Kind.SAND,
+            "product": "Dennerle Sansibar",
+            "grain_size": "0,5–1 mm",
+            "depth_cm": "4",
+            "added_on": self.today.isoformat(),
+            "depleted_on": "",
+            "note": "",
+        }
+        data.update(overrides)
+        return data
+
+    def create(self, **overrides):
+        return self.client.post(
+            reverse("tanks:substrate-create", args=[self.tank.slug]), self.payload(**overrides)
+        )
+
+    def test_a_new_layer_lands_on_top_of_the_stack(self):
+        self.create(kind=SubstrateLayer.Kind.NUTRIENT, depth_cm="2")
+        self.create(kind=SubstrateLayer.Kind.SAND, depth_cm="4")
+        self.assertEqual(
+            list(self.tank.substrate_layers.values_list("kind", "position")),
+            [("nutrient", 0), ("sand", 1)],
+        )
+
+    def test_a_depot_is_prefilled_with_four_months(self):
+        self.create(kind=SubstrateLayer.Kind.NUTRIENT, product="JBL AquaBasis")
+        layer = self.tank.substrate_layers.get()
+        self.assertEqual(layer.depleted_on, self.today + timedelta(days=NUTRIENT_DEPOT_DAYS))
+
+    def test_an_entered_end_beats_the_default(self):
+        own = self.today + timedelta(days=200)
+        self.create(kind=SubstrateLayer.Kind.NUTRIENT, depleted_on=own.isoformat())
+        self.assertEqual(self.tank.substrate_layers.get().depleted_on, own)
+
+    def test_an_end_before_the_start_is_refused(self):
+        self.create(
+            kind=SubstrateLayer.Kind.NUTRIENT,
+            depleted_on=(self.today - timedelta(days=1)).isoformat(),
+        )
+        self.assertFalse(SubstrateLayer.objects.exists())
+
+    def test_a_layer_without_a_depth_is_refused(self):
+        self.create(depth_cm="0")
+        self.assertFalse(SubstrateLayer.objects.exists())
+
+    def test_the_tab_shows_the_stack_top_down_with_the_total(self):
+        self.create(kind=SubstrateLayer.Kind.NUTRIENT, product="Depot", depth_cm="2")
+        self.create(kind=SubstrateLayer.Kind.SAND, product="Sansibar", depth_cm="4")
+
+        response = self.client.get(f"{self.tank.get_absolute_url()}?reiter=einrichtung")
+
+        self.assertEqual(
+            [layer.product for layer in response.context["layers"]], ["Sansibar", "Depot"]
+        )
+        self.assertContains(response, "6 cm gesamt")
+
+    def test_a_layer_is_moved_and_deleted(self):
+        self.create(kind=SubstrateLayer.Kind.NUTRIENT, depth_cm="2")
+        self.create(kind=SubstrateLayer.Kind.SAND, depth_cm="4")
+        sand = self.tank.substrate_layers.get(kind=SubstrateLayer.Kind.SAND)
+
+        self.client.post(
+            reverse("tanks:substrate-move", args=[self.tank.slug, sand.pk]), {"richtung": "runter"}
+        )
+        self.assertEqual(
+            list(self.tank.substrate_layers.values_list("kind", flat=True)), ["sand", "nutrient"]
+        )
+
+        self.client.post(reverse("tanks:substrate-delete", args=[self.tank.slug, sand.pk]))
+        self.assertEqual(self.tank.substrate_layers.count(), 1)
+
+    def test_a_foreign_layer_is_not_reachable(self):
+        foreign = create_tank(create_user("fremd"), slug="fremd")
+        layer = SubstrateLayer.objects.create(tank=foreign, kind=SubstrateLayer.Kind.SAND)
+        url = reverse("tanks:substrate-update", args=[self.tank.slug, layer.pk])
+        self.assertEqual(self.client.get(url).status_code, 404)
+
+
+class SetupReminderTests(TestCase):
+    """Termine aus der Einrichtung werden angeboten, nicht angelegt."""
+
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.tank = create_tank(self.user)
+        self.today = timezone.localdate()
+
+    def create_depot(self):
+        return self.client.post(
+            reverse("tanks:substrate-create", args=[self.tank.slug]),
+            {
+                "kind": SubstrateLayer.Kind.NUTRIENT,
+                "product": "JBL AquaBasis",
+                "grain_size": "",
+                "depth_cm": "2",
+                "added_on": self.today.isoformat(),
+                "depleted_on": "",
+                "note": "",
+            },
+        )
+
+    def create_botanicals(self):
+        return self.client.post(
+            reverse("tanks:hardscape-create", args=[self.tank.slug]),
+            {
+                "kind": HardscapeItem.Kind.BOTANICALS,
+                "name": "Erlenzapfen",
+                "quantity": "10",
+                "added_on": self.today.isoformat(),
+                "removed_on": "",
+                "water_effect": "Huminstoffe, senkt pH",
+                "note": "",
+            },
+        )
+
+    def test_a_depot_offers_a_reminder_without_creating_one(self):
+        response = self.create_depot()
+
+        self.assertContains(response, "Termin anlegen?")
+        self.assertContains(response, "Nährstoffdepot erschöpft")
+        self.assertFalse(CareTask.objects.exists())
+
+    def test_the_offer_becomes_a_task_only_on_confirmation(self):
+        self.create_depot()
+        layer = self.tank.substrate_layers.get()
+
+        self.client.post(
+            reverse("tanks:substrate-reminder", args=[self.tank.slug, layer.pk]),
+            {
+                "title": "Nährstoffdepot erschöpft: JBL AquaBasis",
+                "category": CareTask.Category.FERTILIZER,
+                "interval_days": "",
+                "due_on": layer.depleted_on.isoformat(),
+                "notes": "",
+            },
+        )
+
+        task = self.tank.tasks.get()
+        self.assertEqual(task.due_on, layer.depleted_on)
+        self.assertEqual(task.category, CareTask.Category.FERTILIZER)
+
+    def test_botanicals_offer_a_reminder_six_weeks_out(self):
+        response = self.create_botanicals()
+        item = self.tank.hardscape.get()
+
+        self.assertContains(response, "Termin anlegen?")
+        self.assertEqual(item.expected_depletion, self.today + timedelta(days=BOTANICALS_DAYS))
+        self.assertFalse(CareTask.objects.exists())
+
+    def test_a_stone_is_offered_nothing(self):
+        response = self.client.post(
+            reverse("tanks:hardscape-create", args=[self.tank.slug]),
+            {
+                "kind": HardscapeItem.Kind.STONE,
+                "name": "Lavastein",
+                "quantity": "5",
+                "added_on": self.today.isoformat(),
+                "removed_on": "",
+                "water_effect": "",
+                "note": "",
+            },
+        )
+        self.assertNotContains(response, "Termin anlegen?")
+
+    def test_the_offer_is_reachable_again_from_the_row(self):
+        self.create_botanicals()
+        item = self.tank.hardscape.get()
+        response = self.client.get(
+            reverse("tanks:hardscape-reminder", args=[self.tank.slug, item.pk])
+        )
+        self.assertContains(response, "Erlenzapfen erneuern")
+
+
+class HardscapeWriteTests(TestCase):
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.tank = create_tank(self.user)
+        self.today = timezone.localdate()
+
+    def payload(self, **overrides):
+        data = {
+            "kind": HardscapeItem.Kind.WOOD,
+            "name": "Moorkienwurzel",
+            "quantity": "1",
+            "added_on": self.today.isoformat(),
+            "removed_on": "",
+            "water_effect": "",
+            "note": "",
+        }
+        data.update(overrides)
+        return data
+
+    def create(self, **overrides):
+        return self.client.post(
+            reverse("tanks:hardscape-create", args=[self.tank.slug]), self.payload(**overrides)
+        )
+
+    def test_an_item_is_recorded(self):
+        self.create(affects_water="on", water_effect="Huminstoffe, senkt pH")
+        item = self.tank.hardscape.get()
+        self.assertTrue(item.affects_water)
+        self.assertEqual(item.water_effect, "Huminstoffe, senkt pH")
+
+    def test_a_described_effect_sets_the_flag_by_itself(self):
+        """Wer die Wirkung beschreibt, meint auch, dass sie eintritt."""
+        self.create(water_effect="hebt KH und Leitwert")
+        self.assertTrue(self.tank.hardscape.get().affects_water)
+
+    def test_it_is_marked_as_removed_instead_of_deleted(self):
+        self.create()
+        item = self.tank.hardscape.get()
+
+        self.client.post(
+            reverse("tanks:hardscape-remove", args=[self.tank.slug, item.pk]),
+            {"removed_on": self.today.isoformat(), "note": "gegen Steine getauscht"},
+        )
+
+        item.refresh_from_db()
+        self.assertEqual(item.removed_on, self.today)
+        self.assertFalse(item.is_active)
+        self.assertTrue(HardscapeItem.objects.exists())
+
+    def test_a_removal_before_the_arrival_is_rejected(self):
+        self.create(added_on=(self.today - timedelta(days=5)).isoformat())
+        item = self.tank.hardscape.get()
+        self.client.post(
+            reverse("tanks:hardscape-remove", args=[self.tank.slug, item.pk]),
+            {"removed_on": (self.today - timedelta(days=10)).isoformat(), "note": ""},
+        )
+        item.refresh_from_db()
+        self.assertIsNone(item.removed_on)
+
+    def test_there_is_no_delete_route_for_hardscape(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse("tanks:hardscape-delete", args=[self.tank.slug, 1])
+
+    def test_the_tab_lists_the_item_with_its_effect(self):
+        self.create(water_effect="Huminstoffe, senkt pH")
+        response = self.client.get(f"{self.tank.get_absolute_url()}?reiter=einrichtung")
+        self.assertContains(response, "Moorkienwurzel")
+        self.assertContains(response, "Huminstoffe, senkt pH")
+
+
+class SetupContextTests(TestCase):
+    """Die Einrichtung im Kontext der KI-Auswertung (#1227)."""
+
+    def setUp(self):
+        self.user = create_user()
+        self.tank = create_tank(self.user)
+        self.today = timezone.localdate()
+
+    def test_substrate_and_hardscape_reach_the_prompt(self):
+        SubstrateLayer.objects.create(
+            tank=self.tank,
+            kind=SubstrateLayer.Kind.NUTRIENT,
+            position=0,
+            depth_cm=Decimal("2.0"),
+            product="JBL AquaBasis",
+            added_on=self.today - timedelta(days=200),
+            depleted_on=self.today - timedelta(days=80),
+        )
+        SubstrateLayer.objects.create(
+            tank=self.tank, kind=SubstrateLayer.Kind.SAND, position=1, depth_cm=Decimal("4.0")
+        )
+        HardscapeItem.objects.create(
+            tank=self.tank,
+            kind=HardscapeItem.Kind.WOOD,
+            name="Moorkienwurzel",
+            quantity=1,
+            affects_water=True,
+            water_effect="Huminstoffe, senkt pH",
+        )
+
+        text = selectors.tank_facts(self.tank).as_text()
+
+        # Von unten nach oben, mit Standzeit — und die Wirkung des Hardscapes.
+        self.assertIn("2 cm Nährstoffdepot (JBL AquaBasis), erschöpft seit", text)
+        self.assertIn("4 cm Sand", text)
+        self.assertIn("Moorkienwurzel — Huminstoffe, senkt pH", text)
+
+    def test_removed_hardscape_stays_in_the_context_with_its_date(self):
+        HardscapeItem.objects.create(
+            tank=self.tank,
+            kind=HardscapeItem.Kind.WOOD,
+            name="Moorkienwurzel",
+            removed_on=self.today,
+        )
+        self.assertIn("(entfernt ", selectors.tank_facts(self.tank).as_text())
+
+    def test_without_a_setup_nothing_is_claimed(self):
+        text = selectors.tank_facts(self.tank).as_text()
+        self.assertNotIn("Bodengrund", text)
+        self.assertNotIn("Einrichtung", text)
 
 
 class CareTaskWriteTests(TestCase):
