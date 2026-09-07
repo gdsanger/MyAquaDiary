@@ -28,10 +28,12 @@ from tanks import derived, selectors
 from tanks.models import (
     CareTask,
     Event,
+    HardscapeItem,
     Measurement,
     Parameter,
     Planting,
     Stocking,
+    SubstrateLayer,
     Tank,
     TankDerivedTarget,
     TankParameterTarget,
@@ -51,6 +53,8 @@ MODELS = {
     "task": CareTask,
     "stocking": Stocking,
     "planting": Planting,
+    "substrate_layer": SubstrateLayer,
+    "hardscape_item": HardscapeItem,
     "catalog_animal": AnimalSpecies,
     "catalog_plant": PlantSpecies,
 }
@@ -144,6 +148,28 @@ def stocking(user, stocking_id: int):
 
 def plantings(user):
     return _owned("planting", user).select_related("tank", "species")
+
+
+def substrate_layers(user):
+    return _owned("substrate_layer", user).select_related("tank")
+
+
+def substrate_layer(user, layer_id: int):
+    found = substrate_layers(user).filter(pk=layer_id).first()
+    if found is None:
+        raise NotFound(NOT_FOUND)
+    return found
+
+
+def hardscape_items(user):
+    return _owned("hardscape_item", user).select_related("tank")
+
+
+def hardscape_item(user, item_id: int):
+    found = hardscape_items(user).filter(pk=item_id).first()
+    if found is None:
+        raise NotFound(NOT_FOUND)
+    return found
 
 
 def parameter_targets(user, tank_ids):

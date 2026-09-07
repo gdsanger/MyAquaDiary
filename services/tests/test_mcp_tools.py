@@ -873,6 +873,225 @@ class StockTests(ToolTestCase):
         self.assertEqual(foreign.quantity, 8)
 
 
+class SubstrateWriteTests(ToolTestCase):
+    """Bodengrund anlegen und fortschreiben — mit der heiklen Reihenfolge."""
+
+    def make_layer(self, tank=None, **extra):
+        extra.setdefault("kind", SubstrateLayer.Kind.GRAVEL)
+        return SubstrateLayer.objects.create(tank=tank or self.tank, **extra)
+
+    def positions(self):
+        """Die Schichten des Beckens von unten nach oben, als (Position, Art)."""
+        return [
+            (layer.position, layer.kind)
+            for layer in self.tank.substrate_layers.all()
+        ]
+
+    def test_a_layer_without_a_position_goes_on_top(self):
+        self.make_layer(position=0, kind=SubstrateLayer.Kind.NUTRIENT)
+        self.make_layer(position=1, kind=SubstrateLayer.Kind.SAND)
+
+        result = self.call("add_substrate_layer", tank_id=self.tank.pk, kind="gravel")
+
+        self.assertEqual(result["position"], 2)
+        self.assertEqual(
+            self.positions(), [(0, "nutrient"), (1, "sand"), (2, "gravel")]
+        )
+
+    def test_the_first_layer_lands_at_the_bottom(self):
+        result = self.call("add_substrate_layer", tank_id=self.tank.pk, kind="nutrient")
+
+        self.assertEqual(result["position"], 0)
+
+    def test_inserting_with_a_position_shifts_the_layers_above(self):
+        self.make_layer(position=0, kind=SubstrateLayer.Kind.NUTRIENT)
+        self.make_layer(position=1, kind=SubstrateLayer.Kind.SAND)
+
+        result = self.call(
+            "add_substrate_layer", tank_id=self.tank.pk, kind="lava", position=1
+        )
+
+        self.assertEqual(result["position"], 1)
+        # Der Sand über der eingeschobenen Lavaschicht rückt nach.
+        self.assertEqual(
+            self.positions(), [(0, "nutrient"), (1, "lava"), (2, "sand")]
+        )
+
+    def test_a_position_beyond_the_stack_still_lands_on_top(self):
+        self.make_layer(position=0, kind=SubstrateLayer.Kind.SAND)
+
+        result = self.call(
+            "add_substrate_layer", tank_id=self.tank.pk, kind="gravel", position=9
+        )
+
+        self.assertEqual(result["position"], 1)
+
+    def test_it_carries_the_details(self):
+        result = self.call(
+            "add_substrate_layer",
+            tank_id=self.tank.pk,
+            kind="nutrient",
+            product="JBL AquaBasis",
+            grain_size="1–2 mm",
+            depth_cm=2.5,
+            depleted_on=(timezone.localdate() + timedelta(days=400)).isoformat(),
+            note="unterste Schicht",
+        )
+
+        layer = SubstrateLayer.objects.get(pk=result["layer_id"])
+        self.assertEqual(layer.product, "JBL AquaBasis")
+        self.assertEqual(layer.grain_size, "1–2 mm")
+        self.assertEqual(layer.depth_cm, Decimal("2.5"))
+        self.assertEqual(layer.added_on, timezone.localdate())
+        self.assertIsNotNone(layer.depleted_on)
+
+    def test_an_unknown_kind_lists_the_possible_ones(self):
+        with self.assertRaises(ToolError) as caught:
+            self.call("add_substrate_layer", tank_id=self.tank.pk, kind="beton")
+
+        self.assertIn("gravel", str(caught.exception))
+
+    def test_it_cannot_write_into_a_foreign_tank(self):
+        with self.assertRaises(ToolError):
+            self.call("add_substrate_layer", tank_id=self.foreign_tank.pk, kind="sand")
+
+        self.assertFalse(SubstrateLayer.objects.exists())
+
+    def test_no_appointment_is_created(self):
+        self.call(
+            "add_substrate_layer",
+            tank_id=self.tank.pk,
+            kind="nutrient",
+            depleted_on=(timezone.localdate() + timedelta(days=10)).isoformat(),
+        )
+
+        self.assertFalse(CareTask.objects.exists())
+
+    def test_it_writes_a_layer_forward(self):
+        layer = self.make_layer(kind=SubstrateLayer.Kind.SAND, depth_cm=Decimal("4.0"))
+
+        result = self.call(
+            "update_substrate_layer",
+            layer_id=layer.pk,
+            depth_cm=6,
+            product="Dennerle Sansibar",
+            depleted_on=(timezone.localdate() + timedelta(days=100)).isoformat(),
+        )
+
+        layer.refresh_from_db()
+        self.assertEqual(layer.depth_cm, Decimal("6.0"))
+        self.assertEqual(layer.product, "Dennerle Sansibar")
+        self.assertIsNotNone(layer.depleted_on)
+        self.assertEqual(result["layer_id"], layer.pk)
+
+    def test_a_foreign_layer_is_not_found(self):
+        foreign = self.make_layer(tank=self.foreign_tank, depth_cm=Decimal("4.0"))
+
+        with self.assertRaises(ToolError):
+            self.call("update_substrate_layer", layer_id=foreign.pk, depth_cm=1)
+
+        foreign.refresh_from_db()
+        self.assertEqual(foreign.depth_cm, Decimal("4.0"))
+
+
+class HardscapeWriteTests(ToolTestCase):
+    """Hardscape anlegen und fortschreiben — der Anlass für #1246."""
+
+    def make_item(self, tank=None, **extra):
+        extra.setdefault("kind", HardscapeItem.Kind.WOOD)
+        extra.setdefault("name", "Moorkienwurzel")
+        return HardscapeItem.objects.create(tank=tank or self.tank, **extra)
+
+    def add(self, **arguments):
+        """``add_hardscape_item`` aufrufen — direkt, weil ``name`` mit dem ersten
+        Parameter der ``call``-Hilfe kollidieren würde."""
+        return call_tool(self.context, "add_hardscape_item", arguments)
+
+    def test_it_adds_the_alder_cones_from_the_ticket(self):
+        result = self.add(
+            tank_id=self.tank.pk,
+            kind="botanicals",
+            name="Erlenzapfen",
+            quantity=4,
+            added_on="2026-09-04",
+            affects_water=True,
+            water_effect="Huminstoffe, senkt pH",
+        )
+
+        item = HardscapeItem.objects.get(pk=result["hardscape_id"])
+        self.assertEqual(item.name, "Erlenzapfen")
+        self.assertEqual(item.quantity, 4)
+        self.assertEqual(item.added_on.isoformat(), "2026-09-04")
+        self.assertTrue(item.affects_water)
+        self.assertEqual(item.water_effect, "Huminstoffe, senkt pH")
+
+    def test_the_quantity_defaults_to_one(self):
+        result = self.add(tank_id=self.tank.pk, kind="wood", name="Wurzel")
+
+        self.assertEqual(result["quantity"], 1)
+
+    def test_a_name_is_required(self):
+        with self.assertRaises(ToolError):
+            self.add(tank_id=self.tank.pk, kind="wood")
+
+    def test_an_unknown_kind_lists_the_possible_ones(self):
+        with self.assertRaises(ToolError) as caught:
+            self.add(tank_id=self.tank.pk, kind="plastik", name="X")
+
+        self.assertIn("wood", str(caught.exception))
+
+    def test_it_cannot_write_into_a_foreign_tank(self):
+        with self.assertRaises(ToolError):
+            self.add(tank_id=self.foreign_tank.pk, kind="stone", name="X")
+
+        self.assertFalse(HardscapeItem.objects.exists())
+
+    def test_no_appointment_is_created(self):
+        self.add(
+            tank_id=self.tank.pk,
+            kind="botanicals",
+            name="Erlenzapfen",
+            added_on=timezone.localdate().isoformat(),
+        )
+
+        self.assertFalse(CareTask.objects.exists())
+
+    def test_update_sets_removed_on_instead_of_deleting(self):
+        item = self.make_item(kind=HardscapeItem.Kind.BOTANICALS, name="Erlenzapfen")
+        removed_on = timezone.localdate()
+
+        result = self.call(
+            "update_hardscape_item",
+            hardscape_id=item.pk,
+            removed_on=removed_on.isoformat(),
+        )
+
+        item.refresh_from_db()
+        self.assertEqual(item.removed_on, removed_on)
+        self.assertFalse(result["is_active"])
+        self.assertTrue(HardscapeItem.objects.filter(pk=item.pk).exists())
+
+    def test_update_can_switch_the_water_effect_off(self):
+        item = self.make_item(affects_water=True, water_effect="senkt pH")
+
+        result = self.call(
+            "update_hardscape_item", hardscape_id=item.pk, affects_water=False
+        )
+
+        item.refresh_from_db()
+        self.assertFalse(item.affects_water)
+        self.assertFalse(result["affects_water"])
+
+    def test_a_foreign_item_is_not_found(self):
+        foreign = self.make_item(tank=self.foreign_tank)
+
+        with self.assertRaises(ToolError):
+            self.call("update_hardscape_item", hardscape_id=foreign.pk, quantity=9)
+
+        foreign.refresh_from_db()
+        self.assertIsNone(foreign.removed_on)
+
+
 class EveryToolTests(ToolTestCase):
     """Jedes registrierte Werkzeug wird einmal mit gültigen Argumenten gerufen.
 
@@ -905,10 +1124,10 @@ class EveryToolTests(ToolTestCase):
         Event.objects.create(
             tank=self.tank, title="Wasserwechsel", occurred_at=timezone.now()
         )
-        SubstrateLayer.objects.create(
+        self.layer = SubstrateLayer.objects.create(
             tank=self.tank, kind=SubstrateLayer.Kind.SAND, position=0, depth_cm=Decimal("4.0")
         )
-        HardscapeItem.objects.create(
+        self.hardscape = HardscapeItem.objects.create(
             tank=self.tank, kind=HardscapeItem.Kind.WOOD, name="Moorkienwurzel", quantity=1
         )
 
@@ -932,6 +1151,17 @@ class EveryToolTests(ToolTestCase):
             "add_stocking": {"tank_id": self.tank.pk, "species_id": self.guppy_species.pk},
             "add_planting": {"tank_id": self.tank.pk, "species_id": self.moss_species.pk},
             "update_stocking": {"stocking_id": self.stocking.pk, "quantity": 9},
+            "add_substrate_layer": {"tank_id": self.tank.pk, "kind": "gravel"},
+            "update_substrate_layer": {"layer_id": self.layer.pk, "depth_cm": 5},
+            "add_hardscape_item": {
+                "tank_id": self.tank.pk,
+                "kind": "stone",
+                "name": "Drachenstein",
+            },
+            "update_hardscape_item": {
+                "hardscape_id": self.hardscape.pk,
+                "removed_on": timezone.localdate().isoformat(),
+            },
         }
 
     def test_every_registered_tool_is_covered_here(self):
@@ -968,6 +1198,14 @@ class EveryToolTests(ToolTestCase):
                 "species_id": self.moss_species.pk,
             },
             "update_stocking": {"stocking_id": 999_999, "quantity": 1},
+            "add_substrate_layer": {"tank_id": self.foreign_tank.pk, "kind": "gravel"},
+            "update_substrate_layer": {"layer_id": 999_999, "depth_cm": 5},
+            "add_hardscape_item": {
+                "tank_id": self.foreign_tank.pk,
+                "kind": "stone",
+                "name": "Drachenstein",
+            },
+            "update_hardscape_item": {"hardscape_id": 999_999, "quantity": 1},
         }
         for name, arguments in unreachable.items():
             with self.subTest(tool=name):
