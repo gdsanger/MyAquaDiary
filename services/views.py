@@ -34,6 +34,7 @@ from .eheim import (
 )
 from .forms import (
     CandidateForm,
+    DeviceCoverForm,
     DeviceDiscoveryForm,
     DeviceDocumentForm,
     DeviceForm,
@@ -561,6 +562,84 @@ def _section_delete(request, pk, section: Section, object_pk):
 def device_section(request, pk, section):
     """Abschnitt frisch ausliefern — das Ziel jedes „Abbrechen"."""
     return _render_section(request, _device(request, pk), SECTIONS[section])
+
+
+# --------------------------------------------------------------------------
+# Titelbild
+# --------------------------------------------------------------------------
+#
+# Ein eigener Abschnitt, obwohl er aussieht wie die anderen: hinter Technik,
+# Dokumenten und Links steht je eine Sammlung am Gerät, hinter dem Titelbild
+# ein Feld des Geräts selbst. Die Formulare der Abschnitte legen einen
+# Datensatz an — hier gibt es keinen.
+
+
+def _render_cover(request, device: Device, **extra):
+    """Wie :func:`_render_section`, nur für das Titelbild.
+
+    Mit HTMX kommt der Abschnitt zurück, ohne HTMX die ganze Detailseite mit
+    dem Formular an seinem Platz — ohne JavaScript soll das Titelbild ebenso
+    zu wechseln sein.
+    """
+    context = {"open_section": "cover", **extra}
+    if getattr(request, "htmx", False):
+        return render(request, "services/_device_cover.html", {"device": device, **context})
+    return render(
+        request, "services/device_detail.html", {**_detail_context(request, device), **context}
+    )
+
+
+@login_required
+def device_cover(request, pk):
+    """Titelbild-Abschnitt frisch ausliefern — das Ziel jedes „Abbrechen"."""
+    return _render_cover(request, _device(request, pk))
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def device_cover_edit(request, pk):
+    """Titelbild hochladen oder ersetzen."""
+    device = _device(request, pk)
+    form = DeviceCoverForm(request.POST or None, request.FILES or None)
+
+    if request.method == "POST" and form.is_valid():
+        device.set_cover(form.cleaned_data["cover_image"])
+        if not getattr(request, "htmx", False):
+            messages.success(request, "Titelbild gespeichert.")
+        return _render_cover(request, device)
+
+    return _render_cover(
+        request,
+        device,
+        section_form=form,
+        section_action=reverse("services:device_cover_edit", args=[device.pk]),
+        section_title="Titelbild ersetzen" if device.has_cover else "Titelbild hochladen",
+        section_submit="Speichern",
+        section_multipart=True,
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def device_cover_delete(request, pk):
+    """Ein Schritt vor dem Entfernen: ``GET`` fragt, ``POST`` führt aus."""
+    device = _device(request, pk)
+
+    if request.method == "POST":
+        device.clear_cover()
+        if not getattr(request, "htmx", False):
+            messages.success(request, "Titelbild entfernt.")
+        return _render_cover(request, device)
+
+    return _render_cover(
+        request,
+        device,
+        section_action=reverse("services:device_cover_delete", args=[device.pk]),
+        section_title="Titelbild entfernen",
+        section_question="Soll das Titelbild samt seiner Varianten gelöscht werden?",
+        section_subject=device.name,
+        section_submit="Entfernen",
+    )
 
 
 @login_required

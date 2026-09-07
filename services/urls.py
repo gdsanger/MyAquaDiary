@@ -15,6 +15,19 @@ urlpatterns = [
     path("geraete/<int:pk>/bearbeiten/", views.device_edit, name="device_edit"),
     path("geraete/<int:pk>/zugang/", views.device_credentials, name="device_credentials"),
     path("geraete/<int:pk>/steuern/<str:action>/", views.device_control, name="device_control"),
+    # Titelbild — ein Abschnitt der Detailseite wie die folgenden, nur ohne
+    # eigenen Datensatz: es ist ein Feld des Geräts.
+    path("geraete/<int:pk>/titelbild/", views.device_cover, name="device_cover"),
+    path(
+        "geraete/<int:pk>/titelbild/aendern/",
+        views.device_cover_edit,
+        name="device_cover_edit",
+    ),
+    path(
+        "geraete/<int:pk>/titelbild/entfernen/",
+        views.device_cover_delete,
+        name="device_cover_delete",
+    ),
     # Technische Daten, Dokumente und Links — Abschnitte der Detailseite.
     path(
         "geraete/<int:pk>/technik/",
