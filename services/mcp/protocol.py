@@ -27,9 +27,11 @@ logger = logging.getLogger(__name__)
 
 #: Protokollstand, den dieser Server spricht. Fragt ein Client eine andere
 #: bekannte Fassung an, wird sie bestätigt — die hier benutzten Methoden sind
-#: in allen dreien gleich.
-PROTOCOL_VERSION = "2024-11-05"
-SUPPORTED_VERSIONS = ("2024-11-05", "2025-03-26", "2025-06-18")
+#: in allen gleich. Vorgegeben wird eine Revision, die Streamable HTTP kennt:
+#: der alte HTTP+SSE-Transport stammt aus 2024-11-05 und ist seit 2025-03-26
+#: abgelöst.
+PROTOCOL_VERSION = "2025-06-18"
+SUPPORTED_VERSIONS = ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
 
 SERVER_NAME = "myaquadiary"
 SERVER_VERSION = "1.0"

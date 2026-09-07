@@ -28,6 +28,11 @@ from services.eheim import (
     mode_label,
     normalize_mac,
 )
+# Präfix und Erkennungslänge des MCP-Tokens stehen in services.masking: den
+# Log-Filter lädt Django, bevor es die Modelle kennt — das Modul darf deshalb
+# nichts von hier hereinziehen, und die Beschreibung des Token-Formats gibt es
+# nur einmal.
+from services.masking import MCP_TOKEN_HINT_CHARS, MCP_TOKEN_PREFIX  # noqa: F401
 from services.shelly import (
     KIND_SHELLY_PLUG,
     generation_label,
@@ -1012,17 +1017,24 @@ class AISuggestion(models.Model):
 # MCP-Server
 # --------------------------------------------------------------------------
 
-#: Erkennungszeichen am Anfang jedes Tokens. Macht einen versehentlich in einen
-#: Chat kopierten Token als Zugangsdatum erkennbar — und für eine spätere
-#: Suche nach geleakten Tokens greifbar.
-MCP_TOKEN_PREFIX = "mad_"
 #: Zufallsanteil in Bytes. 32 Byte = 256 Bit; ein Rateversuch ist damit
 #: aussichtslos, weshalb der Token als schneller SHA-256 gespeichert werden darf
 #: (siehe :meth:`MCPToken.hash_key`).
 MCP_TOKEN_BYTES = 32
-#: So viele Zeichen des Zufallsanteils bleiben im Klartext stehen, damit der
-#: Benutzer in der Liste erkennt, welcher Token in welchem Client steckt.
-MCP_TOKEN_HINT_CHARS = 6
+#: Vorbelegte Laufzeit, falls die Einstellung fehlt.
+MCP_TOKEN_DEFAULT_DAYS = 90
+
+
+def default_token_expiry():
+    """Vorbelegtes Ablaufdatum eines neuen Zugangs.
+
+    Der Token darf in der Adresse des Clients stehen und ist damit schwerer
+    geheim zu halten als einer in einem Header. Ein Ablauf, um den sich niemand
+    kümmern muss, ist die billigste Gegenmaßnahme — deshalb ist das Feld
+    vorbelegt und nicht leer.
+    """
+    days = int(getattr(settings, "MCP_TOKEN_DEFAULT_DAYS", MCP_TOKEN_DEFAULT_DAYS))
+    return timezone.localdate() + timedelta(days=days)
 
 
 class MCPTokenQuerySet(models.QuerySet):

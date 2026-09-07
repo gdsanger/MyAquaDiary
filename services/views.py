@@ -46,6 +46,7 @@ from .forms import (
     ShellyDeviceForm,
     controls_for,
 )
+from .mcp.auth import TOKEN_PARAM
 from .models import AISuggestion, Device, MCPToken
 from .shelly import ShellyClient, ShellyError, ShellyService
 
@@ -930,11 +931,15 @@ def mcp_token_list(request):
     """
     form = MCPTokenForm(request.POST or None)
     issued_key = ""
+    issued_token = None
     if request.method == "POST" and form.is_valid():
-        token, issued_key = form.issue(request.user)
-        messages.success(request, f"Zugang „{token.name}“ angelegt.")
+        issued_token, issued_key = form.issue(request.user)
+        messages.success(request, f"Zugang „{issued_token.name}“ angelegt.")
         form = MCPTokenForm()
 
+    # Nicht SITE_URL: der MCP-Server ist ein eigener Dienst hinter einer
+    # eigenen Adresse.
+    endpoint_url = f"{settings.MCP_PUBLIC_URL.rstrip('/')}/mcp/"
     return render(
         request,
         "services/mcp_token_list.html",
@@ -942,9 +947,11 @@ def mcp_token_list(request):
             "form": form,
             "tokens": request.user.mcp_tokens.all(),
             "issued_key": issued_key,
-            # Nicht SITE_URL: der MCP-Server ist ein eigener Dienst hinter einer
-            # eigenen Adresse.
-            "sse_url": f"{settings.MCP_PUBLIC_URL.rstrip('/')}/mcp/sse/",
+            "issued_token": issued_token,
+            "endpoint_url": endpoint_url,
+            # Die fertige Adresse: mehr braucht ein Client nicht, und genau
+            # deshalb ist sie so schutzbedürftig wie ein Passwort.
+            "client_url": f"{endpoint_url}?{TOKEN_PARAM}={issued_key}" if issued_key else "",
         },
     )
 

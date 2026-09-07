@@ -19,6 +19,7 @@ from .models import (
     DeviceSpec,
     MailConfig,
     MCPToken,
+    default_token_expiry,
 )
 from .shelly import GEN2_USERNAME
 
@@ -481,6 +482,11 @@ class MCPTokenForm(BootstrapMixin, forms.Form):
     Schreibrecht ist bewusst nicht vorbelegt. Ein Zugang, der nur auswerten
     soll, braucht keines, und ein Haken, den man setzen muss, wird bewusster
     gesetzt als einer, den man wegnehmen müsste.
+
+    Das Ablaufdatum dagegen **ist** vorbelegt und lässt sich nicht leeren: Der
+    Token steht in der Adresse des Clients und ist damit schwerer geheim zu
+    halten als einer in einem Header. Ein Zugang, an dessen Ende niemand denken
+    muss, ist die einfachste Gegenmaßnahme.
     """
 
     name = forms.CharField(
@@ -496,10 +502,17 @@ class MCPTokenForm(BootstrapMixin, forms.Form):
     )
     expires_at = forms.DateField(
         label="Gültig bis",
-        required=False,
-        widget=forms.DateInput(attrs={"type": "date"}),
-        help_text="Leer lassen für einen unbefristeten Zugang.",
+        # ``format`` ist hier nicht kosmetisch: ein ``<input type="date">``
+        # versteht ausschließlich ISO, die deutsche Lokalisierung würde den
+        # vorbelegten Wert sonst verschlucken.
+        widget=forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d"),
+        help_text="Danach ist der Zugang von selbst wertlos. Ein neuer ist "
+        "schnell angelegt — lieber kurz als unbegrenzt.",
     )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["expires_at"].initial = default_token_expiry()
 
     def clean_expires_at(self):
         """Das Ablaufdatum gilt bis zum Ende des gewählten Tages."""

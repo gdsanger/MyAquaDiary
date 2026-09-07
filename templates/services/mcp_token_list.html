@@ -17,26 +17,26 @@
 {% if issued_key %}
   <div class="card border-success mb-4">
     <div class="card-body">
-      <h2 class="h5 card-title">Der Token — nur jetzt sichtbar</h2>
+      <h2 class="h5 card-title">Die Adresse — nur jetzt sichtbar</h2>
       <p class="card-text">
-        Kopiere ihn in die Konfiguration deines Clients. Nach dem Verlassen
-        dieser Seite lässt er sich nicht wieder anzeigen; ist er verloren,
-        widerrufst du ihn und legst einen neuen an.
+        Trage sie in deinem Client als MCP-Server ein. Mehr braucht er nicht:
+        keine Zusatzsoftware, kein Node.js. Nach dem Verlassen dieser Seite
+        lässt sie sich nicht wieder anzeigen; ist sie verloren, widerrufst du
+        den Zugang und legst einen neuen an.
       </p>
-      <pre class="bg-body-tertiary border rounded p-3 mb-3"><code>{{ issued_key }}</code></pre>
-      <h3 class="h6">Beispiel für Claude Desktop</h3>
-      <pre class="bg-body-tertiary border rounded p-3 mb-0 small"><code>{
-  "mcpServers": {
-    "myaquadiary": {
-      "command": "npx",
-      "args": [
-        "-y", "mcp-remote",
-        "{{ sse_url }}",
-        "--header", "Authorization: Bearer {{ issued_key }}"
-      ]
-    }
-  }
-}</code></pre>
+      <pre class="bg-body-tertiary border rounded p-3 mb-3"><code>{{ client_url }}</code></pre>
+      <div class="alert alert-warning mb-3">
+        <strong>Diese Adresse ist ein Passwort.</strong> Der Zugang steckt
+        darin — wer sie hat, liest dein Tagebuch{% if issued_token.allow_write %} und schreibt hinein{% endif %}.
+        Nicht in Chats, Tickets oder Screenshots weitergeben und nicht in einem
+        Browser öffnen, dessen Verlauf jemand anders sieht.
+      </div>
+      <p class="card-text small text-body-secondary mb-0">
+        Kann dein Client eigene Kopfzeilen setzen, ist das der bessere Weg:
+        <code>{{ endpoint_url }}</code> mit
+        <code>Authorization: Bearer {{ issued_key }}</code>. Dann steht der
+        Token in keinem Zugriffsprotokoll.
+      </p>
     </div>
   </div>
 {% endif %}
@@ -116,8 +116,10 @@
       <div class="card-body">
         <h2 class="h6 card-title">Endpunkt</h2>
         <p class="card-text small mb-0">
-          <code>{{ sse_url }}</code><br>
-          Anmeldung über den Kopf <code>Authorization: Bearer &lt;Token&gt;</code>.
+          <code>{{ endpoint_url }}</code><br>
+          Anmeldung über <code>?token=&lt;Token&gt;</code> in der Adresse oder
+          über den Kopf <code>Authorization: Bearer &lt;Token&gt;</code>.
+          Der Kopf ist der sicherere Weg — die Adresse der bequemere.
         </p>
       </div>
     </div>
