@@ -70,6 +70,43 @@ Wo Historie dranhängt, wird nicht gelöscht:
 Löschen bleibt der Fehleingabe vorbehalten und verlangt immer einen
 Zwischenschritt; es gibt keinen Link, der beim Klick löscht.
 
+### CO₂: gerechnet, nicht gemessen
+
+CO₂ lässt sich mit einem Tröpfchentest nicht sinnvoll bestimmen, wohl aber aus
+zwei Werten ausrechnen, die ohnehin erfasst werden:
+
+```
+CO₂ [mg/l] = 3 × KH [°dH] × 10^(7 − pH)
+```
+
+Gerechnet wird bei jeder Anzeige, **gespeichert wird nichts**. Wird ein KH-
+oder pH-Wert nachträglich korrigiert, zieht CO₂ mit; ein abgelegter Wert
+bliebe stehen und sähe dabei aus wie eine Messung. Aus demselben Grund gibt es
+keinen `Parameter`-Eintrag mit dem Schlüssel `co2` — sonst stünde die Größe im
+Erfassungsformular und ließe sich von Hand eintippen. Beschrieben ist sie in
+`tanks/derived.py`.
+
+**Welche KH gehört zu welchem pH?** Das Modell speichert einen Wert je Zeile;
+einen Datensatz, an dem beide gemeinsam hängen, gibt es nicht. Nur über den
+gleichen Zeitstempel zu paaren bricht, sobald jemand erst die KH tropft und
+zehn Minuten später den pH abliest — und genau so wird gemessen. Gepaart wird
+deshalb über zeitliche Nähe: zu jedem KH-Wert der nächstgelegene pH-Wert
+innerhalb von `CO2_PAIR_WINDOW_HOURS` (Default 6), und umgekehrt. Der
+Zeitstempel des Ergebnisses ist der spätere der beiden — erst dann ist das
+Paar vollständig.
+
+**Ohne Partner keine Zahl.** Liegt im Fenster kein Gegenstück, wird nichts
+angezeigt; auf den KH-Wert von vorletzter Woche wird nicht zurückgegriffen.
+Ein CO₂ aus weit auseinanderliegenden Messungen wäre schlimmer als gar keines,
+weil es echt aussieht.
+
+Angezeigt wird es im Reiter *Messwerte*, in *Aktuelle Messwerte* und als
+eigene Kurve im Verlaufsdiagramm — jeweils als „berechnet" gekennzeichnet und
+ohne Bearbeiten und Löschen. Der Zielbereich ist wie bei den gemessenen Größen
+je Becken hinterlegbar (`tanks.TankDerivedTarget`), vorbelegt mit 15–25 mg/l.
+Diese Vorbelegung steht im Code und nicht in der Datenbank; ein `Parameter`,
+an dem sie hängen könnte, existiert ja nicht.
+
 ### Beobachtungen und Fotos am Ereignis
 
 Dass die Cryptocoryne neue Blätter schiebt, ist ein **Ereignis der Kategorie
@@ -791,8 +828,8 @@ Clients schicken keinen, und gegen die richtet sich die Prüfung nicht.
 |---|---|
 | `list_tanks` | Becken des Nutzers mit Stammdaten |
 | `get_tank` | Detail inkl. Zielbereichen, Besatz, Bepflanzung, Einrichtung (Bodengrund, Hardscape) |
-| `list_measurements` | Messreihen, Zeitraum- und Parameterfilter |
-| `get_measurement` | Einzelne Messreihe inkl. berechnetem CO2 und Zielabgleich |
+| `list_measurements` | Messwerte, Zeitraum- und Parameterfilter; dazu unter `derived` das aus KH und pH gerechnete CO₂ |
+| `get_measurement` | Einzelner Messwert mit Zielabgleich; bei KH und pH das CO₂, an dem er beteiligt ist |
 | `list_events` | Ereignisse, Kategorie- und Zeitraumfilter |
 | `list_due_schedules` | Fällige und anstehende Termine |
 | `search_catalog` | Pflanzen- und Tierkatalog durchsuchen |
