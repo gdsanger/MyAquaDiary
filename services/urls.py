@@ -15,6 +15,67 @@ urlpatterns = [
     path("geraete/<int:pk>/bearbeiten/", views.device_edit, name="device_edit"),
     path("geraete/<int:pk>/zugang/", views.device_credentials, name="device_credentials"),
     path("geraete/<int:pk>/steuern/<str:action>/", views.device_control, name="device_control"),
+    # Technische Daten, Dokumente und Links — Abschnitte der Detailseite.
+    path(
+        "geraete/<int:pk>/technik/",
+        views.device_section,
+        {"section": "specs"},
+        name="device_specs",
+    ),
+    path("geraete/<int:pk>/technik/neu/", views.device_spec_create, name="device_spec_create"),
+    path(
+        "geraete/<int:pk>/technik/<int:spec_pk>/bearbeiten/",
+        views.device_spec_update,
+        name="device_spec_update",
+    ),
+    path(
+        "geraete/<int:pk>/technik/<int:spec_pk>/loeschen/",
+        views.device_spec_delete,
+        name="device_spec_delete",
+    ),
+    path(
+        "geraete/<int:pk>/dokumente/",
+        views.device_section,
+        {"section": "documents"},
+        name="device_documents",
+    ),
+    path(
+        "geraete/<int:pk>/dokumente/neu/",
+        views.device_document_create,
+        name="device_document_create",
+    ),
+    path(
+        "geraete/<int:pk>/dokumente/<int:document_pk>/",
+        views.device_document,
+        name="device_document",
+    ),
+    path(
+        "geraete/<int:pk>/dokumente/<int:document_pk>/bearbeiten/",
+        views.device_document_update,
+        name="device_document_update",
+    ),
+    path(
+        "geraete/<int:pk>/dokumente/<int:document_pk>/loeschen/",
+        views.device_document_delete,
+        name="device_document_delete",
+    ),
+    path(
+        "geraete/<int:pk>/links/",
+        views.device_section,
+        {"section": "links"},
+        name="device_links",
+    ),
+    path("geraete/<int:pk>/links/neu/", views.device_link_create, name="device_link_create"),
+    path(
+        "geraete/<int:pk>/links/<int:link_pk>/bearbeiten/",
+        views.device_link_update,
+        name="device_link_update",
+    ),
+    path(
+        "geraete/<int:pk>/links/<int:link_pk>/loeschen/",
+        views.device_link_delete,
+        name="device_link_delete",
+    ),
     path("ki/bestimmen/", views.ai_identify, name="ai_identify"),
     path("ki/vorschlaege/", views.ai_suggestion_list, name="ai_suggestion_list"),
     path("ki/vorschlaege/uebernehmen/", views.ai_suggestion_create, name="ai_suggestion_create"),

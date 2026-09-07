@@ -112,8 +112,8 @@ def _warning(status, title, detail, tank):
 def warnings(user, limit=None):
     """Alle Auffälligkeiten über alle aktiven Becken, kritischste zuerst.
 
-    Vier Quellen: Messwerte außerhalb des Zielbereichs, Gerätefehler, fällige
-    Wartung und unterschrittene Gruppengrößen.
+    Fünf Quellen: Messwerte außerhalb des Zielbereichs, Gerätefehler, fällige
+    Wartung, ablaufende Garantie und unterschrittene Gruppengrößen.
 
     Der Gerätestatus wird gelesen, wie er am Gerät steht — bei angebundenen
     Geräten hat ihn die letzte Abfrage geschrieben (ein Eheim-Fehlercode wird
@@ -157,6 +157,18 @@ def warnings(user, limit=None):
                     maintenance,
                     f"Wartung fällig: {device.name}",
                     f"{device.get_kind_display()} · fällig am {due:%d.%m.%Y}",
+                    device.tank,
+                )
+            )
+        # Eine Garantie meldet sich nicht von selbst. Endet sie demnächst, ist
+        # das der letzte Zeitpunkt, an dem eine Auffälligkeit am Gerät noch den
+        # Hersteller etwas angeht statt den eigenen Geldbeutel.
+        if device.warranty_status(today) == Status.WARN:
+            items.append(
+                _warning(
+                    Status.WARN,
+                    f"Garantie läuft ab: {device.name}",
+                    f"{device.get_kind_display()} · endet am {device.warranty_until:%d.%m.%Y}",
                     device.tank,
                 )
             )

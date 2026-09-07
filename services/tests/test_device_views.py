@@ -34,6 +34,12 @@ class AccessTests(DeviceViewTestCase):
             reverse("services:device_edit", args=[self.device.pk]),
             reverse("services:device_credentials", args=[self.device.pk]),
             reverse("services:device_control", args=[self.device.pk, "on"]),
+            reverse("services:device_specs", args=[self.device.pk]),
+            reverse("services:device_spec_create", args=[self.device.pk]),
+            reverse("services:device_documents", args=[self.device.pk]),
+            reverse("services:device_document_create", args=[self.device.pk]),
+            reverse("services:device_links", args=[self.device.pk]),
+            reverse("services:device_link_create", args=[self.device.pk]),
         ]
 
     def test_every_page_requires_login(self):

@@ -81,40 +81,30 @@
           </h2>
           {% include "services/_line_chart.html" %}
         {% else %}
-          <h2 class="h5 card-title">Gerät</h2>
-          <dl class="row mb-0">
-            {% if device.manufacturer or device.model_name %}
-              <dt class="col-5 fw-normal text-body-secondary">Hersteller</dt>
-              <dd class="col-7">{{ device.manufacturer }} {{ device.model_name }}</dd>
-            {% endif %}
-            {% if device.installed_on %}
-              <dt class="col-5 fw-normal text-body-secondary">In Betrieb seit</dt>
-              <dd class="col-7">{{ device.installed_on|date:"d.m.Y" }}</dd>
-            {% endif %}
-            {% if device.last_maintenance_on %}
-              <dt class="col-5 fw-normal text-body-secondary">Letzte Wartung</dt>
-              <dd class="col-7">{{ device.last_maintenance_on|date:"d.m.Y" }}</dd>
-            {% endif %}
-            {% if device.maintenance_due_on %}
-              <dt class="col-5 fw-normal text-body-secondary">Nächste Wartung</dt>
-              <dd class="col-7">
-                <span class="mad-status mad-status--{{ device.maintenance_status_value }}">
-                  {{ device.maintenance_due_on|date:"d.m.Y" }}
-                </span>
-              </dd>
-            {% endif %}
-          </dl>
+          <h2 class="h5 card-title">Stammdaten</h2>
+          {% include "services/_device_facts.html" %}
         {% endif %}
       </div>
     </div>
   </div>
 </div>
 
-{% if device.is_shelly %}
+{% if device.is_connected %}
+  <div class="card mt-3">
+    <div class="card-body">
+      <h2 class="h5 card-title">Stammdaten</h2>
+      {% include "services/_device_facts.html" %}
+    </div>
+  </div>
+{% endif %}
+
+{% if device.is_metered or buckets %}
   <div class="card mt-3">
     <div class="card-body">
       <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-        <h2 class="h5 card-title mb-0">Stromverbrauch</h2>
+        <h2 class="h5 card-title mb-0">
+          Stromverbrauch{% if energy_estimated %} <span class="badge text-bg-secondary align-middle">geschätzt</span>{% endif %}
+        </h2>
         <div class="btn-group" role="group" aria-label="Zeitraum wählen">
           {% for value, label in periods %}
             <a class="btn btn-sm {% if value == period %}btn-primary{% else %}btn-outline-secondary{% endif %}"
@@ -146,7 +136,12 @@
         </div>
       {% endif %}
       <p class="small text-body-secondary mt-2 mb-0">
-        Der Verbrauch ist die Differenz der Zählerstände;
+        {% if energy_estimated %}
+          Hochgerechnet aus Nennleistung ({{ device.power_watts }} W) und Laufzeit
+          ({{ device.runtime_hours_per_day }} h/Tag) — gemessen wird an diesem Gerät nichts.
+        {% else %}
+          Der Verbrauch ist die Differenz der Zählerstände;
+        {% endif %}
         <a href="{% url 'services:energy_overview' %}">im Vergleich mit den anderen Becken</a>
         wird daraus die Antwort auf die Frage, was welches Becken kostet.
       </p>
@@ -248,4 +243,8 @@
     </div>
   </div>
 </div>
+
+{% include "services/_device_specs.html" %}
+{% include "services/_device_documents.html" %}
+{% include "services/_device_links.html" %}
 {% endblock %}

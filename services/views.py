@@ -5,14 +5,17 @@ nachgeladen (:func:`device_status`). Ein Gerät, das nicht antwortet, kostet
 damit nur einen Platzhalter im Layout und blockiert keine Seite.
 """
 
+import mimetypes
+from dataclasses import dataclass
 from functools import wraps
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
-from django.http import Http404
+from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_http_methods
 
 from tanks.models import Tank
@@ -32,8 +35,11 @@ from .eheim import (
 from .forms import (
     CandidateForm,
     DeviceDiscoveryForm,
+    DeviceDocumentForm,
     DeviceForm,
+    DeviceLinkForm,
     DevicePasswordForm,
+    DeviceSpecForm,
     IdentifyForm,
     ManualDeviceForm,
     MCPTokenForm,
@@ -126,31 +132,39 @@ def device_detail(request, pk):
     eine Steckdose Leistung und Verbrauch.
     """
     device = _device(request, pk)
+    return render(request, "services/device_detail.html", _detail_context(request, device))
+
+
+def _detail_context(request, device: Device) -> dict:
+    """Alles, was die Gerätedetailseite zeigt.
+
+    Steht als eigene Funktion, weil die Abschnitte für technische Daten,
+    Dokumente und Links dieselbe Seite ohne HTMX noch einmal vollständig
+    rendern müssen — mit ihrem Formular darin.
+    """
     readings = list(device.readings.all()[:CHART_READINGS]) if device.is_connected else []
     period = energy.normalize_period(request.GET.get("zeitraum"))
-    buckets = energy.device_buckets(device, period) if device.is_shelly else []
-    return render(
-        request,
-        "services/device_detail.html",
-        {
-            "device": device,
-            "chart": power_chart(readings) if device.is_shelly else rpm_chart(readings),
-            "readings": readings[:20],
-            "events": device.events.all()[:EVENT_ROWS],
-            "controls": [
-                (action, label) for action, (_form, label) in controls_for(device).items()
-            ],
-            "firmware_hint": FIRMWARE_HINT if _firmware_outdated(device) else "",
-            "period": period,
-            "periods": energy.PERIODS,
-            "buckets": buckets,
-            "energy_chart": bar_chart(
-                [(bucket.label, bucket.kwh) for bucket in buckets],
-                description="Stromverbrauch je Zeitraum in Kilowattstunden",
-            ),
-            "price_per_kwh": energy.price_per_kwh(),
-        },
-    )
+    buckets = energy.device_buckets(device, period)
+    return {
+        "device": device,
+        "chart": power_chart(readings) if device.is_shelly else rpm_chart(readings),
+        "readings": readings[:20],
+        "events": device.events.all()[:EVENT_ROWS],
+        "controls": [(action, label) for action, (_form, label) in controls_for(device).items()],
+        "firmware_hint": FIRMWARE_HINT if _firmware_outdated(device) else "",
+        "period": period,
+        "periods": energy.PERIODS,
+        "buckets": buckets,
+        "energy_estimated": not device.is_metered,
+        "energy_chart": bar_chart(
+            [(bucket.label, bucket.kwh) for bucket in buckets],
+            description="Stromverbrauch je Zeitraum in Kilowattstunden",
+        ),
+        "price_per_kwh": energy.price_per_kwh(),
+        "specs": device.specs.all(),
+        "documents": device.documents.all(),
+        "links": device.links.all(),
+    }
 
 
 def _firmware_outdated(device: Device) -> bool:
@@ -396,6 +410,251 @@ def device_credentials(request, pk):
 
 
 # --------------------------------------------------------------------------
+# Technische Daten, Dokumente und Links
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Section:
+    """Ein nachladbarer Abschnitt der Gerätedetailseite.
+
+    Die drei Abschnitte unterscheiden sich in Modell, Formular und Beschriftung
+    — im Ablauf nicht. Was sie gemeinsam haben, steht deshalb einmal in
+    :func:`_section_form` und :func:`_section_delete`; was sie unterscheidet,
+    steht hier.
+    """
+
+    #: Zugleich der ``related_name`` am Gerät und der Schlüssel im Kontext.
+    key: str
+    template: str
+    form_class: type
+    create_title: str
+    update_title: str
+    delete_title: str
+    delete_question: str
+    create_url_name: str
+    update_url_name: str
+    delete_url_name: str
+    multipart: bool = False
+
+
+SECTIONS = {
+    "specs": Section(
+        key="specs",
+        template="services/_device_specs.html",
+        form_class=DeviceSpecForm,
+        create_title="Technische Angabe",
+        update_title="Angabe bearbeiten",
+        delete_title="Angabe löschen",
+        delete_question="Soll diese Angabe entfernt werden?",
+        create_url_name="services:device_spec_create",
+        update_url_name="services:device_spec_update",
+        delete_url_name="services:device_spec_delete",
+    ),
+    "documents": Section(
+        key="documents",
+        template="services/_device_documents.html",
+        form_class=DeviceDocumentForm,
+        create_title="Dokument hinzufügen",
+        update_title="Dokument bearbeiten",
+        delete_title="Dokument löschen",
+        delete_question="Soll dieses Dokument samt Datei gelöscht werden?",
+        create_url_name="services:device_document_create",
+        update_url_name="services:device_document_update",
+        delete_url_name="services:device_document_delete",
+        multipart=True,
+    ),
+    "links": Section(
+        key="links",
+        template="services/_device_links.html",
+        form_class=DeviceLinkForm,
+        create_title="Link hinzufügen",
+        update_title="Link bearbeiten",
+        delete_title="Link löschen",
+        delete_question="Soll dieser Link entfernt werden?",
+        create_url_name="services:device_link_create",
+        update_url_name="services:device_link_update",
+        delete_url_name="services:device_link_delete",
+    ),
+}
+
+
+def _render_section(request, device: Device, section: Section, **extra):
+    """Abschnitt zurückgeben — mit HTMX das Fragment, ohne HTMX die ganze Seite.
+
+    Ohne JavaScript ist jede Schaltfläche ein Link und jedes Formular ein
+    regulärer POST; dann kommt die vollständige Detailseite zurück, mit dem
+    Formular an seinem Platz im Abschnitt. Das Markup dafür gibt es nur einmal.
+    """
+    context = {"open_section": section.key, **extra}
+    if getattr(request, "htmx", False):
+        entries = getattr(device, section.key).all()
+        return render(
+            request, section.template, {"device": device, section.key: entries, **context}
+        )
+    return render(
+        request, "services/device_detail.html", {**_detail_context(request, device), **context}
+    )
+
+
+def _section_object(device: Device, section: Section, object_pk):
+    """Datensatz eines Abschnitts — nur am eigenen Gerät, sonst 404."""
+    return get_object_or_404(getattr(device, section.key), pk=object_pk)
+
+
+def _section_form(request, pk, section: Section, object_pk=None):
+    """Anlegen und Bearbeiten sind derselbe Ablauf; es gibt nur einmal ein Objekt."""
+    device = _device(request, pk)
+    instance = _section_object(device, section, object_pk) if object_pk else None
+    form = section.form_class(request.POST or None, request.FILES or None, instance=instance)
+
+    if request.method == "POST" and form.is_valid():
+        entry = form.save(commit=False)
+        entry.device = device
+        entry.save()
+        if not getattr(request, "htmx", False):
+            messages.success(request, "Gespeichert." if instance else "Angelegt.")
+        return _render_section(request, device, section)
+
+    action = (
+        reverse(section.update_url_name, args=[device.pk, object_pk])
+        if object_pk
+        else reverse(section.create_url_name, args=[device.pk])
+    )
+    return _render_section(
+        request,
+        device,
+        section,
+        section_form=form,
+        section_action=action,
+        section_title=section.update_title if object_pk else section.create_title,
+        section_submit="Speichern",
+        section_multipart=section.multipart,
+    )
+
+
+def _section_delete(request, pk, section: Section, object_pk):
+    """Ein Schritt vor dem Löschen: ``GET`` fragt, ``POST`` führt aus."""
+    device = _device(request, pk)
+    entry = _section_object(device, section, object_pk)
+
+    if request.method == "POST":
+        entry.delete()
+        if not getattr(request, "htmx", False):
+            messages.success(request, "Gelöscht.")
+        return _render_section(request, device, section)
+
+    return _render_section(
+        request,
+        device,
+        section,
+        section_action=reverse(section.delete_url_name, args=[device.pk, object_pk]),
+        section_title=section.delete_title,
+        section_question=section.delete_question,
+        section_subject=str(entry),
+        section_submit="Löschen",
+    )
+
+
+@login_required
+def device_section(request, pk, section):
+    """Abschnitt frisch ausliefern — das Ziel jedes „Abbrechen"."""
+    return _render_section(request, _device(request, pk), SECTIONS[section])
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def device_spec_create(request, pk):
+    return _section_form(request, pk, SECTIONS["specs"])
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def device_spec_update(request, pk, spec_pk):
+    return _section_form(request, pk, SECTIONS["specs"], spec_pk)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def device_spec_delete(request, pk, spec_pk):
+    return _section_delete(request, pk, SECTIONS["specs"], spec_pk)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def device_document_create(request, pk):
+    return _section_form(request, pk, SECTIONS["documents"])
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def device_document_update(request, pk, document_pk):
+    return _section_form(request, pk, SECTIONS["documents"], document_pk)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def device_document_delete(request, pk, document_pk):
+    return _section_delete(request, pk, SECTIONS["documents"], document_pk)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def device_link_create(request, pk):
+    return _section_form(request, pk, SECTIONS["links"])
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def device_link_update(request, pk, link_pk):
+    return _section_form(request, pk, SECTIONS["links"], link_pk)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def device_link_delete(request, pk, link_pk):
+    return _section_delete(request, pk, SECTIONS["links"], link_pk)
+
+
+@login_required
+def device_document(request, pk, document_pk):
+    """Ein Gerätedokument ausliefern — und vorher prüfen, wem es gehört.
+
+    Der einzige Weg zu diesen Dateien. Sie liegen außerhalb von ``MEDIA_ROOT``
+    und werden von keinem Webserver direkt ausgeliefert; auf einer Rechnung
+    stehen Name, Anschrift und Zahlungsdaten, und eine schwer zu erratende
+    Adresse ist dafür kein Schutz, sondern nur eine Hoffnung.
+
+    Steht nginx davor, übernimmt der das Ausliefern über ``X-Accel-Redirect``:
+    die Prüfung bleibt hier, die Bytes gehen an dem Python-Prozess vorbei.
+    """
+    device = _device(request, pk)
+    document = get_object_or_404(device.documents, pk=document_pk)
+    content_type = mimetypes.guess_type(document.filename)[0] or "application/octet-stream"
+    # Bilder und PDF im Browser zeigen, alles andere herunterladen. Ausführbares
+    # kommt hier nicht an — die Endungsprüfung lässt es gar nicht erst hinein.
+    inline = content_type.startswith("image/") or content_type == "application/pdf"
+    disposition = "inline" if inline else "attachment"
+
+    accel = getattr(settings, "PRIVATE_MEDIA_ACCEL_LOCATION", "")
+    if accel:
+        response = HttpResponse(content_type=content_type)
+        response["X-Accel-Redirect"] = f"{accel.rstrip('/')}/{document.file.name}"
+    else:
+        try:
+            response = FileResponse(document.file.open("rb"), content_type=content_type)
+        except (FileNotFoundError, OSError) as exc:
+            # Datensatz ohne Datei: eine Fehlerseite ist die ehrlichere Antwort
+            # als ein Serverfehler — abrufbar ist hier gerade nichts.
+            raise Http404("Die Datei ist nicht mehr vorhanden") from exc
+    response["Content-Disposition"] = f'{disposition}; filename="{document.filename}"'
+    # Ein falsch geratener Typ soll nicht dazu führen, dass der Browser eine
+    # hochgeladene Datei als etwas anderes behandelt, als sie ist.
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+# --------------------------------------------------------------------------
 # Shelly
 # --------------------------------------------------------------------------
 
@@ -439,12 +698,13 @@ def shelly_add(request):
 
 @login_required
 def energy_overview(request):
-    """Stromverbrauch je Becken und je Steckdose im Vergleich.
+    """Stromverbrauch je Becken und je Gerät im Vergleich.
 
     Der eigentliche Nutzen der Anbindung: was kostet welches Becken im Monat.
-    Gerechnet wird ausschließlich aus gespeicherten Messwerten — die Seite
-    fasst kein Gerät an und ist damit auch dann vollständig, wenn gerade keins
-    antwortet.
+    Gerechnet wird ausschließlich aus gespeicherten Messwerten und aus den am
+    Gerät hinterlegten Nennleistungen — die Seite fasst kein Gerät an und ist
+    damit auch dann vollständig, wenn gerade keins antwortet. Was gemessen und
+    was hochgerechnet ist, steht an jeder Zeile.
     """
     period = energy.normalize_period(request.GET.get("zeitraum"))
     tanks = energy.usage_by_tank(request.user, period)
@@ -463,9 +723,10 @@ def energy_overview(request):
                 description="Stromverbrauch je Becken in Kilowattstunden",
             ),
             "total_kwh": energy.total_kwh(tanks),
+            "total_estimated_kwh": energy.total_estimated_kwh(tanks),
             "total_cost": energy.total_cost(tanks),
             "price_per_kwh": energy.price_per_kwh(),
-            "has_meters": energy.metered_devices(request.user).exists(),
+            "has_devices": energy.accounted_devices(request.user).exists(),
         },
     )
 

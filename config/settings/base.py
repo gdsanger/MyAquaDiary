@@ -116,6 +116,22 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_ROOT = BASE_DIR / "mediafiles"
 MEDIA_URL = "media/"
 
+# Ablage der Dateien, die nicht jeder abrufen darf (Gerätedokumente). Bewusst
+# außerhalb von MEDIA_ROOT: was dort liegt, wird ausgeliefert, sobald jemand die
+# Adresse kennt. Hier führt der einzige Weg über eine Ansicht, die vorher prüft,
+# wem die Datei gehört.
+PRIVATE_MEDIA_ROOT = env("DJANGO_PRIVATE_MEDIA_ROOT", default=str(BASE_DIR / "privatefiles"))
+
+# Interner Ort, über den nginx eine geschützte Datei ausliefert
+# (``X-Accel-Redirect``). Leer heißt: Django schickt die Datei selbst — richtig
+# in der Entwicklung, in Produktion hinter nginx die schlechtere Wahl.
+PRIVATE_MEDIA_ACCEL_LOCATION = env("DJANGO_PRIVATE_MEDIA_ACCEL_LOCATION", default="")
+
+# Größte zulässige Datei je Gerätedokument. Eine eingescannte Anleitung bleibt
+# darunter; ein versehentlich hochgeladenes Video nicht — und genau das ist der
+# Zweck der Grenze.
+DEVICE_DOCUMENT_MAX_BYTES = env.int("DEVICE_DOCUMENT_MAX_BYTES", default=10 * 1024 * 1024)
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Startwerte für die MailConfig-Singleton. Solange kein Datensatz existiert,

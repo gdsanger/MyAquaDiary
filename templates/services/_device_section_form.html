@@ -1,0 +1,33 @@
+{% comment %}
+Formular oder Rückfrage innerhalb eines Abschnitts der Gerätedetailseite.
+
+Mit HTMX tauscht die Antwort nur den Abschnitt; ohne JavaScript kommt dieselbe
+Seite vollständig zurück und das Formular steht an derselben Stelle. Deshalb
+gibt es beides nur einmal — den Unterschied macht der Request, nicht das Markup.
+
+Erwartet: section_action, section_title, section_submit sowie entweder
+section_form (Bearbeiten) oder section_question/section_subject (Löschen).
+{% endcomment %}
+<div class="border rounded p-3 mb-3 bg-body-tertiary">
+  <h3 class="h6">{{ section_title }}</h3>
+  <form method="post" action="{{ section_action }}"
+        {% if section_multipart %}enctype="multipart/form-data" hx-encoding="multipart/form-data"{% endif %}
+        hx-post="{{ section_action }}" hx-target="#geraet-{{ open_section }}" hx-swap="outerHTML">
+    {% csrf_token %}
+    {% if section_form %}
+      {% include "partials/form_fields.html" with form=section_form %}
+    {% else %}
+      <p>{{ section_question }}</p>
+      <p class="fw-semibold">{{ section_subject }}</p>
+    {% endif %}
+    <div class="d-flex flex-wrap gap-2">
+      <button type="submit" class="btn {% if section_form %}btn-primary{% else %}btn-danger{% endif %}">
+        {{ section_submit }}
+      </button>
+      <a class="btn btn-outline-secondary" href="{% url 'services:device_detail' device.pk %}"
+         hx-get="{% url section_cancel_url device.pk %}" hx-target="#geraet-{{ open_section }}" hx-swap="outerHTML">
+        Abbrechen
+      </a>
+    </div>
+  </form>
+</div>

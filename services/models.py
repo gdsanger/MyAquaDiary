@@ -5,14 +5,19 @@ import json
 import logging
 import secrets
 from datetime import timedelta
+from decimal import Decimal
+from pathlib import Path
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import FileExtensionValidator, MaxValueValidator, MinValueValidator
 from django.db import models
+from django.urls import reverse
 from django.utils import timezone
 
 from core.enums import Status
 from core.fields import EncryptedTextField
+from core.storage import private_storage
 from services.eheim import (
     DEFAULT_PASSWORD,
     DEFAULT_USERNAME,
@@ -39,6 +44,31 @@ SINGLETON_PK = 1
 #: auskommen — der Fremdschlüssel zeigt in diese Richtung, die Abhängigkeit
 #: soll es nicht auch noch tun.
 MAINTENANCE_HORIZON_DAYS = 14
+
+#: Eine Garantie, die innerhalb dieser Frist endet, gehört als Hinweis auf das
+#: Dashboard. Genau dann lohnt der Blick, ob das Gerät noch Auffälligkeiten
+#: zeigt — danach ist es die eigene Rechnung.
+WARRANTY_HORIZON_DAYS = 30
+
+#: Stunden je Tag, mit denen ein Gerät ohne eigene Angabe gerechnet wird.
+#: Heizer und Filter laufen durch; wer eine Beleuchtung erfasst, trägt ihre
+#: Brenndauer nach (``Device.daily_runtime_hours``).
+DEFAULT_RUNTIME_HOURS = 24
+
+#: Dateiarten, die als Gerätedokument zulässig sind. Bewusst kurz: Anleitungen
+#: und Rechnungen kommen als PDF, Fotos vom Typenschild als Bild. Alles andere
+#: — allen voran alles, was ein Browser ausführen würde — bleibt draußen.
+DOCUMENT_EXTENSIONS = ["pdf", "jpg", "jpeg", "png", "webp", "gif", "heic", "txt"]
+
+
+def device_document_path(instance, filename):
+    """Ablageort eines Gerätedokuments: je Gerät ein eigener Ordner.
+
+    Der Ordner liegt in der geschützten Ablage (:mod:`core.storage`), nicht
+    unter ``MEDIA_ROOT`` — von dort ginge die Rechnung an jeden, der die
+    Adresse kennt.
+    """
+    return f"devices/{instance.device_id}/docs/{filename}"
 
 
 class MailConfig(models.Model):
@@ -197,6 +227,8 @@ class Device(models.Model):
     POLLED_KINDS = CONNECTED_KINDS
     #: Arten ohne Anbindung — reine Dokumentation, Status von Hand.
     DOCUMENTED_KINDS = frozenset(Kind) - CONNECTED_KINDS
+    #: Arten mit eigenem Stromzähler. Alles andere wird hochgerechnet.
+    METERED_KINDS = SHELLY_KINDS
 
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -260,6 +292,52 @@ class Device(models.Model):
     )
     last_seen = models.DateTimeField("zuletzt erreicht", null=True, blank=True)
     created_at = models.DateTimeField("angelegt", auto_now_add=True)
+
+    # -- Kaufmännisches ------------------------------------------------------
+    serial_number = models.CharField("Seriennummer", max_length=120, blank=True)
+    supplier = models.CharField("Lieferant", max_length=160, blank=True)
+    purchased_on = models.DateField("Kaufdatum", null=True, blank=True)
+    purchase_price = models.DecimalField(
+        "Kaufpreis (€)",
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+    )
+    warranty_until = models.DateField(
+        "Garantie bis",
+        null=True,
+        blank=True,
+        help_text="Endet die Garantie demnächst, erscheint das als Hinweis auf dem Dashboard.",
+    )
+
+    # -- Technische Daten ----------------------------------------------------
+    power_watts = models.DecimalField(
+        "Nennleistung (W)",
+        max_digits=7,
+        decimal_places=1,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+        help_text="Grundlage der Verbrauchsschätzung bei Geräten ohne messende Steckdose.",
+    )
+    flow_rate_lph = models.PositiveIntegerField(
+        "Förderleistung (l/h)",
+        null=True,
+        blank=True,
+        help_text="Nur bei Filtern und Pumpen.",
+    )
+    daily_runtime_hours = models.DecimalField(
+        "Laufzeit (h/Tag)",
+        max_digits=4,
+        decimal_places=1,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(24)],
+        help_text="Betriebsstunden je Tag für die Verbrauchsschätzung. Leer heißt Dauerbetrieb "
+        "(24 h) — bei einer Beleuchtung ist das falsch, dort gehört die Brenndauer hinein.",
+    )
 
     class Meta:
         verbose_name = "Gerät"
@@ -357,6 +435,28 @@ class Device(models.Model):
         return self.kind in self.CONNECTED_KINDS
 
     @property
+    def is_metered(self) -> bool:
+        """True, wenn das Gerät einen eigenen Stromzähler mitbringt.
+
+        Nur eine Steckdose zählt selbst. Bei allen anderen bleibt für die
+        Verbrauchsauswertung die Hochrechnung aus Nennleistung und Laufzeit —
+        eine Schätzung, und als solche auch gekennzeichnet.
+        """
+        return self.kind in self.METERED_KINDS
+
+    @property
+    def runtime_hours_per_day(self):
+        """Betriebsstunden je Tag — ohne eigene Angabe: Dauerbetrieb."""
+        if self.daily_runtime_hours is None:
+            return Decimal(DEFAULT_RUNTIME_HOURS)
+        return Decimal(self.daily_runtime_hours)
+
+    @property
+    def has_power_estimate(self) -> bool:
+        """True, wenn sich der Verbrauch dieses Geräts hochrechnen lässt."""
+        return not self.is_metered and self.power_watts is not None
+
+    @property
     def generation_label(self) -> str:
         """Shelly-Generation im Klartext (``Gen1``/``Gen2+``)."""
         return generation_label(self.generation)
@@ -421,6 +521,155 @@ class Device(models.Model):
     def maintenance_status_value(self):
         """Template-freundlicher Zugriff (Templates rufen keine Argumente auf)."""
         return self.maintenance_status()
+
+    # -- Garantie ------------------------------------------------------------
+
+    def warranty_status(self, today=None):
+        """Zustand der Garantie auf derselben Skala wie alles andere.
+
+        ``WARN`` heißt: sie endet in den nächsten
+        :data:`WARRANTY_HORIZON_DAYS` Tagen — der einzige Zeitpunkt, an dem ein
+        Hinweis etwas ändern kann. Eine abgelaufene Garantie ist keine Warnung
+        mehr, sondern eine Tatsache, und steht deshalb als ``UNKNOWN`` neutral
+        da.
+        """
+        if self.warranty_until is None:
+            return Status.UNKNOWN
+        today = today or timezone.localdate()
+        if self.warranty_until < today:
+            return Status.UNKNOWN
+        if self.warranty_until <= today + timedelta(days=WARRANTY_HORIZON_DAYS):
+            return Status.WARN
+        return Status.OK
+
+    @property
+    def warranty_status_value(self):
+        """Template-freundlicher Zugriff (Templates rufen keine Argumente auf)."""
+        return self.warranty_status()
+
+    @property
+    def warranty_expired(self) -> bool:
+        return self.warranty_until is not None and self.warranty_until < timezone.localdate()
+
+
+class DeviceSpec(models.Model):
+    """Eine freie technische Angabe am Gerät.
+
+    Feste Spalten je Geräteart wären zu vier Fünfteln leer: ein Filter hat eine
+    Förderleistung, eine Lampe Lumen und Kelvin, ein CO₂-Ventil nichts von
+    beidem. Typisierte Felder gibt es deshalb nur für das, womit die Anwendung
+    selbst rechnet (:attr:`Device.power_watts`, :attr:`Device.flow_rate_lph`);
+    alles Übrige steht hier als Beschriftung, Wert und Einheit.
+    """
+
+    device = models.ForeignKey(
+        Device, verbose_name="Gerät", on_delete=models.CASCADE, related_name="specs"
+    )
+    label = models.CharField("Bezeichnung", max_length=80, help_text="z. B. „Beckenvolumen“")
+    value = models.CharField("Wert", max_length=160, help_text="z. B. „60–160“")
+    unit = models.CharField(
+        "Einheit", max_length=20, blank=True, help_text="z. B. „l“ oder „K“"
+    )
+    position = models.PositiveSmallIntegerField(
+        "Reihenfolge", default=0, help_text="Kleinere Zahlen stehen oben."
+    )
+
+    class Meta:
+        verbose_name = "Technische Angabe"
+        verbose_name_plural = "Technische Angaben"
+        ordering = ["position", "label"]
+
+    def __str__(self):
+        return f"{self.label}: {self.display_value}"
+
+    @property
+    def display_value(self) -> str:
+        return f"{self.value} {self.unit}".strip()
+
+
+class DeviceDocument(models.Model):
+    """Eine Datei am Gerät — Anleitung, Rechnung, Garantieunterlage, Foto.
+
+    Die Datei liegt in der geschützten Ablage und hat keine öffentliche
+    Adresse: auf einer Rechnung stehen Name, Anschrift und Zahlungsdaten, und
+    eine schwer zu erratende URL ist kein Zugriffsschutz. Ausgeliefert wird nur
+    über :func:`services.views.device_document`, und die prüft vorher, wem das
+    Gerät gehört.
+    """
+
+    class Kind(models.TextChoices):
+        MANUAL = "manual", "Bedienungsanleitung"
+        INVOICE = "invoice", "Rechnung"
+        WARRANTY = "warranty", "Garantieunterlage"
+        PHOTO = "photo", "Foto"
+        OTHER = "other", "Sonstiges"
+
+    device = models.ForeignKey(
+        Device, verbose_name="Gerät", on_delete=models.CASCADE, related_name="documents"
+    )
+    kind = models.CharField("Art", max_length=10, choices=Kind.choices, default=Kind.OTHER)
+    title = models.CharField("Titel", max_length=200)
+    file = models.FileField(
+        "Datei",
+        upload_to=device_document_path,
+        storage=private_storage,
+        validators=[FileExtensionValidator(DOCUMENT_EXTENSIONS)],
+    )
+    uploaded_at = models.DateTimeField("hochgeladen", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Gerätedokument"
+        verbose_name_plural = "Gerätedokumente"
+        ordering = ["kind", "title"]
+
+    def __str__(self):
+        return self.title
+
+    def get_absolute_url(self):
+        return reverse("services:device_document", args=[self.device_id, self.pk])
+
+    @property
+    def filename(self) -> str:
+        return Path(self.file.name).name if self.file else ""
+
+    @property
+    def extension(self) -> str:
+        return Path(self.file.name).suffix.lstrip(".").lower() if self.file else ""
+
+    @property
+    def size_bytes(self):
+        """Dateigröße; ``None``, wenn die Datei nicht (mehr) im Speicher liegt."""
+        if not self.file:
+            return None
+        try:
+            return self.file.size
+        except (OSError, ValueError):
+            return None
+
+
+class DeviceLink(models.Model):
+    """Ein Verweis am Gerät — Herstellerseite, Ersatzteilshop, Forenthread.
+
+    Getrennt vom Dokument, weil ein Link keine Datei ist: er belegt keinen
+    Speicher, braucht keinen Zugriffsschutz und keine Typprüfung.
+    """
+
+    device = models.ForeignKey(
+        Device, verbose_name="Gerät", on_delete=models.CASCADE, related_name="links"
+    )
+    title = models.CharField("Titel", max_length=200)
+    url = models.URLField("Adresse", max_length=500)
+    position = models.PositiveSmallIntegerField(
+        "Reihenfolge", default=0, help_text="Kleinere Zahlen stehen oben."
+    )
+
+    class Meta:
+        verbose_name = "Geräte-Link"
+        verbose_name_plural = "Geräte-Links"
+        ordering = ["position", "title"]
+
+    def __str__(self):
+        return self.title
 
 
 class DeviceReading(models.Model):
