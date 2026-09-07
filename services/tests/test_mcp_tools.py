@@ -799,3 +799,36 @@ class UserModelTests(ToolTestCase):
         self.assertEqual([tank["name"] for tank in mine["tanks"]], ["Südamerika-Becken"])
         self.assertEqual([tank["name"] for tank in theirs["tanks"]], ["Fremdes Becken"])
         self.assertNotEqual(get_user_model().objects.count(), 1)
+
+
+class DeviceDataStaysOutTests(ToolTestCase):
+    """Über MCP gibt es keine Gerätedaten — auch nach dem Zusammenführen nicht.
+
+    Ein Gerät hängt jetzt am Becken, ``get_tank`` könnte es also mitliefern.
+    Soll es aber nicht (#1226): Zugangsdaten, Adressen und Schaltzustände
+    gehören nicht in ein Sprachmodell, und lesen ohne schalten wäre eine
+    Auskunft über das Heimnetz.
+    """
+
+    def test_no_tool_deals_with_devices(self):
+        from services.mcp import registry
+
+        for definition in registry.definitions(allow_write=True):
+            with self.subTest(tool=definition["name"]):
+                text = f"{definition['name']} {definition['description']}".lower()
+                self.assertNotIn("gerät", text)
+                self.assertNotIn("device", text)
+
+    def test_the_model_map_knows_no_device(self):
+        from services.mcp.data import MODELS
+
+        self.assertEqual(
+            [alias for alias, (_app, model) in MODELS.items() if "evice" in model], []
+        )
+
+    def test_get_tank_carries_no_device_data(self):
+        result = self.call("get_tank", tank_id=self.tank.pk)
+
+        payload = json.dumps(result, ensure_ascii=False).lower()
+        self.assertNotIn("device", payload)
+        self.assertNotIn("mac", payload)

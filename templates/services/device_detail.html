@@ -12,10 +12,19 @@
     <h1 class="h3 mb-1">{{ device.name }}</h1>
     <p class="text-body-secondary mb-0">
       {{ device.get_kind_display }}{% if device.generation_label %} {{ device.generation_label }}{% endif %}
-      · {{ device.host }}{% if device.mac_address %} · {{ device.mac_address }}{% endif %}
-      {% if device.firmware %} · Software {{ device.firmware }}{% endif %}
-      {% if device.tank_label %} · {{ device.tank_label }}{% endif %}
+      {% if device.is_connected %}
+        · {{ device.host }}{% if device.mac_address %} · {{ device.mac_address }}{% endif %}
+        {% if device.firmware %} · Software {{ device.firmware }}{% endif %}
+      {% endif %}
+      · <a href="{{ device.tank.get_absolute_url }}">{{ device.tank.name }}</a>
     </p>
+    {% if device.maintenance_due_on %}
+      <p class="mb-0 mt-1">
+        <span class="mad-status mad-status--{{ device.maintenance_status_value }}">
+          Wartung fällig am {{ device.maintenance_due_on|date:"d.m.Y" }}
+        </span>
+      </p>
+    {% endif %}
   </div>
   <div class="d-flex gap-2">
     <a class="btn btn-outline-secondary" href="{% url 'services:device_edit' device.pk %}">Bearbeiten</a>
@@ -41,7 +50,18 @@
     <div class="card h-100">
       <div class="card-body">
         <h2 class="h5 card-title">Status</h2>
-        {% if device.is_active %}
+        {% if not device.is_connected %}
+          {# Ohne Anbindung ist der Status eine Handeingabe — es gibt nichts
+             abzufragen, und ein Ladeplatzhalter würde etwas anderes behaupten. #}
+          <p class="mb-1">
+            <span class="mad-status mad-status--{{ device.status }}">{{ device.get_status_display }}</span>
+          </p>
+          {% if device.status_message %}<p class="mb-1">{{ device.status_message }}</p>{% endif %}
+          <p class="small text-body-secondary mb-0">
+            Das Gerät ist nicht angebunden; der Status wird beim
+            <a href="{% url 'services:device_edit' device.pk %}">Bearbeiten</a> gesetzt.
+          </p>
+        {% elif device.is_active %}
           <div hx-get="{% url 'services:device_status' device.pk %}" hx-trigger="load" hx-swap="outerHTML">
             <p class="text-body-secondary mb-0">Status wird geladen …</p>
           </div>
@@ -55,10 +75,36 @@
   <div class="col-12 col-lg-7">
     <div class="card h-100">
       <div class="card-body">
-        <h2 class="h5 card-title">
-          {% if device.is_shelly %}Leistung im Verlauf{% else %}Drehzahl im Verlauf{% endif %}
-        </h2>
-        {% include "services/_line_chart.html" %}
+        {% if device.is_connected %}
+          <h2 class="h5 card-title">
+            {% if device.is_shelly %}Leistung im Verlauf{% else %}Drehzahl im Verlauf{% endif %}
+          </h2>
+          {% include "services/_line_chart.html" %}
+        {% else %}
+          <h2 class="h5 card-title">Gerät</h2>
+          <dl class="row mb-0">
+            {% if device.manufacturer or device.model_name %}
+              <dt class="col-5 fw-normal text-body-secondary">Hersteller</dt>
+              <dd class="col-7">{{ device.manufacturer }} {{ device.model_name }}</dd>
+            {% endif %}
+            {% if device.installed_on %}
+              <dt class="col-5 fw-normal text-body-secondary">In Betrieb seit</dt>
+              <dd class="col-7">{{ device.installed_on|date:"d.m.Y" }}</dd>
+            {% endif %}
+            {% if device.last_maintenance_on %}
+              <dt class="col-5 fw-normal text-body-secondary">Letzte Wartung</dt>
+              <dd class="col-7">{{ device.last_maintenance_on|date:"d.m.Y" }}</dd>
+            {% endif %}
+            {% if device.maintenance_due_on %}
+              <dt class="col-5 fw-normal text-body-secondary">Nächste Wartung</dt>
+              <dd class="col-7">
+                <span class="mad-status mad-status--{{ device.maintenance_status_value }}">
+                  {{ device.maintenance_due_on|date:"d.m.Y" }}
+                </span>
+              </dd>
+            {% endif %}
+          </dl>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -126,6 +172,7 @@
 {% endif %}
 
 <div class="row g-3 mt-0">
+  {% if device.is_connected %}
   <div class="col-12 col-lg-7">
     <div class="card h-100">
       <div class="card-body">
@@ -174,8 +221,9 @@
       </div>
     </div>
   </div>
+  {% endif %}
 
-  <div class="col-12 col-lg-5">
+  <div class="col-12 {% if device.is_connected %}col-lg-5{% endif %}">
     <div class="card h-100">
       <div class="card-body">
         <h2 class="h5 card-title">Protokoll</h2>

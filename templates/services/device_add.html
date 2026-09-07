@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Gerät erfassen – MyAquaDiary{% endblock %}
+
+{% block content %}
+<nav aria-label="Brotkrumen" class="mb-2">
+  <a href="{% url 'services:device_list' %}" class="small">← Geräte</a>
+</nav>
+<h1 class="h3 mb-3">Gerät erfassen</h1>
+
+<div class="row">
+  <div class="col-12 col-md-8 col-lg-6">
+    <div class="card">
+      <div class="card-body">
+        <p class="text-body-secondary">
+          Für Technik ohne Anbindung: Heizer, Beleuchtung, CO₂-Anlage, Dosierpumpe. Sie
+          erscheint im Beckenreiter „Geräte“ und meldet sich mit ihrer Wartung; abgefragt
+          oder geschaltet wird sie nicht. Ein
+          <a href="{% url 'services:device_discover' %}">EHEIM-Gerät</a> oder eine
+          <a href="{% url 'services:shelly_add' %}">Shelly-Steckdose</a> wird stattdessen
+          angebunden.
+        </p>
+        <form method="post">
+          {% csrf_token %}
+          {% include "partials/form_fields.html" %}
+          <button type="submit" class="btn btn-primary">Speichern</button>
+          <a class="btn btn-outline-secondary" href="{% url 'services:device_list' %}">Abbrechen</a>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

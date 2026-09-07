@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.test import TestCase
 
+from core.testing import tank_named
 from services import devices as device_service
 from services.models import Device, DeviceEvent, DeviceReading
 from services.shelly import Gen1Service, Gen2Service, ShellyClient
@@ -28,7 +29,7 @@ def make_plug(owner, **kwargs):
         name=kwargs.pop("name", "Licht Becken 1"),
         kind=Device.Kind.SHELLY_PLUG,
         host=kwargs.pop("host", HOST),
-        tank_label=kwargs.pop("tank_label", "Becken 1"),
+        tank=kwargs.pop("tank", None) or tank_named(owner, kwargs.pop("tank_name", "Becken 1")),
         **kwargs,
     )
     device.save()
@@ -187,10 +188,11 @@ class PlugModelTests(ShellyDeviceTestCase):
         self.device.set_credentials("admin", "admin")
         self.assertFalse(self.device.uses_default_password)
 
-    def test_tank_defaults_to_a_readable_label(self):
-        self.assertEqual(self.device.tank_name, "Becken 1")
-        self.device.tank_label = "  "
-        self.assertEqual(self.device.tank_name, "ohne Becken")
+    def test_the_tank_is_a_foreign_key_not_a_label(self):
+        """Kein Freitext mehr: das Becken ist ein Datensatz, der umbenannt
+        werden darf, ohne dass eine Auswertung auseinanderfällt."""
+        self.assertEqual(self.device.tank.name, "Becken 1")
+        self.assertIn(self.device, self.device.tank.devices.all())
 
 
 class PollCommandTests(ShellyDeviceTestCase):

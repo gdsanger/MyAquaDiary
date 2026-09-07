@@ -1,15 +1,29 @@
+{% comment %}
+Dieselben Geräte wie unter /geraete/ — es gibt nur ein Gerätemodell. Gepflegt
+werden sie im Gerätebereich, weil dort auch Status, Verlauf und Steuerung der
+angebundenen Geräte liegen; hier stehen sie am Becken, wo man sie sucht.
+{% endcomment %}
 <section class="mad-card">
-  <div class="mad-card__header"><h2 class="mad-card__title">Geräte</h2></div>
+  <div class="mad-card__header">
+    <h2 class="mad-card__title">Geräte</h2>
+    {# Kein HTMX-Overlay wie bei den übrigen Reitern: die Gerätepflege liegt
+       im Gerätebereich, damit Anbindung und Dokumentation an einer Stelle
+       stehen. #}
+    <a class="btn btn-primary btn-sm" href="{% url 'services:device_add' %}">Gerät erfassen</a>
+  </div>
   <ul class="mad-list">
     {% for device in devices %}
       <li>
         <div class="mad-list__row">
           <div class="mad-list__main">
-            <p class="mad-list__title">{{ device.name }}</p>
+            <p class="mad-list__title">
+              <a href="{% url 'services:device_detail' device.pk %}">{{ device.name }}</a>
+            </p>
             <p class="mad-list__meta">
               {{ device.get_kind_display }}
               {% if device.manufacturer %}· {{ device.manufacturer }} {{ device.model_name }}{% endif %}
-              {% if device.last_seen_at %}· zuletzt erreicht {{ device.last_seen_at|date:"d.m.Y H:i" }}{% endif %}
+              {% if device.last_seen %}· zuletzt erreicht {{ device.last_seen|date:"d.m.Y H:i" }}{% endif %}
+              {% if not device.is_active %}· inaktiv{% endif %}
             </p>
             {% if device.status_message %}
               <p class="mad-list__meta">{{ device.status_message }}</p>

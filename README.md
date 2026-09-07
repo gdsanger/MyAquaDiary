@@ -31,7 +31,7 @@ docker compose exec web python manage.py createsuperuser
 | `catalog` | Pflanzen- und Tier-Katalog (userübergreifend) |
 | `tanks` | Becken, Messreihen, Ereignisse, Termine, Besatz, Bepflanzung, Fotos |
 | `dashboard` | KPIs, fällige Termine |
-| `services` | Anbindung Graph-API, Eheim, Shelly, KI, MCP; Verbrauchsauswertung |
+| `services` | Geräte am Becken samt Anbindung (Eheim, Shelly), Graph-API, KI, MCP; Verbrauchsauswertung |
 
 ## Erfassen und Pflegen
 
@@ -112,6 +112,40 @@ Das HTML nutzt bewusst Table-Layout mit Inline-Styles und einen fest hellen
 Hintergrund, weil Outlook weder Flexbox noch Grid rendert und die Clients Dark
 Mode sehr unterschiedlich behandeln.
 
+## Geräte
+
+Ein Gerät ist ein Datensatz: `services.Device`, mit **Pflicht-Fremdschlüssel
+auf das Becken**. Ob eine Anbindung dahintersteckt, entscheidet die Art:
+
+| Art | Anbindung | Status |
+|---|---|---|
+| Eheim classicVARIO+e, Eheim (sonstiges), Shelly Plug | REST- bzw. lokale HTTP-API | aus dem letzten `DeviceReading` fortgeschrieben |
+| Filter, Heizer, Beleuchtung, CO₂, Pumpe, Dosierpumpe, Sensor, Steckdose, Sonstiges | keine | Handeingabe |
+
+**Nicht jedes Gerät muss anbindbar sein.** Ein CO₂-Nachtabschalter ohne
+Netzanschluss wird unter *Geräte → Gerät erfassen* angelegt und dokumentiert:
+Hersteller, Modell, Inbetriebnahme, Wartungsintervall. Status, Verlauf,
+Steuerung und Zugangsdaten erscheinen nur bei anbindbaren Arten — es gibt dort
+schlicht nichts abzufragen.
+
+Der Status ist **ein** Feld mit zwei Quellen. Bei angebundenen Geräten schreibt
+ihn jede Abfrage fort (Eheim-Fehlercode 1 oder 2 → *kritisch*, mit dem Fehler
+im Klartext als Meldung), sonst bleibt er eine Handeingabe. Auswertende Stellen
+— `tanks/selectors.warnings()`, Beckenreiter, Geräteliste — lesen deshalb nur
+diesen einen Weg. Gerätefehler und fällige Wartung erscheinen darüber als
+**Beckenwarnung** auf dem Dashboard.
+
+Jede Schaltaktion wird zweimal protokolliert: als `DeviceEvent` am Gerät und
+als `tanks.Event` der Kategorie *Technik* am Becken — geschrieben in
+`services.devices.record_event`, der einzigen Stelle, an der das Protokoll
+entsteht. Wer eine Woche später eine Trübung sucht, sieht in der
+Beckenhistorie, dass am Vorabend der Filter umgestellt wurde. Fehlgeschlagene
+Versuche stehen mit dabei.
+
+Der Beckenreiter *Geräte* und der Bereich `/geraete/` zeigen dieselben Geräte;
+gepflegt werden sie im Gerätebereich, weil dort auch Anbindung und Steuerung
+liegen.
+
 ## Eheim-Digital-Geräte
 
 Angebunden über die offizielle REST-API der Geräte
@@ -122,7 +156,7 @@ haben die API nicht; die Anwendung erkennt das und sagt es beim Anlegen.
 Einrichten unter *Geräte → Geräte suchen*: Adresse eines erreichbaren Geräts
 plus Zugangsdaten eingeben (werksseitig `api` / `admin`). Das Gerät beantwortet
 `/mesh-liste` für das ganze Mesh; aus der Trefferliste werden die gewünschten
-Geräte übernommen. **Danach über *Zugangsdaten ändern* ein eigenes Passwort
+Geräte übernommen — je Gerät mit dem Becken, an dem es hängt. **Danach über *Zugangsdaten ändern* ein eigenes Passwort
 setzen** — ein unverändertes Werkspasswort im LAN ist kein guter Zustand. Die
 Zugangsdaten liegen verschlüsselt in der Datenbank und werden nie ausgegeben.
 
@@ -188,8 +222,8 @@ Gerät; der Umweg fällt also nur beim ersten Kontakt an. Oberhalb von
 Einrichten unter *Geräte → Steckdose anbinden*: Adresse eingeben, optional
 Benutzer und Passwort (im Auslieferungszustand ist die lokale API offen).
 Angelegt wird nur, was auf `/shelly` geantwortet hat. Das Feld *Becken* ist die
-Grundlage der Verbrauchsauswertung — solange das Becken-Modell nicht im Epic
-liegt, ist es ein Freitext am Gerät.
+Grundlage der Verbrauchsauswertung; zur Auswahl stehen ausschließlich die
+eigenen Becken.
 
 Gelesen werden Schaltzustand, Leistung, Zählerstand und Gerätetemperatur; der
 Statusabruf läuft wie bei Eheim per HTMX und mit kurzem Timeout
@@ -217,6 +251,8 @@ Zählerstand (Gen1 nach Stromausfall) gilt als Verbrauch seit dem Reset.
 
 Unter *Stromverbrauch* stehen Tag, Monat und Jahr je Becken im Vergleich, dazu
 die Kosten mit dem Arbeitspreis aus `ENERGY_PRICE_PER_KWH` (Default 0,35 €/kWh).
+Gruppiert wird über die Beckenkennung, nicht über einen Namen: eine Umbenennung
+erzeugt damit keine zweite Gruppe.
 Gespeichert werden Kilowattstunden, keine Beträge. Die Seite rechnet
 ausschließlich aus gespeicherten Messwerten und fragt kein Gerät ab — sie ist
 damit auch dann vollständig, wenn gerade keine Steckdose antwortet.
@@ -410,9 +446,11 @@ zu sehen — geprüft wird trotzdem beim Aufruf.
 
 ### Was es bewusst nicht gibt
 
-- **Geräte.** Weder lesend noch schaltend. Eheim-Filter und Shelly-Steckdosen
-  regeln sich autark; ihre Werte gehören in die Oberfläche und in die
-  serverseitige Auswertung, nicht in ein externes Modell.
+- **Geräte.** Weder lesend noch schaltend, auch nicht als Beiwerk von
+  `get_tank`. Eheim-Filter und Shelly-Steckdosen regeln sich autark; ihre Werte
+  gehören in die Oberfläche und in die serverseitige Auswertung, nicht in ein
+  externes Modell. Dass ein Gerät seit #1230 am Becken hängt, ändert daran
+  nichts.
 - **Löschen.** Kein `delete_*`. Was falsch angelegt wurde, wird in der
   Oberfläche korrigiert — ein irrtümlich ausgelöster Löschbefehl aus einem
   Chatfenster ist nicht zurückzuholen.

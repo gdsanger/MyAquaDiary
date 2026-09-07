@@ -9,6 +9,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from core.testing import tank_named
 from services.models import Device, DeviceEvent, DeviceReading
 from services.shelly import ShellyClient
 from services.tests.test_eheim_client import FakeResponse, FakeSession
@@ -38,7 +39,12 @@ class AddPlugTests(PlugViewTestCase):
 
     def post(self, response, **extra):
         session = FakeSession(response)
-        data = {"name": "Licht", "host": HOST, "tank_label": "Becken 1", "is_active": "on"}
+        data = {
+            "name": "Licht",
+            "host": HOST,
+            "tank": tank_named(self.user, "Becken 1").pk,
+            "is_active": "on",
+        }
         data.update(extra)
         with patch("services.views.ShellyClient", return_value=ShellyClient(HOST, session=session)):
             return self.client.post(self.url, data, follow=True), session
@@ -51,7 +57,7 @@ class AddPlugTests(PlugViewTestCase):
         self.assertEqual(device.kind, Device.Kind.SHELLY_PLUG)
         self.assertEqual(device.generation, 2)
         self.assertEqual(device.firmware, "1.0.3")
-        self.assertEqual(device.tank_label, "Becken 1")
+        self.assertEqual(device.tank.name, "Becken 1")
         self.assertIn("/shelly", session.calls[0]["url"])
         self.assertContains(response, "Gen2+")
 
@@ -217,7 +223,7 @@ class EnergyOverviewTests(PlugViewTestCase):
         super().setUp()
         self.url = reverse("services:energy_overview")
         self.heater = make_plug(
-            self.user, name="Heizung", tank_label="Becken 2", host="192.168.1.61"
+            self.user, name="Heizung", tank_name="Becken 2", host="192.168.1.61"
         )
 
     def add_reading(self, device, watt_hours, hours_ago=0):

@@ -32,6 +32,16 @@ def create_tank(owner, name="Gesellschaftsbecken", **kwargs):
     return Tank.objects.create(owner=owner, name=name, **defaults)
 
 
+def tank_named(owner, name="Becken 1"):
+    """Becken eines Benutzers, bei Bedarf angelegt.
+
+    Für Tests, in denen das Becken nur Beiwerk ist: ein Gerät braucht eines,
+    aber welches, ist der Sache egal.
+    """
+    existing = Tank.objects.filter(owner=owner, name=name).first()
+    return existing or create_tank(owner, name=name)
+
+
 def create_measurement(tank, parameter_key="ph", value="7.0", days_ago=0):
     parameter = Parameter.objects.get(key=parameter_key)
     return Measurement.objects.create(

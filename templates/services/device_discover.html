@@ -37,6 +37,7 @@
                 <th scope="col" class="text-center">Anlegen</th>
                 <th scope="col">MAC</th>
                 <th scope="col">Name</th>
+                <th scope="col">Becken</th>
                 <th scope="col">Art</th>
                 <th scope="col">Software</th>
               </tr>
@@ -53,6 +54,17 @@
                     <input class="form-control form-control-sm" type="text"
                            name="name_{{ item.mac }}" value="{{ item.name|default:item.mac }}"
                            aria-label="Name für {{ item.label }}">
+                  </td>
+                  <td>
+                    {# Das Becken ist Pflicht: ohne es gäbe es weder eine
+                       Verbrauchsauswertung noch eine Warnung am Becken. #}
+                    <select class="form-select form-select-sm" name="tank_{{ item.mac }}"
+                            aria-label="Becken von {{ item.label }}">
+                      <option value="">Becken wählen …</option>
+                      {% for tank in tanks %}
+                        <option value="{{ tank.pk }}">{{ tank.name }}</option>
+                      {% endfor %}
+                    </select>
                   </td>
                   <td>
                     <select class="form-select form-select-sm" name="kind_{{ item.mac }}"

@@ -11,6 +11,7 @@ from django.db import connection
 from django.test import TestCase
 from django.utils import timezone
 
+from core.testing import tank_named
 from services import devices as device_service
 from services.eheim import ClassicVarioService, EheimClient
 from services.models import Device, DeviceEvent, DeviceReading
@@ -20,6 +21,7 @@ from services.tests.test_eheim_client import CLASSICVARIO_PAYLOAD, MAC, FakeResp
 def make_device(owner, **kwargs):
     device = Device(
         owner=owner,
+        tank=kwargs.pop("tank", None) or tank_named(owner, kwargs.pop("tank_name", "Becken 1")),
         name=kwargs.pop("name", "Filter Becken 1"),
         kind=kwargs.pop("kind", Device.Kind.EHEIM_CLASSICVARIO),
         mac_address=kwargs.pop("mac_address", MAC),
@@ -52,15 +54,16 @@ class DeviceModelTests(TestCase):
         self.assertEqual(device.mac_address, MAC)
 
     def test_eheim_device_needs_mac_and_host(self):
-        device = Device(owner=self.user, name="Filter", kind=Device.Kind.EHEIM_CLASSICVARIO)
+        device = Device(owner=self.user, tank=tank_named(self.user), name="Filter",
+                        kind=Device.Kind.EHEIM_CLASSICVARIO)
         with self.assertRaises(ValidationError) as caught:
             device.full_clean(exclude=["owner"])
         self.assertIn("mac_address", caught.exception.message_dict)
         self.assertIn("host", caught.exception.message_dict)
 
     def test_other_kinds_do_not_need_a_mac(self):
-        device = Device(owner=self.user, name="Steckdose", kind=Device.Kind.SHELLY_PLUG,
-                        host="192.168.1.60")
+        device = Device(owner=self.user, tank=tank_named(self.user), name="Steckdose",
+                        kind=Device.Kind.SHELLY_PLUG, host="192.168.1.60")
         device.full_clean(exclude=["owner"])
 
     def test_credentials_are_encrypted_at_rest(self):
@@ -363,6 +366,7 @@ class PollCommandTests(TestCase):
     def test_inactive_devices_are_skipped(self):
         Device.objects.create(
             owner=self.user,
+            tank=tank_named(self.user),
             name="Steckdose",
             kind=Device.Kind.SHELLY_PLUG,
             host="192.168.1.60",

@@ -4,12 +4,14 @@ import hashlib
 import json
 import logging
 import secrets
+from datetime import timedelta
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
+from core.enums import Status
 from core.fields import EncryptedTextField
 from services.eheim import (
     DEFAULT_PASSWORD,
@@ -30,6 +32,13 @@ from services.shelly import (
 logger = logging.getLogger(__name__)
 
 SINGLETON_PK = 1
+
+#: Eine Wartung, die innerhalb dieser Frist fällig wird, gilt als „anstehend".
+#: Dieselbe Spanne wie bei den Terminen (``tanks.models.UPCOMING_DAYS``); sie
+#: steht hier noch einmal, damit die Gerätemodelle ohne Import aus ``tanks``
+#: auskommen — der Fremdschlüssel zeigt in diese Richtung, die Abhängigkeit
+#: soll es nicht auch noch tun.
+MAINTENANCE_HORIZON_DAYS = 14
 
 
 class MailConfig(models.Model):
@@ -146,33 +155,62 @@ class MailLog(models.Model):
 
 
 class Device(models.Model):
-    """Ein angebundenes Gerät im Netz des Benutzers.
+    """Ein Gerät an einem Becken — angebunden oder nur dokumentiert.
 
-    Bis das Becken-Modell im Epic liegt, hängt ein Gerät am Benutzer; die
-    Zuordnung zum Becken kommt später als zusätzliches Feld dazu und ändert an
-    dieser Klasse sonst nichts.
+    Es gibt genau ein Gerätemodell. Ob hinter einem Gerät eine API steckt, ist
+    ein Merkmal der Art (:attr:`CONNECTED_KINDS`) und keine Voraussetzung
+    dafür, es überhaupt zu erfassen: ein CO₂-Nachtabschalter ohne Netzanschluss
+    gehört genauso in die Geräteliste des Beckens wie ein Eheim-Filter, der
+    seinen Fehlercode selbst meldet.
+
+    Das Becken ist Pflicht. Freitext war es einmal, mit den bekannten Folgen:
+    ein Tippfehler erzeugte in der Verbrauchsauswertung eine zweite Gruppe, und
+    ein Gerätefehler fand den Weg zum Becken gar nicht erst.
 
     Die Zugangsdaten liegen als JSON (``user``, ``password``) verschlüsselt in
     der Datenbank und werden weder angezeigt noch protokolliert.
     """
 
     class Kind(models.TextChoices):
+        # Anbindbar — hinter diesen Arten steckt eine API.
         EHEIM_CLASSICVARIO = KIND_CLASSICVARIO, "Eheim classicVARIO+e"
         EHEIM_OTHER = KIND_EHEIM_OTHER, "Eheim (sonstiges)"
         SHELLY_PLUG = KIND_SHELLY_PLUG, "Shelly Plug"
+        # Nur dokumentiert — erfasst, aber nicht abfragbar und nicht schaltbar.
+        FILTER = "filter", "Filter"
+        HEATER = "heater", "Heizer"
+        LIGHT = "light", "Beleuchtung"
+        CO2 = "co2", "CO₂-Anlage"
+        PUMP = "pump", "Pumpe"
+        DOSER = "doser", "Dosierpumpe"
+        SENSOR = "sensor", "Sensor"
+        SOCKET = "socket", "Steckdose"
+        OTHER = "other", "Sonstiges"
 
     #: Arten, die über die Eheim-REST-API angesprochen werden.
     EHEIM_KINDS = frozenset({Kind.EHEIM_CLASSICVARIO, Kind.EHEIM_OTHER})
     #: Arten, die über die lokale Shelly-API angesprochen werden.
     SHELLY_KINDS = frozenset({Kind.SHELLY_PLUG})
+    #: Alles, was eine Anbindung hat: abfragbar, teils schaltbar.
+    CONNECTED_KINDS = EHEIM_KINDS | SHELLY_KINDS
     #: Alles, was ``poll_devices`` periodisch abfragt.
-    POLLED_KINDS = EHEIM_KINDS | SHELLY_KINDS
+    POLLED_KINDS = CONNECTED_KINDS
+    #: Arten ohne Anbindung — reine Dokumentation, Status von Hand.
+    DOCUMENTED_KINDS = frozenset(Kind) - CONNECTED_KINDS
 
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         verbose_name="Besitzer",
         on_delete=models.CASCADE,
         related_name="devices",
+    )
+    tank = models.ForeignKey(
+        "tanks.Tank",
+        verbose_name="Becken",
+        on_delete=models.CASCADE,
+        related_name="devices",
+        help_text="Becken, an dem das Gerät hängt — Grundlage der Verbrauchsauswertung "
+        "und der Warnungen.",
     )
     kind = models.CharField("Art", max_length=30, choices=Kind.choices)
     name = models.CharField("Name", max_length=120)
@@ -196,12 +234,25 @@ class Device(models.Model):
         blank=True,
         help_text="Nur bei Shelly: 1 oder 2+. Wird beim ersten Kontakt über /shelly erkannt.",
     )
-    tank_label = models.CharField(
-        "Becken",
-        max_length=120,
+    manufacturer = models.CharField("Hersteller", max_length=80, blank=True)
+    model_name = models.CharField("Modell", max_length=80, blank=True)
+    installed_on = models.DateField("In Betrieb seit", null=True, blank=True)
+    maintenance_interval_days = models.PositiveSmallIntegerField(
+        "Wartungsintervall (Tage)",
+        null=True,
         blank=True,
-        help_text="Becken, an dem das Gerät hängt — Grundlage der Verbrauchsauswertung.",
+        help_text="Leer lassen, wenn das Gerät keine wiederkehrende Wartung braucht.",
     )
+    last_maintenance_on = models.DateField("Letzte Wartung", null=True, blank=True)
+    status = models.CharField(
+        "Status",
+        max_length=10,
+        choices=Status.choices,
+        default=Status.OK,
+        help_text="Bei angebundenen Geräten aus dem letzten Messwert fortgeschrieben, "
+        "sonst eine Handeingabe.",
+    )
+    status_message = models.CharField("Statusmeldung", max_length=200, blank=True)
     is_active = models.BooleanField(
         "aktiv",
         default=True,
@@ -231,6 +282,8 @@ class Device(models.Model):
 
     def clean(self):
         self.mac_address = normalize_mac(self.mac_address) if self.mac_address else ""
+        if self.tank_id and self.owner_id and self.tank.owner_id != self.owner_id:
+            raise ValidationError({"tank": "Das Becken gehört einem anderen Benutzer."})
         if self.is_shelly and not self.host:
             raise ValidationError({"host": "Ohne Adresse lässt sich das Gerät nicht erreichen."})
         if not self.is_eheim:
@@ -294,19 +347,19 @@ class Device(models.Model):
         return self.kind in self.SHELLY_KINDS
 
     @property
+    def is_connected(self) -> bool:
+        """True, wenn das Gerät abgefragt werden kann.
+
+        Entscheidet darüber, ob Status, Verlauf und Steuerung überhaupt
+        erscheinen — und ob :attr:`status` selbst geschrieben wird oder von
+        Hand gepflegt bleibt.
+        """
+        return self.kind in self.CONNECTED_KINDS
+
+    @property
     def generation_label(self) -> str:
         """Shelly-Generation im Klartext (``Gen1``/``Gen2+``)."""
         return generation_label(self.generation)
-
-    @property
-    def tank_name(self) -> str:
-        """Becken für Anzeige und Auswertung.
-
-        Bis das Becken-Modell im Epic liegt, ist das ein Freitextfeld am Gerät;
-        die Auswertung gruppiert ausschließlich hierüber. Wird daraus später
-        ein Fremdschlüssel, ändert sich genau diese eine Stelle.
-        """
-        return self.tank_label.strip() or "ohne Becken"
 
     @property
     def firmware_supported(self):
@@ -318,6 +371,56 @@ class Device(models.Model):
     @property
     def latest_reading(self):
         return self.readings.first()
+
+    def update_status_from(self, reading) -> list[str]:
+        """Schreibt den Status eines angebundenen Geräts aus einem Messwert fort.
+
+        Ein Fehlercode (Rotor blockiert, Luft im Filter) ist ein kritischer
+        Zustand und gehört als solcher an das Becken — sonst steht der Wert nur
+        im Messwert und niemand sieht ihn. Bei Geräten ohne Anbindung bleibt
+        das Feld unberührt: dort ist es eine Handeingabe.
+
+        Zurück kommen die geänderten Feldnamen, damit der Aufrufer sie an sein
+        ``update_fields`` hängen kann.
+        """
+        if not self.is_connected:
+            return []
+        if reading.has_error:
+            status, message = Status.CRITICAL, reading.error_text
+        else:
+            status, message = Status.OK, ""
+        if (self.status, self.status_message) == (status, message):
+            return []
+        self.status, self.status_message = status, message
+        return ["status", "status_message"]
+
+    # -- Wartung -------------------------------------------------------------
+
+    @property
+    def maintenance_due_on(self):
+        """Nächster Wartungstermin, ``None`` ohne hinterlegtes Intervall."""
+        if not self.maintenance_interval_days:
+            return None
+        reference = self.last_maintenance_on or self.installed_on
+        if reference is None:
+            return None
+        return reference + timedelta(days=self.maintenance_interval_days)
+
+    def maintenance_status(self, today=None):
+        due = self.maintenance_due_on
+        if due is None:
+            return Status.UNKNOWN
+        today = today or timezone.localdate()
+        if due < today:
+            return Status.CRITICAL
+        if due <= today + timedelta(days=MAINTENANCE_HORIZON_DAYS):
+            return Status.WARN
+        return Status.OK
+
+    @property
+    def maintenance_status_value(self):
+        """Template-freundlicher Zugriff (Templates rufen keine Argumente auf)."""
+        return self.maintenance_status()
 
 
 class DeviceReading(models.Model):
@@ -389,11 +492,11 @@ class DeviceReading(models.Model):
 class DeviceEvent(models.Model):
     """Protokoll jeder schreibenden Aktion an einem Gerät.
 
-    Die Felder sind absichtlich wie ``tanks.Event`` geschnitten
-    (``occurred_at``, ``title``, ``description``): sobald das Becken-Modell im
-    Epic liegt, wird derselbe Satz zusätzlich als Ereignis der Kategorie
-    *Technik* am Becken abgelegt — geschrieben wird das an genau einer Stelle,
-    in :func:`services.devices.record_event`.
+    Die Felder sind wie ``tanks.Event`` geschnitten (``occurred_at``,
+    ``title``, ``description``): derselbe Satz wird zusätzlich als Ereignis der
+    Kategorie *Technik* am Becken abgelegt, damit eine Schaltaktion in der
+    Beckenhistorie auftaucht und nicht nur im Geräteprotokoll. Geschrieben wird
+    beides an genau einer Stelle, in :func:`services.devices.record_event`.
     """
 
     device = models.ForeignKey(

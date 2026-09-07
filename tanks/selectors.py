@@ -11,11 +11,11 @@ from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
 from core.enums import STATUS_SEVERITY, Status
+from services.models import Device
 
 from .models import (
     UPCOMING_DAYS,
     CareTask,
-    Device,
     Event,
     Measurement,
     Stocking,
@@ -109,6 +109,11 @@ def warnings(user, limit=None):
 
     Vier Quellen: Messwerte außerhalb des Zielbereichs, Gerätefehler, fällige
     Wartung und unterschrittene Gruppengrößen.
+
+    Der Gerätestatus wird gelesen, wie er am Gerät steht — bei angebundenen
+    Geräten hat ihn die letzte Abfrage geschrieben (ein Eheim-Fehlercode wird
+    dort zu ``CRITICAL``), bei den übrigen ein Mensch. Genau deshalb ist es ein
+    Feld und nicht zwei: hier muss niemand beide Wege kennen.
     """
     today = timezone.localdate()
     tanks = list(Tank.objects.for_user(user).active())
@@ -129,7 +134,7 @@ def warnings(user, limit=None):
                 )
             )
 
-    for device in Device.objects.filter(tank__in=tanks).select_related("tank"):
+    for device in Device.objects.filter(tank__in=tanks, is_active=True).select_related("tank"):
         if device.status in (Status.WARN, Status.CRITICAL):
             items.append(
                 _warning(
