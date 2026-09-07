@@ -1,10 +1,10 @@
 """MCP-Server: das Tagebuch als Werkzeugkasten für externe KI-Clients.
 
-Ein eigener Endpunkt (SSE), über den Claude Desktop, Claude Code und andere
-MCP-fähige Anwendungen die eigenen Becken lesen und beschreiben können. Der
-Server teilt sich Modelle und Service-Schicht mit der Web-App — es gibt keinen
-zweiten Datenzugriff und keine zweite Geschäftslogik, sondern nur eine weitere
-Oberfläche auf dieselbe Anwendung.
+Ein eigener Endpunkt (Streamable HTTP), über den Claude Desktop, Claude Code
+und andere MCP-fähige Anwendungen die eigenen Becken lesen und beschreiben
+können. Der Server teilt sich Modelle und Service-Schicht mit der Web-App — es
+gibt keinen zweiten Datenzugriff und keine zweite Geschäftslogik, sondern nur
+eine weitere Oberfläche auf dieselbe Anwendung.
 
 Aufbau:
 
@@ -13,7 +13,8 @@ Aufbau:
 * :mod:`services.mcp.read` / :mod:`services.mcp.write` — die Werkzeuge.
 * :mod:`services.mcp.runner` — Rechte, Ratelimit, Protokoll um jeden Aufruf.
 * :mod:`services.mcp.protocol` — JSON-RPC-Schicht des MCP.
-* :mod:`services.mcp.views` — SSE-Strom und Nachrichtenendpunkt.
+* :mod:`services.mcp.auth` — Token aus Kopf oder Adresse, Herkunftsprüfung.
+* :mod:`services.mcp.views` — der Endpunkt selbst.
 
 Bewusst **nicht** angeboten: Geräte (weder lesend noch schaltend), Löschen,
 Katalogpflege, Benutzer- und Tokenverwaltung. Die Begründungen stehen bei den

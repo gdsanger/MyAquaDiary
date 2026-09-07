@@ -500,6 +500,23 @@ Er teilt sich Modelle und Service-Schicht mit der Web-App: kein paralleler
 Datenzugriff, keine zweite Geschäftslogik, nur eine weitere Oberfläche auf
 dieselbe Anwendung.
 
+### Transport
+
+**Streamable HTTP**, ein Endpunkt: `POST /mcp/` nimmt JSON-RPC entgegen und
+antwortet in derselben Antwort. Der ältere Transport *HTTP+SSE* (zwei Adressen,
+Antwort über einen offenen Strom) stammt aus Protokollversion `2024-11-05`, ist
+seit `2025-03-26` abgelöst und wird von Clients zunehmend abgelehnt.
+
+Das ist mehr als ein anderer Pfad. Weil die Antwort direkt zurückgeht, muss
+nichts mehr zwischen zwei Requests vermitteln: **kein Zustand im Prozess, keine
+Sitzung, kein `Mcp-Session-Id`.** Jede Anfrage bringt ihren Zugang mit und wird
+für sich autorisiert — ein Widerruf wirkt sofort, weil es nichts gibt, das ihn
+überdauert, und der Dienst darf auf mehreren Workern laufen.
+
+`GET /mcp/` ist bewusst **nicht** umgesetzt und antwortet mit `405`. Wir
+verschicken keine unaufgeforderten Nachrichten; ein Strom ohne Inhalt brächte
+nur die Betriebsprobleme zurück, die dieser Transport gerade loswird.
+
 Der Server läuft als **eigener Dienst** neben der Web-App — in
 `docker compose` als Dienst `mcp` auf Port 8001, sonst:
 
@@ -509,48 +526,78 @@ python manage.py run_mcp_server 0.0.0.0:8001
 
 # Betrieb
 gunicorn config.wsgi_mcp:application \
-    --bind 0.0.0.0:8001 --worker-class gthread --threads 16 --timeout 0
+    --bind 0.0.0.0:8001 --workers 3 \
+    --access-logformat '%(h)s "%(r)s" %(s)s %(b)s %(M)sms'
 ```
 
-Ein SSE-Strom belegt seinen Worker, solange der Client verbunden ist — daher
-Threads statt zusätzlicher Prozesse und kein Worker-Timeout. **Ein Prozess ist
-Absicht:** die offenen Sitzungen liegen im Arbeitsspeicher.
+Das Log-Format ist kein Beiwerk: im Standardformat steckt `%(q)s`, und darin
+stünde der Token (siehe unten). Dasselbe gilt für den Proxy davor — im Nginx
+Proxy Manager den Zugriffslog für den MCP-Host abschalten oder das Format
+anpassen.
 
 Der Entrypoint kennt nur `config/mcp_urls.py`. Admin, Login und
 Beckenverwaltung sind über diesen Port nicht erreichbar, auch nicht
 versehentlich.
 
+#### Alte Adressen
+
+`/mcp/sse/` und `/mcp/messages/` bleiben vorerst bedienbar, damit bestehende
+Konfigurationen weiterlaufen. Sie melden ihren Verfall im Log und über die
+Header `Deprecation`, `Sunset` und `Link`. `MCP_LEGACY_SSE=False` schaltet sie
+ab (`410`) — **erst dann** ist der Dienst wirklich zustandslos: solange sie
+laufen, liegen ihre offenen Sitzungen im Arbeitsspeicher eines Prozesses
+(`services/mcp/sessions.py`, verschwindet mit ihnen). Der Abschalttermin steht
+in `MCP_LEGACY_SUNSET`.
+
 ### Zugänge
 
 Tokens legt jeder Benutzer selbst unter *MCP* an: Name, wahlweise Schreibrecht
-und ein Ablaufdatum. Der Klartext wird **genau einmal** angezeigt — gespeichert
-ist nur sein SHA-256-Hash. Widerrufen wirkt sofort, auch mitten in einer
-laufenden Sitzung; der Token bleibt danach als Eintrag stehen, damit das
-Protokoll ihn weiter benennen kann.
+und ein Ablaufdatum. Das Ablaufdatum ist vorbelegt (`MCP_TOKEN_DEFAULT_DAYS`,
+Default 90) und **Pflicht** — ein Token, der in einer Adresse stehen darf, soll
+von selbst enden. Der Klartext wird **genau einmal** angezeigt; gespeichert ist
+nur sein SHA-256-Hash. Widerrufen wirkt sofort; der Token bleibt danach als
+Eintrag stehen, damit das Protokoll ihn weiter benennen kann.
 
-Beispielkonfiguration für Claude Desktop
-(`claude_desktop_config.json`) — der Token steht im `Authorization`-Kopf, nicht
-in der Adresse:
+Angemeldet wird sich auf zwei Wegen, in dieser Reihenfolge geprüft:
 
-```json
-{
-  "mcpServers": {
-    "myaquadiary": {
-      "command": "npx",
-      "args": [
-        "-y", "mcp-remote",
-        "https://tagebuch.example.com/mcp/sse/",
-        "--header", "Authorization: Bearer mad_dein-token"
-      ]
-    }
-  }
-}
+1. `Authorization: Bearer <Token>` — bevorzugt, wenn der Client Kopfzeilen
+   setzen kann.
+2. `?token=<Token>` in der Adresse — die Rückfallebene.
+
+```
+https://aquamcp.example.com/mcp/?token=mad_dein-token
 ```
 
-Dieselbe Angabe steht mit der richtigen Adresse auf der Seite *MCP*, sobald ein
-Token angelegt ist; welche Adresse dort erscheint, steht in `MCP_PUBLIC_URL`
-(Default `http://localhost:8001`) — der MCP-Dienst hört auf einem eigenen Port
-und damit nicht unter `SITE_URL`.
+Mehr braucht ein Client nicht: **keine Brücke über `mcp-remote`, kein Node.js
+auf dem Rechner des Benutzers.** Die fertige Adresse steht auf der Seite *MCP*,
+sobald ein Token angelegt ist; welche Adresse dort erscheint, steht in
+`MCP_PUBLIC_URL` (Default `http://localhost:8001`) — der MCP-Dienst hört auf
+einem eigenen Port und damit nicht unter `SITE_URL`.
+
+**Der Token in der Adresse ist die schwächere Absicherung, und das soll hier
+stehen:** Query-Strings landen in Zugriffsprotokollen, in Verlaufslisten und
+möglicherweise im `Referer`. Ein Kopf täte das nicht. Wir nehmen es in Kauf,
+weil eine Node-Abhängigkeit auf jedem Client-Rechner der höhere Preis wäre und
+das Vorgehen zu Zenico, Agira und Moneyplan passt. Ausgeglichen wird es an drei
+Stellen:
+
+- Der Query-String bleibt aus den Zugriffsprotokollen (Gunicorn-Format oben,
+  Proxy entsprechend).
+- Was trotzdem irgendwo auftaucht, kürzt `services/masking.py` auf die
+  Erkennung — als Log-Filter an allen Handlern, denn die gefährliche Zeile
+  kommt von `django.request` („Not Found: /mcp/?token=…“), nicht aus unserem
+  Code. Dieselbe Maskierung greift an den Parametern im `MCPAccessLog`.
+- Der Zugang läuft von selbst ab, und die Seite *MCP* sagt, dass die Adresse
+  wie ein Passwort zu behandeln ist.
+
+### Herkunftsprüfung
+
+Die Spezifikation verlangt gegen DNS-Rebinding die Prüfung des
+`Origin`-Headers: eine fremde Webseite soll den lokal erreichbaren Dienst nicht
+im Namen des Browsers ansprechen. Zulässige Werte stehen in
+`MCP_ALLOWED_ORIGINS` (Default leer), bei einem unzulässigen Wert gibt es
+`403`. **Ein fehlender Header ist kein Ablehnungsgrund** — `curl` und native
+Clients schicken keinen, und gegen die richtet sich die Prüfung nicht.
 
 ### Werkzeuge
 
@@ -606,9 +653,10 @@ und ein Protokoll jeder Abfrage wäre eine Bewegungsdatenbank über den eigenen
 Benutzer.
 
 Je Token gilt ein Ratelimit von `MCP_RATE_LIMIT_PER_MINUTE` Aufrufen je Minute
-(Default 60, `0` schaltet es ab). Gezählt wird im Cache; der Standard-Cache ist
-prozesslokal, was zum Ein-Prozess-Betrieb passt. Wer den Dienst auf mehrere
-Worker verteilt, hinterlegt einen gemeinsamen Cache.
+(Default 60, `0` schaltet es ab). Gezählt wird im Cache. Der Standard-Cache ist
+prozesslokal — bei mehreren Workern zählt dann jeder für sich, das Limit
+vervielfacht sich entsprechend. Als Schutz gegen eine Endlosschleife reicht das;
+wer es genau haben will, hinterlegt einen gemeinsamen Cache (Redis, Memcached).
 
 Becken und Katalog werden — wie in `services/ai/catalog.py` — über
 `apps.get_model` aufgelöst statt importiert. Solange die Modelle im Epic
