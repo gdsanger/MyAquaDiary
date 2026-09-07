@@ -28,9 +28,8 @@
               <ul class="mad-thumbs">
                 {% for photo in event.photos.all %}
                   <li>
-                    <a href="{{ photo.image.url }}">
-                      <img src="{{ photo.image.url }}" loading="lazy"
-                           alt="{{ photo.caption|default:event.title }}">
+                    <a href="{{ photo.large.url }}">
+                      {% include "partials/image.html" with variant=photo.thumb alt=photo.caption|default:event.title lazy=True only %}
                     </a>
                   </li>
                 {% endfor %}

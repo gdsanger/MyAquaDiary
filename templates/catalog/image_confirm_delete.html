@@ -19,7 +19,7 @@ steht dieselbe Rückfrage direkt in der Galerie.
 <div class="row">
   <div class="col-12 col-lg-6">
     <section class="mad-card">
-      <img class="mad-thumb" src="{{ image.image.url }}" alt="{{ image.caption|default:species.display_name }}">
+      {% include "partials/image.html" with variant=image.large alt=image.caption|default:species.display_name class="mad-thumb" only %}
       <div class="mad-card__body">
         <p>{{ image.caption|default:"Dieses Bild wird gelöscht." }}</p>
         <form method="post" action="{{ action }}">

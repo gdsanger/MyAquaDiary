@@ -26,8 +26,7 @@
               <ul class="mad-thumbs">
                 {% for photo in entry.photos %}
                   <li>
-                    <img src="{{ photo.image.url }}" loading="lazy"
-                         alt="{{ photo.caption|default:entry.title }}">
+                    {% include "partials/image.html" with variant=photo.thumb alt=photo.caption|default:entry.title lazy=True only %}
                   </li>
                 {% endfor %}
               </ul>

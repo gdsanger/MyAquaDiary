@@ -18,6 +18,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.enums import Status, WaterType
+from core.images import ImageVariantsMixin, VariantFields
 
 #: Anzahl Farbkennungen für Becken (siehe ``.mad-tank-accent-*`` im Stylesheet).
 TANK_ACCENT_COUNT = 8
@@ -34,8 +35,24 @@ def tank_cover_path(instance, filename):
     return f"tanks/{instance.pk or 'neu'}/cover/{filename}"
 
 
+def tank_cover_thumb_path(instance, filename):
+    return f"tanks/{instance.pk or 'neu'}/cover/thumbs/{filename}"
+
+
+def tank_cover_preview_path(instance, filename):
+    return f"tanks/{instance.pk or 'neu'}/cover/preview/{filename}"
+
+
 def tank_photo_path(instance, filename):
     return f"tanks/{instance.tank_id}/photos/{filename}"
+
+
+def tank_thumb_path(instance, filename):
+    return f"tanks/{instance.tank_id}/thumbs/{filename}"
+
+
+def tank_preview_path(instance, filename):
+    return f"tanks/{instance.tank_id}/preview/{filename}"
 
 
 class TankQuerySet(models.QuerySet):
@@ -91,8 +108,18 @@ class TankQuerySet(models.QuerySet):
         )
 
 
-class Tank(models.Model):
+class Tank(ImageVariantsMixin, models.Model):
     """Ein Aquarium eines Benutzers."""
+
+    #: Das Titelbild trägt eigene Feldnamen — ``width`` wäre am Becken schon
+    #: durch ``width_cm`` belegt und meinte dann zweierlei.
+    IMAGE_VARIANTS = VariantFields(
+        source="cover_image",
+        thumbnail="cover_thumbnail",
+        preview="cover_preview",
+        width="cover_width",
+        height="cover_height",
+    )
 
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="tanks", on_delete=models.CASCADE, verbose_name="Besitzer"
@@ -116,6 +143,20 @@ class Tank(models.Model):
         help_text="Bestimmt die Farbmarkierung des Beckens in Listen und auf dem Dashboard.",
     )
     cover_image = models.ImageField("Titelbild", upload_to=tank_cover_path, blank=True)
+    # Varianten des Titelbilds. Nicht editierbar: sie entstehen beim Speichern
+    # und haben in keinem Formular etwas zu suchen.
+    cover_thumbnail = models.ImageField(
+        "Titelbild (Kachel)", upload_to=tank_cover_thumb_path, blank=True, editable=False
+    )
+    cover_preview = models.ImageField(
+        "Titelbild (Vorschau)", upload_to=tank_cover_preview_path, blank=True, editable=False
+    )
+    cover_width = models.PositiveIntegerField(
+        "Titelbildbreite", null=True, blank=True, editable=False
+    )
+    cover_height = models.PositiveIntegerField(
+        "Titelbildhöhe", null=True, blank=True, editable=False
+    )
     notes = models.TextField("Notizen", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -538,7 +579,7 @@ class TaskCompletion(models.Model):
         return f"{self.task} · {self.completed_on}"
 
 
-class TankPhoto(models.Model):
+class TankPhoto(ImageVariantsMixin, models.Model):
     tank = models.ForeignKey(Tank, related_name="photos", on_delete=models.CASCADE)
     # ``SET_NULL``, nicht ``CASCADE``: wer ein Ereignis löscht, will nicht die
     # Fotos mitlöschen. Sie bleiben in der Galerie und verlieren nur ihre
@@ -552,6 +593,16 @@ class TankPhoto(models.Model):
         on_delete=models.SET_NULL,
     )
     image = models.ImageField("Bild", upload_to=tank_photo_path)
+    # Kachel- und Vorschaugröße entstehen beim Speichern; das Original bleibt
+    # daneben stehen. Nicht editierbar: kein Formular soll sie anbieten.
+    thumbnail = models.ImageField(
+        "Kachel", upload_to=tank_thumb_path, blank=True, editable=False
+    )
+    preview = models.ImageField(
+        "Vorschau", upload_to=tank_preview_path, blank=True, editable=False
+    )
+    width = models.PositiveIntegerField("Breite", null=True, blank=True, editable=False)
+    height = models.PositiveIntegerField("Höhe", null=True, blank=True, editable=False)
     caption = models.CharField("Bildunterschrift", max_length=200, blank=True)
     taken_on = models.DateField("Aufgenommen am")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -563,6 +614,15 @@ class TankPhoto(models.Model):
 
     def __str__(self):
         return self.caption or f"Foto {self.taken_on}"
+
+    @property
+    def alt_text(self):
+        """Bildbeschreibung für die Ausgabe: Bildunterschrift, sonst das Datum.
+
+        Ein Foto ohne Unterschrift ist deshalb nicht beschreibungslos — das
+        Aufnahmedatum sagt einem Screenreader immerhin, worum es geht.
+        """
+        return self.caption or f"Foto vom {self.taken_on:%d.%m.%Y}"
 
     def clean(self):
         """Foto und Ereignis gehören zum selben Becken.

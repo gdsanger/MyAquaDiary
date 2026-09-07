@@ -126,6 +126,14 @@ h1, h2, h3, h4, h5, h6 {
   letter-spacing: -0.01em;
 }
 
+/* Ein Bild bleibt in seinem Kasten. Ohne diese Regel sprengt ein Foto mit
+ * 4000 px Kantenlaenge die Kachel, in der es steht, und schiebt das Layout
+ * daneben weg — unabhaengig davon, ob eine verkleinerte Variante existiert. */
+img {
+  max-width: 100%;
+  height: auto;
+}
+
 .mad-muted {
   color: var(--mad-text-muted);
 }
