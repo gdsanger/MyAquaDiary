@@ -81,7 +81,10 @@ def list_tanks(context, arguments):
 @tool(
     "get_tank",
     "Ein Becken im Detail: Stammdaten, Notizen, Zielbereiche der Wasserwerte, "
-    "Besatz und Bepflanzung.",
+    "Besatz, Bepflanzung und die Einrichtung — Bodengrund als Schichtung von "
+    "unten nach oben samt Standzeit eines Nährstoffdepots, dazu Hardscape "
+    "(Wurzeln, Steine, Erlenzapfen, Rückwand) mit dem Hinweis, ob es auf die "
+    "Wasserwerte wirkt.",
     schema={
         "type": "object",
         "properties": {"tank_id": {"type": "integer", "description": "Kennung des Beckens."}},
@@ -89,13 +92,19 @@ def list_tanks(context, arguments):
     },
 )
 def get_tank(context, arguments):
-    # Ohne Vorabladung fragt die Serialisierung je Zielbereich, Besatzposten und
-    # Pflanze einzeln nach — bei einem gut gefüllten Becken sind das dutzende
-    # Abfragen für eine Antwort.
+    # Ohne Vorabladung fragt die Serialisierung je Zielbereich, Besatzposten,
+    # Pflanze und Einrichtungsposition einzeln nach — bei einem gut gefüllten
+    # Becken sind das dutzende Abfragen für eine Antwort.
     tank = data.tank(
         context.user,
         arguments.integer("tank_id", required=True),
-        prefetch=("parameter_targets__parameter", "stockings__species", "plantings__species"),
+        prefetch=(
+            "parameter_targets__parameter",
+            "stockings__species",
+            "plantings__species",
+            "substrate_layers",
+            "hardscape",
+        ),
     )
     return serialize.tank_detail(tank)
 

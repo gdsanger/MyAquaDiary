@@ -99,14 +99,24 @@ class TankFacts:
     water_type: str = ""
     started_on: str = ""
     notes: str = ""
+    #: Bodengrund von unten nach oben, je Schicht eine Zeile.
+    substrate: Sequence[str] = ()
+    #: Wurzeln, Steine, Botanik — mit ihrer Wirkung auf die Wasserwerte.
+    hardscape: Sequence[str] = ()
 
     def as_text(self) -> str:
+        # Bodengrund und Hardscape stehen hier, weil sie die naheliegendste
+        # Erklärung für eine Wertveränderung sind: Huminstoffe drücken den pH,
+        # kalkhaltiges Gestein hebt KH und Leitwert, ein aufgebrauchtes
+        # Nährstoffdepot zeigt sich an den Pflanzen.
         rows = [
             ("Becken", self.name),
             ("Volumen", f"{self.volume_liters:g} l" if self.volume_liters else ""),
             ("Kantenlänge", f"{self.length_cm} cm" if self.length_cm else ""),
             ("Wasser", self.water_type),
             ("In Betrieb seit", self.started_on),
+            ("Bodengrund (von unten)", "; ".join(self.substrate)),
+            ("Einrichtung", "; ".join(self.hardscape)),
             ("Notizen", self.notes),
         ]
         known = [f"- {label}: {value}" for label, value in rows if value]

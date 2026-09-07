@@ -11,6 +11,7 @@ from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
 from core.enums import STATUS_SEVERITY, Status
+from services.ai.prompts import TankFacts
 from services.models import Device
 
 from .models import (
@@ -83,6 +84,55 @@ def tank_measurements(tank, limit=50):
         .order_by("-measured_at")[:limit]
     )
     return annotate_status(measurements, target_map([tank]))
+
+
+def substrate_lines(tank):
+    """Bodengrund als Textzeilen, von unten nach oben.
+
+    Die Standzeit steht dabei: „2 cm Nährstoffdepot (JBL AquaBasis), erschöpft
+    seit 01.05.2026" ist die Angabe, aus der sich ein Mangel erklären lässt.
+    """
+    lines = []
+    for layer in tank.substrate_layers.all():
+        label = layer.depletion_label
+        lines.append(f"{layer}, {label}" if label else str(layer))
+    return lines
+
+
+def hardscape_lines(tank):
+    """Hardscape als Textzeilen, mit Wirkung auf die Wasserwerte.
+
+    Entferntes bleibt mit Datum dabei: eine Wurzel, die vor zwei Wochen
+    herausgenommen wurde, erklärt einen steigenden pH genauso gut wie eine, die
+    noch drin liegt.
+    """
+    lines = []
+    for item in tank.hardscape.all():
+        effect = f" — {item.effect_label}" if item.effect_label else ""
+        removed = f" (entfernt {item.removed_on:%d.%m.%Y})" if item.removed_on else ""
+        lines.append(f"{item}{effect}{removed}")
+    return lines
+
+
+def tank_facts(tank):
+    """Die Eckdaten eines Beckens für einen KI-Prompt.
+
+    Der Übergabepunkt zwischen Datenmodell und Service-Schicht: die Auswertung
+    in ``services.ai`` kennt weder ORM noch App-Grenzen und nimmt deshalb
+    :class:`~services.ai.prompts.TankFacts` entgegen. Die Einrichtung gehört
+    hinein — ohne sie fehlt dem Modell die naheliegendste Erklärung für eine
+    Wertveränderung (#1227).
+    """
+    return TankFacts(
+        name=tank.name,
+        volume_liters=float(tank.volume_liters) if tank.volume_liters is not None else None,
+        length_cm=tank.length_cm,
+        water_type=tank.get_water_type_display(),
+        started_on=f"{tank.setup_date:%d.%m.%Y}" if tank.setup_date else "",
+        notes=tank.notes,
+        substrate=substrate_lines(tank),
+        hardscape=hardscape_lines(tank),
+    )
 
 
 def photo_neighbours(tank, photo):
