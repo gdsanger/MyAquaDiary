@@ -33,6 +33,12 @@ docker compose exec web python manage.py createsuperuser
 | `dashboard` | KPIs, fällige Termine |
 | `services` | Geräte am Becken samt Anbindung (Eheim, Shelly), Graph-API, KI, MCP; Verbrauchsauswertung |
 
+Welche Felder es tatsächlich gibt, steht in **[`docs/datenmodell.md`](docs/datenmodell.md)** —
+die maßgebliche Referenz, gegen die auch die Feldnamen in MCP-Schicht und
+KI-Prompts geschrieben werden. `core/test_datamodel_doc.py` hält sie mit den
+Modellen zusammen: Ein neues oder umbenanntes Feld macht den Test rot, bis es
+dort steht.
+
 ## Erfassen und Pflegen
 
 Alles, was ein Becken ausmacht, wird in der Oberfläche gepflegt — das
