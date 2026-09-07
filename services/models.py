@@ -959,9 +959,10 @@ class AIUsageLog(models.Model):
 class AISuggestion(models.Model):
     """Ein KI-Vorschlag — Entwurf, kein Ergebnis.
 
-    Eine Bestimmung oder ein Steckbrief entsteht hier mit ``verified=False``
+    Eine Bestimmung oder ein Steckbrief entsteht hier mit ``status = DRAFT``
     und wird erst durch eine ausdrückliche Bestätigung in den Katalog
-    übernommen. Ein unbestätigt übernommener Steckbrief verbreitet Fehler über
+    übernommen. Ein Feld ``verified`` gibt es nicht — die Entscheidung steht im
+    ``status``. Ein unbestätigt übernommener Steckbrief verbreitet Fehler über
     alle Benutzer — deshalb der Zwischenschritt.
 
     ``payload`` trägt die Felder so, wie der Prompt sie abfragt
