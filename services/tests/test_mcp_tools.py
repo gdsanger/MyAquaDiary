@@ -903,24 +903,6 @@ class AccessLogTests(ToolTestCase):
         self.assertEqual(entry.token_name, "Claude Desktop")
 
 
-class DataModelMissingTests(ToolTestCase):
-    """Ein fehlendes Modell wird zum Werkzeug-Fehler, nicht zum Serverabsturz."""
-
-    def test_a_missing_model_becomes_a_tool_error(self):
-        from services.mcp.data import MODELS
-
-        original = dict(MODELS)
-        MODELS["tank"] = ("tanks", "GibtEsNicht")
-        try:
-            with self.assertRaises(ToolError) as caught:
-                self.call("list_tanks")
-        finally:
-            MODELS.clear()
-            MODELS.update(original)
-
-        self.assertIn("nicht verfügbar", str(caught.exception))
-
-
 class UserModelTests(ToolTestCase):
     def test_the_token_owner_decides_what_is_visible(self):
         """Zur Sicherheit gegen die andere Richtung: derselbe Aufruf, anderer Token."""
@@ -955,7 +937,7 @@ class DeviceDataStaysOutTests(ToolTestCase):
         from services.mcp.data import MODELS
 
         self.assertEqual(
-            [alias for alias, (_app, model) in MODELS.items() if "evice" in model], []
+            [alias for alias, model in MODELS.items() if "evice" in model.__name__], []
         )
 
     def test_get_tank_carries_no_device_data(self):

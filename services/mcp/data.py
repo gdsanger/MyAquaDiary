@@ -10,34 +10,46 @@ gesucht, nicht über eine freie ``pk``-Abfrage. Ein Werkzeug, das eine
 gehören; eine fremde Kennung sieht für den Client aus wie eine unbekannte. Wäre
 das anders, wäre jeder Token ein Generalschlüssel über alle Benutzer.
 
-**Auflösung der Modelle.** Die Modelle werden über
-:func:`django.apps.apps.get_model` aufgelöst statt importiert — genau wie in
-:mod:`services.ai.catalog`. Fehlt eines in einer Installation, meldet das
-Werkzeug sauber „Datenmodell nicht verfügbar“ statt beim Import zu scheitern.
+**Auflösung der Modelle.** Die Modelle werden importiert. Früher standen hier
+Namen für :func:`django.apps.apps.get_model`, weil diese Schicht vor den
+Modellen entstand; heute wäre ein Tippfehler im Namen von „Modell gibt es in
+dieser Installation nicht“ nicht zu unterscheiden und fiele erst dem Client
+auf. Ein Fehler beim Start ist besser als ein Werkzeug, das im Betrieb sagt,
+es gebe die Daten nicht.
 
-Diese Tabelle ist die einzige Stelle, an der die MCP-Schicht Modellnamen kennt.
-Sie muss zu ``tanks/models.py`` und ``catalog/models.py`` passen und zu nichts
+Diese Tabelle ist die einzige Stelle, an der die MCP-Schicht Modelle kennt. Sie
+muss zu ``tanks/models.py`` und ``catalog/models.py`` passen und zu nichts
 sonst — insbesondere nicht zu den Feldnamen aus dem Entwurf der Agira-Items,
 gegen die diese Schicht ursprünglich geschrieben war (#1236).
 """
 
-from django.apps import apps
+from catalog.models import AnimalSpecies, PlantSpecies
+from tanks.models import (
+    CareTask,
+    Event,
+    Measurement,
+    Parameter,
+    Planting,
+    Stocking,
+    Tank,
+    TankParameterTarget,
+)
 
-from .exceptions import DataModelUnavailable, NotFound
+from .exceptions import NotFound
 
-#: Kurzname -> (App, Modell). Ein Tippfehler fällt damit an einer Stelle auf
-#: und nicht verstreut über zwölf Werkzeuge.
+#: Kurzname -> Modell. Ein Tippfehler fällt damit an einer Stelle auf und nicht
+#: verstreut über zwölf Werkzeuge.
 MODELS = {
-    "tank": ("tanks", "Tank"),
-    "parameter": ("tanks", "Parameter"),
-    "parameter_target": ("tanks", "TankParameterTarget"),
-    "measurement": ("tanks", "Measurement"),
-    "event": ("tanks", "Event"),
-    "task": ("tanks", "CareTask"),
-    "stocking": ("tanks", "Stocking"),
-    "planting": ("tanks", "Planting"),
-    "catalog_animal": ("catalog", "AnimalSpecies"),
-    "catalog_plant": ("catalog", "PlantSpecies"),
+    "tank": Tank,
+    "parameter": Parameter,
+    "parameter_target": TankParameterTarget,
+    "measurement": Measurement,
+    "event": Event,
+    "task": CareTask,
+    "stocking": Stocking,
+    "planting": Planting,
+    "catalog_animal": AnimalSpecies,
+    "catalog_plant": PlantSpecies,
 }
 
 #: Art eines Katalogeintrags -> Kurzname des Modells.
@@ -49,30 +61,8 @@ NOT_FOUND = "Dazu gibt es keinen Eintrag. Prüfe die Kennung — sie muss zu ein
 
 
 def model(alias: str):
-    """Das Modell zu einem Kurznamen.
-
-    :raises DataModelUnavailable: solange das Modell in dieser Installation
-        fehlt. Der Client bekommt daraus einen Werkzeug-Fehler, keinen
-        Serverabsturz.
-    """
-    app_label, name = MODELS[alias]
-    try:
-        return apps.get_model(app_label, name)
-    except LookupError as exc:
-        raise DataModelUnavailable(
-            f"Das Datenmodell „{app_label}.{name}“ ist in dieser Installation nicht "
-            "verfügbar. Ohne Becken-Modell gibt es hier nichts zu lesen und nichts "
-            "zu schreiben."
-        ) from exc
-
-
-def is_available() -> bool:
-    """True, wenn die Tagebuch-Modelle da sind."""
-    try:
-        model("tank")
-    except DataModelUnavailable:
-        return False
-    return True
+    """Das Modell zu einem Kurznamen."""
+    return MODELS[alias]
 
 
 def label(instance) -> str:

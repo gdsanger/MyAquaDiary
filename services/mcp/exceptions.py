@@ -29,6 +29,3 @@ class WriteNotAllowed(ToolError):
 class RateLimited(ToolError):
     """Zu viele Aufrufe in zu kurzer Zeit."""
 
-
-class DataModelUnavailable(ToolError):
-    """Die Tagebuch-Modelle sind in dieser Installation (noch) nicht da."""

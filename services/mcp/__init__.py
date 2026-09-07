@@ -21,7 +21,7 @@ Katalogpflege, Benutzer- und Tokenverwaltung. Die Begründungen stehen bei den
 jeweiligen Modulen.
 """
 
-from .exceptions import DataModelUnavailable, MCPError, RateLimited, ToolError
+from .exceptions import MCPError, RateLimited, ToolError
 from .protocol import PROTOCOL_VERSION, SERVER_NAME, handle_message
 from .runner import Context, call_tool
 
@@ -32,7 +32,6 @@ from . import write as _write  # noqa: F401  isort:skip
 
 __all__ = [
     "Context",
-    "DataModelUnavailable",
     "MCPError",
     "PROTOCOL_VERSION",
     "RateLimited",
