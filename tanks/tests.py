@@ -1143,6 +1143,51 @@ class PhotoVariantTests(TestCase):
 
 
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class TankCoverTests(TestCase):
+    """Das Titelbild des Beckens — seit dem Herauslösen von ``CoverImageMixin``
+    dieselbe Verarbeitung wie am Gerät, und derselbe Ablageort wie zuvor."""
+
+    def setUp(self):
+        self.tank = create_tank(create_user())
+
+    def test_the_variants_are_created(self):
+        self.tank.cover_image = photo_upload(size=(1200, 800))
+        self.tank.save()
+
+        self.assertTrue(self.tank.cover_thumbnail)
+        self.assertTrue(self.tank.cover_preview)
+        self.assertEqual((self.tank.cover_width, self.tank.cover_height), (1200, 800))
+
+    def test_the_files_still_lie_under_tanks(self):
+        """Der Ordner kommt jetzt aus dem Mixin — der Pfad bleibt derselbe."""
+        self.tank.cover_image = photo_upload(size=(300, 200))
+        self.tank.save()
+
+        self.assertTrue(self.tank.cover_image.name.startswith(f"tanks/{self.tank.pk}/cover/"))
+        self.assertIn("/cover/thumbs/", self.tank.cover_thumbnail.name)
+        self.assertIn("/cover/preview/", self.tank.cover_preview.name)
+
+    def test_the_location_is_removed(self):
+        self.tank.cover_image = photo_upload(size=(1200, 800), located=True)
+        self.tank.save()
+
+        self.assertNotIn(GPS_IFD, Image.open(BytesIO(self.tank.cover_image.read())).getexif())
+
+    def test_clearing_removes_every_file(self):
+        self.tank.cover_image = photo_upload(size=(1200, 800))
+        self.tank.save()
+        paths = [
+            Path(field.path)
+            for field in (self.tank.cover_image, self.tank.cover_thumbnail, self.tank.cover_preview)
+        ]
+
+        self.tank.clear_cover()
+
+        self.assertFalse(any(path.exists() for path in paths))
+        self.assertFalse(self.tank.has_cover)
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 class GenerateThumbnailsCommandTests(TestCase):
     """Der Befehl für die Bestandsdaten."""
 

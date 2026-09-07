@@ -16,6 +16,11 @@ Auslieferung in Übersichten wird klein. Mit einer Ausnahme: GPS-Angaben werden
 auch aus dem Original entfernt. Aquarienfotos entstehen zu Hause, und die
 eigene Adresse hat in einer Datei nichts verloren, die weitergegeben werden
 kann.
+
+Zwei Mixins stehen dafür bereit: :class:`ImageVariantsMixin` für Modelle, die
+ihre Bildfelder selbst benennen (ein Foto hat ein ``image``), und darauf
+aufbauend :class:`CoverImageMixin`, der die Felder eines Titelbilds gleich
+mitbringt — Becken und Geräte teilen sich beides.
 """
 
 from dataclasses import dataclass
@@ -24,6 +29,7 @@ from io import BytesIO
 from pathlib import Path
 
 from django.core.files.base import ContentFile
+from django.db import models
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 #: EXIF-Tags mit einem Aufnahmezeitpunkt, in absteigender Verlässlichkeit.
@@ -312,6 +318,117 @@ class ImageVariantsMixin:
     def original(self):
         """Das Original samt seiner Maße."""
         return variant(self, None)
+
+
+# --- Titelbild -------------------------------------------------------------
+
+
+def cover_path(instance, filename):
+    return f"{instance.COVER_DIR}/{instance.pk or 'neu'}/cover/{filename}"
+
+
+def cover_thumb_path(instance, filename):
+    return f"{instance.COVER_DIR}/{instance.pk or 'neu'}/cover/thumbs/{filename}"
+
+
+def cover_preview_path(instance, filename):
+    return f"{instance.COVER_DIR}/{instance.pk or 'neu'}/cover/preview/{filename}"
+
+
+class CoverImageMixin(ImageVariantsMixin, models.Model):
+    """Genau ein Titelbild je Objekt — Becken wie Gerät.
+
+    Anders als :class:`ImageVariantsMixin` bringt dieser Mixin die Felder
+    selbst mit: ein Titelbild sieht überall gleich aus, und fünf Felder samt
+    Verarbeitung ein zweites Mal zu schreiben hieße, jede spätere Korrektur an
+    zwei Stellen machen zu müssen — beim zweiten Mal vergisst sie jemand.
+
+    Das Bild ist nicht die Dokumentation des Objekts, sondern seine
+    Wiedererkennung: eins, ersetzbar, entfernbar. Detailaufnahmen gehören in
+    die Galerie (``TankPhoto``) bzw. an die Gerätedokumente.
+
+    Ein Modell setzt nur :attr:`COVER_DIR` — den Ordner, unter dem seine
+    Bilder liegen.
+    """
+
+    #: Erster Abschnitt des Ablageorts, z. B. ``tanks`` oder ``devices``.
+    COVER_DIR = ""
+
+    #: Das Titelbild trägt eigene Feldnamen — ``width`` wäre am Becken schon
+    #: durch ``width_cm`` belegt und meinte dann zweierlei.
+    IMAGE_VARIANTS = VariantFields(
+        source="cover_image",
+        thumbnail="cover_thumbnail",
+        preview="cover_preview",
+        width="cover_width",
+        height="cover_height",
+    )
+
+    cover_image = models.ImageField("Titelbild", upload_to=cover_path, blank=True)
+    # Varianten des Titelbilds. Nicht editierbar: sie entstehen beim Speichern
+    # und haben in keinem Formular etwas zu suchen.
+    cover_thumbnail = models.ImageField(
+        "Titelbild (Kachel)", upload_to=cover_thumb_path, blank=True, editable=False
+    )
+    cover_preview = models.ImageField(
+        "Titelbild (Vorschau)", upload_to=cover_preview_path, blank=True, editable=False
+    )
+    cover_width = models.PositiveIntegerField(
+        "Titelbildbreite", null=True, blank=True, editable=False
+    )
+    cover_height = models.PositiveIntegerField(
+        "Titelbildhöhe", null=True, blank=True, editable=False
+    )
+
+    class Meta:
+        abstract = True
+
+    @property
+    def has_cover(self) -> bool:
+        return bool(getattr(self, self.IMAGE_VARIANTS.source))
+
+    def set_cover(self, upload):
+        """Titelbild setzen oder ersetzen — das bisherige verschwindet dabei.
+
+        Django legt einen Upload unter einem freien Namen ab und lässt den
+        alten Stand liegen. Bei einer Galerie ist das richtig, hier nicht: es
+        gibt genau ein Titelbild, und was ersetzt wurde, ist keine zweite
+        Fassung, sondern Ballast im Speicher.
+        """
+        fields = self.IMAGE_VARIANTS
+        previous = [(file.storage, file.name) for file in variant_files(self)]
+        setattr(self, fields.source, upload)
+        # Die Varianten gehören zum alten Bild; stehen zu lassen hieße, sie
+        # beim Erzeugen der neuen ein zweites Mal löschen zu müssen.
+        for name in (fields.thumbnail, fields.preview):
+            setattr(self, name, "")
+        # Nur das Bildfeld schreiben: an einem Gerät hängen Zugangsdaten, die
+        # ein vollständiges Speichern ohne Grund neu verschlüsseln würde.
+        self.save(update_fields=[fields.source] if self.pk else None)
+        keep = {file.name for file in variant_files(self)}
+        for storage, name in previous:
+            if name not in keep:
+                storage.delete(name)
+
+    def clear_cover(self):
+        """Titelbild samt Varianten entfernen — Datei und Feld."""
+        fields = self.IMAGE_VARIANTS
+        changed = []
+        for name in (fields.source, fields.thumbnail, fields.preview):
+            file = getattr(self, name)
+            if not file:
+                continue
+            file.delete(save=False)
+            # ``delete`` hinterlässt ``None``; die Spalte ist aber nicht
+            # nullbar und will den leeren String sehen.
+            setattr(self, name, "")
+            changed.append(name)
+        for name in (fields.width, fields.height):
+            if getattr(self, name) is not None:
+                setattr(self, name, None)
+                changed.append(name)
+        if changed:
+            self.save(update_fields=changed)
 
 
 # --- Innereien -------------------------------------------------------------

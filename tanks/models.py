@@ -18,7 +18,13 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.enums import Status, WaterType
-from core.images import ImageVariantsMixin, VariantFields
+from core.images import (
+    CoverImageMixin,
+    ImageVariantsMixin,
+    cover_path,
+    cover_preview_path,
+    cover_thumb_path,
+)
 
 #: Anzahl Farbkennungen für Becken (siehe ``.mad-tank-accent-*`` im Stylesheet).
 TANK_ACCENT_COUNT = 8
@@ -31,16 +37,13 @@ WARN_TOLERANCE = Decimal("0.2")
 UPCOMING_DAYS = 14
 
 
-def tank_cover_path(instance, filename):
-    return f"tanks/{instance.pk or 'neu'}/cover/{filename}"
-
-
-def tank_cover_thumb_path(instance, filename):
-    return f"tanks/{instance.pk or 'neu'}/cover/thumbs/{filename}"
-
-
-def tank_cover_preview_path(instance, filename):
-    return f"tanks/{instance.pk or 'neu'}/cover/preview/{filename}"
+# Der Ablageort des Titelbilds kommt jetzt aus ``core.images`` und gilt für
+# jedes Modell mit Titelbild. Die drei alten Namen bleiben als Verweis stehen:
+# Migration 0005 nennt sie, und eine gelaufene Migration schreibt man nicht um.
+# Der Pfad bleibt derselbe — ``Tank.COVER_DIR`` ist ``tanks``.
+tank_cover_path = cover_path
+tank_cover_thumb_path = cover_thumb_path
+tank_cover_preview_path = cover_preview_path
 
 
 def tank_photo_path(instance, filename):
@@ -108,18 +111,11 @@ class TankQuerySet(models.QuerySet):
         )
 
 
-class Tank(ImageVariantsMixin, models.Model):
+class Tank(CoverImageMixin, models.Model):
     """Ein Aquarium eines Benutzers."""
 
-    #: Das Titelbild trägt eigene Feldnamen — ``width`` wäre am Becken schon
-    #: durch ``width_cm`` belegt und meinte dann zweierlei.
-    IMAGE_VARIANTS = VariantFields(
-        source="cover_image",
-        thumbnail="cover_thumbnail",
-        preview="cover_preview",
-        width="cover_width",
-        height="cover_height",
-    )
+    #: Titelbild und Varianten stehen im Mixin; hier steht nur, wo sie liegen.
+    COVER_DIR = "tanks"
 
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="tanks", on_delete=models.CASCADE, verbose_name="Besitzer"
@@ -141,21 +137,6 @@ class Tank(ImageVariantsMixin, models.Model):
         default=1,
         choices=[(i, f"Farbe {i}") for i in range(1, TANK_ACCENT_COUNT + 1)],
         help_text="Bestimmt die Farbmarkierung des Beckens in Listen und auf dem Dashboard.",
-    )
-    cover_image = models.ImageField("Titelbild", upload_to=tank_cover_path, blank=True)
-    # Varianten des Titelbilds. Nicht editierbar: sie entstehen beim Speichern
-    # und haben in keinem Formular etwas zu suchen.
-    cover_thumbnail = models.ImageField(
-        "Titelbild (Kachel)", upload_to=tank_cover_thumb_path, blank=True, editable=False
-    )
-    cover_preview = models.ImageField(
-        "Titelbild (Vorschau)", upload_to=tank_cover_preview_path, blank=True, editable=False
-    )
-    cover_width = models.PositiveIntegerField(
-        "Titelbildbreite", null=True, blank=True, editable=False
-    )
-    cover_height = models.PositiveIntegerField(
-        "Titelbildhöhe", null=True, blank=True, editable=False
     )
     notes = models.TextField("Notizen", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
