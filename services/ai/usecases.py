@@ -282,6 +282,27 @@ def read_measurements(tank: TankFacts, measurements, *, user=None, service=None)
     return _answer(result)
 
 
+def analyse_series(context: prompts.MeasurementContext, *, user=None, service=None) -> Answer:
+    """Ordnet eine Messreihe im Zusammenhang ein.
+
+    Der Unterschied zu :func:`read_measurements` ist der Kontext: hier gehen
+    Verlauf, Ereignisse, Stammdaten und Besatz mit in den Prompt. Was
+    zurückkommt, sind Hinweise — keine Diagnose, und nichts davon schaltet
+    Technik oder legt Termine an.
+    """
+    if not context.current.readings:
+        return Answer(ok=False, error="Die Messreihe enthält keine Werte.")
+    service = service or AIService()
+    result = service.ask(
+        AIUsageLog.Action.MEASUREMENTS,
+        system=prompts.SERIES_SYSTEM,
+        prompt=prompts.series_prompt(context),
+        effort=EFFORT_REASONING,
+        user=user,
+    )
+    return _answer(result)
+
+
 def check_stocking(tank: TankFacts, stock, *, user=None, service=None) -> Answer:
     """Prüft eine Besatzplanung auf Beckengröße, Gruppen und Verträglichkeit."""
     items = [item for item in stock or () if isinstance(item, StockItem)]

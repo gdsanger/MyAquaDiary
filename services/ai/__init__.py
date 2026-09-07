@@ -28,11 +28,20 @@ from .catalog import CatalogMatch, find_matches
 from .client import AIResult, AIService
 from .exceptions import AIBudgetExceeded, AIError, AINotConfigured, AIResponseError
 from .images import PreparedImage, prepare_image
-from .prompts import ReportPeriod, StockItem, TankFacts
+from .prompts import (
+    DiaryEvent,
+    MeasurementContext,
+    Reading,
+    ReportPeriod,
+    Series,
+    StockItem,
+    TankFacts,
+)
 from .usecases import (
     Answer,
     Candidate,
     Identification,
+    analyse_series,
     check_stocking,
     confirm_suggestion,
     draft_profile,
@@ -56,12 +65,17 @@ __all__ = [
     "BudgetStatus",
     "Candidate",
     "CatalogMatch",
+    "DiaryEvent",
     "Identification",
+    "MeasurementContext",
     "PreparedImage",
+    "Reading",
     "ReportPeriod",
+    "Series",
     "StockItem",
     "TankFacts",
     "ai_enabled",
+    "analyse_series",
     "budget_status",
     "check_budget",
     "check_stocking",

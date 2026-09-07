@@ -7,8 +7,10 @@ Modell, das das im Prompt liest, formuliert von sich aus vorsichtiger — das
 ist wirksamer als ein Hinweis, den man hinterher unter die Antwort setzt.
 """
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 #: Gemeinsame Haltung aller Aufrufe.
 BASE_SYSTEM = """\
@@ -62,6 +64,37 @@ deutlich — sachlich, ohne Dramatik.
 - Antworte als Markdown ohne Überschrift: ein kurzer Absatz zur Lage, dann \
 Stichpunkte zu einzelnen Werten."""
 
+SERIES_SYSTEM = f"""\
+{BASE_SYSTEM}
+
+Für diese Aufgabe ordnest du eine frisch erfasste Messreihe im Zusammenhang \
+ein — so, wie es ein erfahrener Aquarianer im Gespräch täte.
+
+Woran du dich hältst:
+- Du siehst den Verlauf, nicht nur den Einzelwert: was hat sich verändert, in \
+welche Richtung, seit wann.
+- Du stellst Zusammenhänge her. Welche Veränderung erklärt sich aus welchem \
+Ereignis? Ein KH-Anstieg nach „Osmosewasser nachgefüllt" heißt etwas anderes \
+als einer ohne.
+- Du benennst die rechnerischen Kopplungen, wo sie tragen: CO₂ folgt aus KH \
+und pH; fällt die KH bei gleichem CO₂, fällt der pH mit; bei Verdunstung \
+laufen Leitfähigkeit und Härte gemeinsam nach oben.
+- Du gleichst gegen die Zielbereiche des Beckens ab und gegen die Ansprüche \
+des Besatzes. Ob 27 °C in Ordnung sind, hängt daran, welche Arten im Becken \
+sind; was an Tag 3 nach dem Einrichten normal ist, ist es an Tag 300 nicht.
+- Du sagst, wo etwas zu tun ist — und sagst genauso deutlich, wenn nichts zu \
+tun ist. „Alles im Rahmen, weitermessen" ist eine vollständige Antwort.
+- Du stellst keine Diagnose und behandelst nicht. Einordnen und Hinweise \
+geben, mehr nicht.
+- Du beruhigst nicht um jeden Preis. Ist ein Wert für die Tiere gefährlich, \
+sagst du das zuerst und ohne Weichzeichner — sachlich, ohne Dramatik.
+- Du erfindest nichts. Was nicht in den Daten steht, kommt in der Auswertung \
+nicht vor; fehlt dir etwas, benennst du die Lücke.
+
+Antworte als Markdown ohne Überschrift: ein kurzer Absatz zur Lage, dann \
+Stichpunkte zu den einzelnen Werten und Zusammenhängen, zuletzt — falls nötig \
+— ein Satz dazu, worauf zu achten ist."""
+
 STOCKING_SYSTEM = f"""\
 {BASE_SYSTEM}
 
@@ -98,6 +131,11 @@ class TankFacts:
     length_cm: int | None = None
     water_type: str = ""
     started_on: str = ""
+    #: Alter seit der Einrichtung, ausgeschrieben („14 Monate"). Bleibt aus der
+    #: Prüfsumme heraus: es ändert sich täglich, die Datenlage nicht.
+    age: str = ""
+    technic: str = ""
+    targets: str = ""
     notes: str = ""
 
     def as_text(self) -> str:
@@ -107,6 +145,9 @@ class TankFacts:
             ("Kantenlänge", f"{self.length_cm} cm" if self.length_cm else ""),
             ("Wasser", self.water_type),
             ("In Betrieb seit", self.started_on),
+            ("Alter", self.age),
+            ("Technik", self.technic),
+            ("Zielbereiche", self.targets),
             ("Notizen", self.notes),
         ]
         known = [f"- {label}: {value}" for label, value in rows if value]
@@ -150,6 +191,133 @@ class ReportPeriod:
                 events_list(self.events),
             ]
         )
+
+
+@dataclass(frozen=True)
+class Reading:
+    """Ein einzelner Messwert samt Zielabgleich.
+
+    Werte und Zielbereiche kommen fertig formatiert an: das Runden gehört
+    zum Parameter (er kennt seine Nachkommastellen), nicht in den Prompt.
+    """
+
+    name: str
+    value: str
+    unit: str = ""
+    target: str = ""
+    status: str = ""
+
+    def as_text(self) -> str:
+        amount = f"{self.value} {self.unit}".strip()
+        remarks = [text for text in (f"Ziel {self.target}" if self.target else "", self.status) if text]
+        suffix = f" ({', '.join(remarks)})" if remarks else ""
+        return f"- {self.name}: {amount}{suffix}"
+
+
+@dataclass(frozen=True)
+class Series:
+    """Eine Messreihe — alles, was an einem Becken zu einem Zeitpunkt gemessen wurde."""
+
+    measured_at: str
+    readings: Sequence[Reading] = field(default_factory=tuple)
+    #: CO₂ in mg/l, aus KH und pH gerechnet. Leer, wenn eines von beidem fehlt.
+    co2: str = ""
+    note: str = ""
+
+    def as_block(self) -> str:
+        """Ausführlich, für die Messreihe, um die es geht."""
+        lines = [f"Gemessen am {self.measured_at}:"]
+        lines += [reading.as_text() for reading in self.readings] or ["- keine Werte"]
+        if self.co2:
+            lines.append(f"- CO₂ (aus KH und pH gerechnet): {self.co2} mg/l")
+        if self.note:
+            lines.append(f"- Notiz des Halters: {self.note}")
+        return "\n".join(lines)
+
+    def as_line(self) -> str:
+        """Knapp, für den Verlauf — eine Zeile je Reihe."""
+        values = "; ".join(
+            f"{reading.name} {reading.value} {reading.unit}".strip() for reading in self.readings
+        )
+        co2 = f"; CO₂ {self.co2} mg/l" if self.co2 else ""
+        return f"- {self.measured_at}: {values or 'keine Werte'}{co2}"
+
+
+@dataclass(frozen=True)
+class DiaryEvent:
+    """Ein Ereignis aus dem Beckentagebuch."""
+
+    occurred_at: str
+    title: str
+    category: str = ""
+    description: str = ""
+
+    def as_text(self) -> str:
+        category = f" [{self.category}]" if self.category else ""
+        detail = f" — {self.description}" if self.description else ""
+        return f"- {self.occurred_at}{category}: {self.title}{detail}"
+
+
+@dataclass(frozen=True)
+class MeasurementContext:
+    """Alles, was die Auswertung einer Messreihe braucht.
+
+    Die Punkte 2 bis 5 sind nicht Beiwerk: ohne Verlauf, Ereignisse,
+    Stammdaten und Besatz kann ein Modell nur allgemeine Sätze bilden, die
+    überall und nirgends gelten.
+    """
+
+    tank: TankFacts
+    current: Series
+    history: Sequence[Series] = field(default_factory=tuple)
+    events: Sequence[DiaryEvent] = field(default_factory=tuple)
+    stock: Sequence[StockItem] = field(default_factory=tuple)
+
+    def as_text(self) -> str:
+        return "\n".join(
+            [
+                "Beckenstammdaten:",
+                self.tank.as_text(),
+                "",
+                "Aktuelle Messreihe:",
+                self.current.as_block(),
+                "",
+                "Messreihen der letzten Tage (älteste zuerst):",
+                _lines(series.as_line() for series in self.history) or "- keine weiteren Messreihen",
+                "",
+                "Letzte Ereignisse (älteste zuerst):",
+                _lines(event.as_text() for event in self.events) or "- keine Ereignisse erfasst",
+                "",
+                "Besatz und Bestand mit den Ansprüchen aus dem Katalog:",
+                _lines(item.as_text() for item in self.stock) or "- nichts erfasst",
+            ]
+        )
+
+    def fingerprint(self) -> str:
+        """Prüfsumme über die Datenlage.
+
+        Stimmt sie noch, ist eine vorhandene Auswertung die Antwort auf
+        dieselbe Frage. Das Alter des Beckens bleibt außen vor — es wächst
+        täglich, ohne dass sich an den Daten etwas geändert hätte.
+        """
+        payload = asdict(self)
+        payload["tank"].pop("age", None)
+        blob = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _lines(parts) -> str:
+    return "\n".join(part for part in parts if part)
+
+
+def series_prompt(context: MeasurementContext) -> str:
+    return "\n".join(
+        [
+            "Ordne die folgende Messreihe im Zusammenhang ein.",
+            "",
+            context.as_text(),
+        ]
+    )
 
 
 def measurements_table(measurements: Sequence[Mapping]) -> str:
