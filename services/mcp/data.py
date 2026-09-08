@@ -37,6 +37,7 @@ from tanks.models import (
     Tank,
     TankDerivedTarget,
     TankParameterTarget,
+    Transfer,
 )
 
 from .exceptions import NotFound
@@ -55,6 +56,7 @@ MODELS = {
     "planting": Planting,
     "substrate_layer": SubstrateLayer,
     "hardscape_item": HardscapeItem,
+    "transfer": Transfer,
     "catalog_animal": AnimalSpecies,
     "catalog_plant": PlantSpecies,
 }
@@ -148,6 +150,13 @@ def stocking(user, stocking_id: int):
 
 def plantings(user):
     return _owned("planting", user).select_related("tank", "species")
+
+
+def planting(user, planting_id: int):
+    found = plantings(user).filter(pk=planting_id).first()
+    if found is None:
+        raise NotFound(NOT_FOUND)
+    return found
 
 
 def substrate_layers(user):
