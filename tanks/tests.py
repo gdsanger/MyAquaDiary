@@ -3,6 +3,7 @@ from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO, StringIO
 from pathlib import Path
+from unittest import mock
 
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
@@ -24,7 +25,7 @@ from core.testing import (
     photo_upload,
     stock,
 )
-from tanks import derived, selectors
+from tanks import derived, selectors, transfers
 from tanks.charts import derived_charts, parameter_series
 from tanks.models import (
     BOTANICALS_DAYS,
@@ -39,6 +40,7 @@ from tanks.models import (
     Tank,
     TankParameterTarget,
     TankPhoto,
+    Transfer,
     classify_below_detection,
     classify_value,
 )
@@ -1041,6 +1043,392 @@ class PlantingWriteTests(TestCase):
 
         self.client.post(reverse("tanks:planting-delete", args=[self.tank.slug, planting.pk]))
         self.assertFalse(Planting.objects.exists())
+
+
+class TransferTestCase(TestCase):
+    """Zwei eigene Becken und zehn Panzerwelse im ersten davon.
+
+    Die Ausgangslage ist die aus #1247: vier von zehn *Corydoras* ziehen um.
+    Mit einer Mindestgruppengröße von sechs bleibt genau eine vertretbare
+    Gruppe zurück — dieser Fall soll ohne Hinweis durchlaufen, damit die Tests
+    zum Umzug nicht versehentlich den Hinweisweg testen.
+    """
+
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.source = create_tank(self.user, name="Suedamerikabecken")
+        self.target = create_tank(self.user, name="Grosses Becken")
+        self.species = create_animal(
+            "Corydoras aeneus",
+            common_name="Bronze-Panzerwels",
+            slug="corydoras-aeneus",
+            min_group_size=6,
+        )
+        self.stocking = stock(self.source, self.species, quantity=10)
+
+    def transfer_url(self, entry=None):
+        entry = entry or self.stocking
+        return reverse("tanks:stocking-transfer", args=[self.source.slug, entry.pk])
+
+    def post_transfer(self, quantity=4, **extra):
+        payload = {
+            "target_tank": self.target.pk,
+            "quantity": str(quantity),
+            "moved_on": timezone.localdate().isoformat(),
+            "note": "",
+        }
+        payload.update(extra)
+        return self.client.post(self.transfer_url(), payload)
+
+
+class TransferTests(TransferTestCase):
+    """Der Umzug selbst: Quellbecken, Zielbecken, Ereignisse, Nachweis."""
+
+    def test_a_part_of_the_stock_moves_and_the_rest_stays(self):
+        self.post_transfer(quantity=4)
+
+        self.stocking.refresh_from_db()
+        self.assertEqual(self.stocking.quantity, 6)
+        self.assertIsNone(self.stocking.removed_on)
+        self.assertEqual(self.target.stockings.get().quantity, 4)
+
+    def test_the_new_entry_starts_on_the_day_of_the_move(self):
+        yesterday = timezone.localdate() - timedelta(days=1)
+        self.post_transfer(quantity=4, moved_on=yesterday.isoformat())
+
+        self.assertEqual(self.target.stockings.get().added_on, yesterday)
+
+    def test_moving_everything_books_the_departure_in_the_source_tank(self):
+        """Bleibt nichts zurück, ist der Posten kein aktiver Besatz mehr.
+
+        Gelöscht wird er trotzdem nicht: dass hier einmal Panzerwelse
+        schwammen, gehört zur Geschichte des Beckens.
+        """
+        today = timezone.localdate()
+        self.post_transfer(quantity=10)
+
+        self.stocking.refresh_from_db()
+        self.assertEqual(self.stocking.quantity, 0)
+        self.assertEqual(self.stocking.removed_on, today)
+        self.assertFalse(self.stocking.is_active)
+
+    def test_the_target_tank_merges_instead_of_duplicating(self):
+        existing = stock(self.target, self.species, quantity=3)
+        self.post_transfer(quantity=4)
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.quantity, 7)
+        self.assertEqual(self.target.stockings.count(), 1)
+
+    def test_a_departed_entry_in_the_target_tank_is_not_revived(self):
+        """Zusammengeführt wird nur mit aktivem Besatz.
+
+        Ein Posten mit Abgangsdatum steht für Tiere, die das Becken verlassen
+        haben; sie kehren nicht dadurch zurück, dass neue ankommen.
+        """
+        gone = stock(self.target, self.species, quantity=3)
+        gone.removed_on = timezone.localdate() - timedelta(days=5)
+        gone.save(update_fields=["removed_on"])
+
+        self.post_transfer(quantity=4)
+
+        gone.refresh_from_db()
+        self.assertEqual(gone.quantity, 3)
+        self.assertEqual(self.target.stockings.filter(removed_on__isnull=True).get().quantity, 4)
+
+    def test_both_tanks_get_an_event_naming_the_other(self):
+        self.post_transfer(quantity=4)
+
+        out = self.source.events.get()
+        arrival = self.target.events.get()
+        self.assertEqual(out.category, Event.Category.STOCKING)
+        self.assertEqual(arrival.category, Event.Category.STOCKING)
+        self.assertIn(self.target.name, out.title)
+        self.assertIn(self.source.name, arrival.title)
+
+    def test_the_transfer_stays_as_evidence(self):
+        self.post_transfer(quantity=4, note="Nach der Einfahrphase")
+
+        transfer = Transfer.objects.get()
+        self.assertEqual(transfer.kind, Transfer.Kind.ANIMAL)
+        self.assertEqual(transfer.animal, self.species)
+        self.assertIsNone(transfer.plant)
+        self.assertEqual(transfer.source_tank, self.source)
+        self.assertEqual(transfer.target_tank, self.target)
+        self.assertEqual(transfer.quantity, 4)
+        self.assertEqual(transfer.note, "Nach der Einfahrphase")
+        self.assertEqual(transfer.created_by, self.user)
+
+    def test_everything_or_nothing(self):
+        """Ein Umzug, der auf halbem Weg scheitert, hinterlässt keine Spur.
+
+        Tiere im Quellbecken abgezogen und im Zielbecken nie angekommen wäre
+        schlimmer als gar keine Funktion — deshalb hängen alle Schritte in
+        einer Transaktion.
+        """
+        move = transfers.Move(
+            entry=self.stocking,
+            target_tank=self.target,
+            quantity=4,
+            moved_on=timezone.localdate(),
+        )
+        with mock.patch.object(Event.objects, "bulk_create", side_effect=RuntimeError("Bruch")):
+            with self.assertRaises(RuntimeError):
+                transfers.perform(move)
+
+        self.stocking.refresh_from_db()
+        self.assertEqual(self.stocking.quantity, 10)
+        self.assertFalse(self.target.stockings.exists())
+        self.assertFalse(Transfer.objects.exists())
+        self.assertFalse(Event.objects.exists())
+
+
+class TransferRuleTests(TransferTestCase):
+    """Was abgewiesen wird — im Unterschied zu dem, was nur angemerkt wird."""
+
+    def test_more_than_the_stock_is_refused(self):
+        response = self.post_transfer(quantity=11)
+
+        self.assertContains(response, "Im Quellbecken sind nur 10.")
+        self.stocking.refresh_from_db()
+        self.assertEqual(self.stocking.quantity, 10)
+        self.assertFalse(Transfer.objects.exists())
+
+    def test_a_date_before_the_stocking_is_refused(self):
+        too_early = (self.stocking.added_on - timedelta(days=1)).isoformat()
+        self.post_transfer(quantity=4, moved_on=too_early)
+
+        self.assertFalse(Transfer.objects.exists())
+
+    def test_a_date_in_the_future_is_refused(self):
+        tomorrow = (timezone.localdate() + timedelta(days=1)).isoformat()
+        self.post_transfer(quantity=4, moved_on=tomorrow)
+
+        self.assertFalse(Transfer.objects.exists())
+
+    def test_a_foreign_tank_is_no_target(self):
+        """Eine Abgabe an Dritte ist kein Umzug, sondern ein Abgang."""
+        stranger = create_user("fremder")
+        foreign = create_tank(stranger, name="Fremdes Becken")
+
+        self.post_transfer(quantity=4, target_tank=foreign.pk)
+
+        self.assertFalse(Transfer.objects.exists())
+        self.assertFalse(foreign.stockings.exists())
+
+    def test_a_dissolved_tank_is_no_target(self):
+        self.target.dissolved_on = timezone.localdate()
+        self.target.save(update_fields=["dissolved_on"])
+
+        self.post_transfer(quantity=4)
+
+        self.assertFalse(Transfer.objects.exists())
+
+    def test_the_source_tank_is_no_target(self):
+        self.post_transfer(quantity=4, target_tank=self.source.pk)
+
+        self.assertFalse(Transfer.objects.exists())
+
+    def test_a_departed_entry_cannot_be_moved(self):
+        self.stocking.removed_on = timezone.localdate()
+        self.stocking.save(update_fields=["removed_on"])
+
+        self.assertEqual(self.client.get(self.transfer_url()).status_code, 404)
+
+    def test_a_foreign_entry_is_not_reachable(self):
+        stranger = create_user("fremder")
+        foreign = create_tank(stranger, name="Fremdes Becken")
+        foreign_stocking = stock(foreign, self.species)
+
+        response = self.client.get(
+            reverse("tanks:stocking-transfer", args=[foreign.slug, foreign_stocking.pk])
+        )
+        self.assertEqual(response.status_code, 404)
+
+
+class TransferHintTests(TransferTestCase):
+    """Hinweise: sie erscheinen vor dem Umzug und halten ihn nicht auf."""
+
+    def move(self, quantity=4):
+        return transfers.Move(
+            entry=self.stocking,
+            target_tank=self.target,
+            quantity=quantity,
+            moved_on=timezone.localdate(),
+        )
+
+    def test_water_values_far_apart_are_pointed_out(self):
+        create_measurement(self.source, "kh", "18")
+        create_measurement(self.target, "kh", "5")
+
+        hints = transfers.hints(self.move())
+        self.assertTrue(any("Karbonathärte" in hint for hint in hints))
+
+    def test_a_small_difference_is_not_worth_a_hint(self):
+        create_measurement(self.source, "kh", "8")
+        create_measurement(self.target, "kh", "6")
+
+        self.assertEqual(transfers.hints(self.move()), [])
+
+    def test_a_value_measured_in_only_one_tank_is_no_deviation(self):
+        """„Nie gemessen“ ist keine Abweichung.
+
+        Ein Hinweis ohne Grundlage lernt man schnell zu überlesen — und dann
+        auch den mit Grundlage.
+        """
+        create_measurement(self.source, "kh", "18")
+
+        self.assertEqual(transfers.hints(self.move()), [])
+
+    def test_a_target_outside_the_species_range_is_pointed_out(self):
+        self.species.temperature_min = Decimal("24.0")
+        self.species.temperature_max = Decimal("28.0")
+        self.species.save(update_fields=["temperature_min", "temperature_max"])
+        create_measurement(self.target, "temperatur", "21.0")
+
+        hints = transfers.hints(self.move())
+        self.assertTrue(any("Temperatur" in hint for hint in hints))
+
+    def test_a_group_left_too_small_is_pointed_out(self):
+        """Vier von zehn zurückzulassen ist vertretbar, acht wegzunehmen nicht."""
+        self.assertEqual(transfers.hints(self.move(quantity=4)), [])
+
+        hints = transfers.hints(self.move(quantity=8))
+        self.assertTrue(any("Mindestgruppengröße" in hint for hint in hints))
+
+    def test_moving_the_whole_group_leaves_no_group_to_be_too_small(self):
+        self.assertEqual(transfers.hints(self.move(quantity=10)), [])
+
+    def test_plants_have_no_group_size(self):
+        planting = Planting.objects.create(
+            tank=self.source,
+            species=create_plant(),
+            quantity=10,
+            planted_on=timezone.localdate() - timedelta(days=30),
+        )
+        move = transfers.Move(
+            entry=planting,
+            target_tank=self.target,
+            quantity=8,
+            moved_on=timezone.localdate(),
+        )
+        self.assertEqual(transfers.hints(move), [])
+
+    def test_the_first_attempt_shows_the_hints_and_books_nothing(self):
+        response = self.post_transfer(quantity=8)
+
+        self.assertContains(response, "Mindestgruppengröße")
+        self.assertContains(response, "Trotzdem umsetzen")
+        self.assertFalse(Transfer.objects.exists())
+        self.stocking.refresh_from_db()
+        self.assertEqual(self.stocking.quantity, 10)
+
+    def test_a_hint_is_no_lock(self):
+        self.post_transfer(quantity=8)
+        self.post_transfer(quantity=8, bestaetigt="1")
+
+        self.assertEqual(Transfer.objects.get().quantity, 8)
+        self.stocking.refresh_from_db()
+        self.assertEqual(self.stocking.quantity, 2)
+
+
+class TransferDisplayTests(TransferTestCase):
+    """Wo der Umzug hinterher zu sehen ist."""
+
+    def test_the_origin_is_visible_on_the_target_entry(self):
+        self.post_transfer(quantity=4)
+
+        response = self.client.get(f"{self.target.get_absolute_url()}?reiter=besatz")
+        self.assertContains(response, f"aus {self.source.name}")
+
+    def test_an_entry_without_a_transfer_has_no_origin(self):
+        stock(self.target, self.species, quantity=5)
+
+        response = self.client.get(f"{self.target.get_absolute_url()}?reiter=besatz")
+        self.assertNotContains(response, "aus ")
+
+    def test_the_overview_lists_transfers_across_tanks_and_species(self):
+        self.post_transfer(quantity=4)
+
+        response = self.client.get(reverse("tanks:transfer-list"))
+        self.assertContains(response, self.species.display_name)
+        self.assertContains(response, self.source.name)
+        self.assertContains(response, self.target.name)
+
+    def test_the_overview_shows_only_own_transfers(self):
+        stranger = create_user("fremder")
+        first = create_tank(stranger, name="Fremd eins")
+        second = create_tank(stranger, name="Fremd zwei")
+        Transfer.objects.create(
+            kind=Transfer.Kind.ANIMAL,
+            source_tank=first,
+            target_tank=second,
+            animal=self.species,
+            quantity=3,
+            moved_on=timezone.localdate(),
+        )
+
+        response = self.client.get(reverse("tanks:transfer-list"))
+        self.assertNotContains(response, "Fremd eins")
+
+    def test_a_tank_that_gave_animals_away_is_dissolved_instead_of_deleted(self):
+        """``PROTECT`` am Umzug und ``has_history`` müssen dasselbe sagen.
+
+        Sagen sie es nicht, versucht die Löschansicht ein Becken zu löschen,
+        das die Datenbank nicht hergibt — und der Benutzer sieht einen Fehler
+        statt der Auflösung.
+        """
+        self.post_transfer(quantity=4)
+        self.target.events.all().delete()
+        self.target.stockings.all().delete()
+
+        self.assertTrue(self.target.has_history)
+        response = self.client.post(reverse("tanks:delete", args=[self.target.slug]))
+        self.assertRedirects(response, reverse("tanks:dissolve", args=[self.target.slug]))
+        self.assertTrue(Tank.objects.filter(pk=self.target.pk).exists())
+
+
+class PlantingTransferTests(TestCase):
+    """Pflanzen ziehen genauso um — nur heißt das Datum anders."""
+
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.source = create_tank(self.user, name="Mutterbecken")
+        self.target = create_tank(self.user, name="Ableger")
+        self.species = create_plant()
+        self.planting = Planting.objects.create(
+            tank=self.source,
+            species=self.species,
+            quantity=12,
+            planted_on=timezone.localdate() - timedelta(days=60),
+        )
+
+    def test_plants_move_between_tanks(self):
+        self.client.post(
+            reverse("tanks:planting-transfer", args=[self.source.slug, self.planting.pk]),
+            {
+                "target_tank": self.target.pk,
+                "quantity": "5",
+                "moved_on": timezone.localdate().isoformat(),
+                "note": "vermehrt",
+            },
+        )
+
+        self.planting.refresh_from_db()
+        self.assertEqual(self.planting.quantity, 7)
+
+        arrived = self.target.plantings.get()
+        self.assertEqual(arrived.quantity, 5)
+        # ``planted_on`` statt ``added_on`` — beim Schreiben von Code der
+        # häufigste Griff daneben.
+        self.assertEqual(arrived.planted_on, timezone.localdate())
+
+        transfer = Transfer.objects.get()
+        self.assertEqual(transfer.kind, Transfer.Kind.PLANT)
+        self.assertEqual(transfer.plant, self.species)
+        self.assertIsNone(transfer.animal)
 
 
 class SubstrateModelTests(TestCase):
