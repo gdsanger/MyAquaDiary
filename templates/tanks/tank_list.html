@@ -8,7 +8,10 @@
     <h1 class="mad-page-title">Becken</h1>
     <p class="mad-page-subtitle">{{ active_tanks|length }} aktive Becken</p>
   </div>
-  <a href="{% url 'tanks:create' %}" class="btn btn-primary btn-sm">Becken anlegen</a>
+  <div class="mad-actions">
+    <a href="{% url 'tanks:transfer-list' %}" class="btn btn-outline-secondary btn-sm">Umzüge</a>
+    <a href="{% url 'tanks:create' %}" class="btn btn-primary btn-sm">Becken anlegen</a>
+  </div>
 </div>
 
 {% if active_tanks %}

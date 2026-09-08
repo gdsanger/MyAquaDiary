@@ -16,7 +16,7 @@ from django.views.generic import TemplateView, View
 
 from core.views import NavSectionMixin
 
-from . import derived, selectors
+from . import derived, selectors, transfers
 from .charts import derived_charts, key_parameter_charts
 from .forms import (
     CareTaskForm,
@@ -35,6 +35,7 @@ from .forms import (
     TankDissolveForm,
     TankForm,
     TankParameterTargetForm,
+    TransferForm,
 )
 from .models import (
     CareTask,
@@ -145,9 +146,19 @@ def tab_context(tank, tab):
         # stehen an jedem Eintrag.
         return {"events": tank.events.prefetch_related("photos")[:100]}
     if tab == "besatz":
-        return {"stockings": tank.stockings.select_related("species").prefetch_related("species__images")}
+        # ``annotate_origins`` hängt die Herkunft an — mit einer Abfrage für
+        # die ganze Liste, nicht mit einer je Zeile.
+        return {
+            "stockings": transfers.annotate_origins(
+                tank.stockings.select_related("species").prefetch_related("species__images"), tank
+            )
+        }
     if tab == "pflanzen":
-        return {"plantings": tank.plantings.select_related("species").prefetch_related("species__images")}
+        return {
+            "plantings": transfers.annotate_origins(
+                tank.plantings.select_related("species").prefetch_related("species__images"), tank
+            )
+        }
     if tab == "einrichtung":
         # Einmal vorladen: Schichtstapel, Gesamthöhe und Zusammenfassung
         # arbeiten danach auf denselben Objekten statt auf drei Abfragen.
@@ -725,6 +736,97 @@ class PlantingDeleteView(TankObjectConfirmView):
     title = "Bepflanzung löschen"
     question = "Dieser Eintrag wird gelöscht. Fortfahren?"
     url_name = "tanks:planting-delete"
+
+
+# --- Umsetzen zwischen Becken ---------------------------------------------
+
+
+class TransferView(TankFragmentView):
+    """Tiere oder Pflanzen in ein anderes eigenes Becken umsetzen.
+
+    Gibt es etwas zu bedenken — abweichende Wasserwerte, Artansprüche, eine zu
+    klein werdende Gruppe —, zeigt der erste ``POST`` die Hinweise und lässt
+    das Formular stehen; erst der zweite bucht. Das ist keine Sperre: derselbe
+    Knopf führt weiter, er heißt nur anders. Der Zwischenschritt ist der einzige
+    Weg, der ohne JavaScript auskommt und den Hinweis trotzdem *vor* den Umzug
+    stellt — hinterher wäre er ein Vorwurf statt einer Entscheidungshilfe.
+    """
+
+    #: Name der URL, an die das Formular sendet.
+    url_name = ""
+    #: Überschrift des Overlays.
+    title = ""
+
+    def get_queryset(self):
+        # Was abgegangen ist, zieht nicht mehr um.
+        return self.model.objects.filter(tank=self.tank, removed_on__isnull=True)
+
+    def get_form(self, data=None):
+        return TransferForm(data, entry=self.get_object())
+
+    def form_context(self, form, hints=()):
+        hints = list(hints)
+        return self.modal(
+            title=self.title,
+            action=reverse(self.url_name, args=[self.tank.slug, self.kwargs["pk"]]),
+            body_template="tanks/partials/form_modal.html",
+            modal_before_fields="tanks/partials/transfer_hints.html",
+            form=form,
+            modal_submit="Trotzdem umsetzen" if hints else "Umsetzen",
+            modal_hint=(
+                "Der Bestand wird im Quellbecken verringert und im Zielbecken "
+                "zusammengeführt. Beide Becken bekommen ein Ereignis."
+            ),
+            transfer_hints=hints,
+        )
+
+    def get(self, request, **kwargs):
+        return self.render_tab(self.form_context(self.get_form()))
+
+    def post(self, request, **kwargs):
+        form = self.get_form(request.POST)
+        if not form.is_valid():
+            return self.render_tab(self.form_context(form))
+        move = form.move()
+        found = transfers.hints(move)
+        if found and not request.POST.get("bestaetigt"):
+            return self.render_tab(self.form_context(form, found))
+        transfer = transfers.perform(move, user=request.user)
+        return self.done(
+            f"{transfer.quantity}× {transfer.species.display_name} nach "
+            f"„{transfer.target_tank.name}“ umgesetzt."
+        )
+
+
+class StockingTransferView(TransferView):
+    model = Stocking
+    tab = "besatz"
+    title = "Besatz umsetzen"
+    url_name = "tanks:stocking-transfer"
+
+
+class PlantingTransferView(TransferView):
+    model = Planting
+    tab = "pflanzen"
+    title = "Pflanzen umsetzen"
+    url_name = "tanks:planting-transfer"
+
+
+class TransferListView(LoginRequiredMixin, NavSectionMixin, TemplateView):
+    """Alle Umzüge des Benutzers, becken- und artübergreifend.
+
+    In der Beckengeschichte steht ein Umzug zweimal — einmal je Becken. Wer
+    nachvollziehen will, wohin eine Art gewandert ist, sucht sonst in zwei
+    Zeitleisten nach zwei Hälften desselben Vorgangs.
+    """
+
+    template_name = "tanks/transfer_list.html"
+    nav_section = "tanks"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["transfers"] = transfers.for_user(self.request.user)
+        return context
 
 
 # --- Termine --------------------------------------------------------------

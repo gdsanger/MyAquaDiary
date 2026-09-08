@@ -43,6 +43,7 @@ from tanks.models import (
     Tank,
     TankDerivedTarget,
     TankParameterTarget,
+    Transfer,
 )
 
 from .test_mcp_tokens import make_user
@@ -873,6 +874,143 @@ class StockTests(ToolTestCase):
         self.assertEqual(foreign.quantity, 8)
 
 
+class TransferTests(ToolTestCase):
+    """Umsetzen zwischen zwei Becken — beide gegen den Token-Inhaber geprüft."""
+
+    def setUp(self):
+        super().setUp()
+        self.second_tank = make_tank(self.user, "Aufzuchtbecken")
+        self.guppy_species = self.guppy()
+        self.stocking = Stocking.objects.create(
+            tank=self.tank,
+            species=self.guppy_species,
+            quantity=10,
+            added_on=timezone.localdate() - timedelta(days=30),
+        )
+
+    def move(self, **extra):
+        arguments = {
+            "stocking_id": self.stocking.pk,
+            "target_tank_id": self.second_tank.pk,
+            "quantity": 4,
+        }
+        arguments.update(extra)
+        return self.call("transfer_stock", **arguments)
+
+    def test_the_animals_arrive_and_the_source_shrinks(self):
+        result = self.move()
+
+        self.stocking.refresh_from_db()
+        self.assertEqual(self.stocking.quantity, 6)
+        self.assertEqual(result["source"]["quantity"], 6)
+        self.assertEqual(result["target"]["quantity"], 4)
+        self.assertEqual(result["target"]["tank_id"], self.second_tank.pk)
+
+    def test_the_answer_names_both_tanks(self):
+        transfer = self.move()["transfer"]
+
+        self.assertEqual(transfer["source_tank"], self.tank.name)
+        self.assertEqual(transfer["target_tank"], self.second_tank.name)
+        self.assertEqual(transfer["kind"], "animal")
+        self.assertEqual(transfer["quantity"], 4)
+
+    def test_without_a_quantity_the_whole_stock_moves(self):
+        self.move(quantity=None)
+
+        self.stocking.refresh_from_db()
+        self.assertEqual(self.stocking.quantity, 0)
+        self.assertEqual(self.stocking.removed_on, timezone.localdate())
+
+    def test_both_tanks_get_an_event(self):
+        self.move()
+
+        self.assertEqual(Event.objects.filter(tank=self.tank).count(), 1)
+        self.assertEqual(Event.objects.filter(tank=self.second_tank).count(), 1)
+
+    def test_what_was_to_be_considered_comes_back_as_hints(self):
+        """Der Hinweis hält den Aufruf nicht auf — er steht in der Antwort.
+
+        Ein Rückfrageschritt im Protokoll wäre eine Bestätigung, die niemand
+        gelesen hat.
+        """
+        result = self.move(quantity=8)
+
+        self.assertTrue(any("Mindestgruppengröße" in hint for hint in result["hints"]))
+        self.stocking.refresh_from_db()
+        self.assertEqual(self.stocking.quantity, 2)
+
+    def test_a_quiet_move_has_no_hints(self):
+        self.assertEqual(self.move()["hints"], [])
+
+    def test_a_foreign_target_tank_is_not_found(self):
+        with self.assertRaises(ToolError):
+            self.move(target_tank_id=self.foreign_tank.pk)
+
+        self.stocking.refresh_from_db()
+        self.assertEqual(self.stocking.quantity, 10)
+        self.assertFalse(Stocking.objects.filter(tank=self.foreign_tank).exists())
+
+    def test_a_foreign_stock_item_is_not_found(self):
+        foreign = Stocking.objects.create(
+            tank=self.foreign_tank,
+            species=self.guppy_species,
+            quantity=8,
+            added_on=timezone.localdate(),
+        )
+
+        with self.assertRaises(ToolError):
+            self.move(stocking_id=foreign.pk)
+
+        foreign.refresh_from_db()
+        self.assertEqual(foreign.quantity, 8)
+
+    def test_more_than_the_stock_is_refused(self):
+        with self.assertRaises(ToolError):
+            self.move(quantity=11)
+
+        self.stocking.refresh_from_db()
+        self.assertEqual(self.stocking.quantity, 10)
+
+    def test_the_same_tank_twice_is_refused(self):
+        with self.assertRaises(ToolError):
+            self.move(target_tank_id=self.tank.pk)
+
+    def test_plants_move_too_and_merge_in_the_target(self):
+        moss = self.moss()
+        planting = Planting.objects.create(
+            tank=self.tank,
+            species=moss,
+            quantity=9,
+            planted_on=timezone.localdate() - timedelta(days=30),
+        )
+        existing = Planting.objects.create(
+            tank=self.second_tank,
+            species=moss,
+            quantity=2,
+            planted_on=timezone.localdate() - timedelta(days=10),
+        )
+
+        result = self.call(
+            "transfer_planting",
+            planting_id=planting.pk,
+            target_tank_id=self.second_tank.pk,
+            quantity=3,
+        )
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.quantity, 5)
+        self.assertEqual(result["target"]["planting_id"], existing.pk)
+        self.assertEqual(Planting.objects.filter(tank=self.second_tank).count(), 1)
+        self.assertEqual(result["transfer"]["kind"], "plant")
+
+    def test_the_transfer_is_logged_with_a_reference(self):
+        self.move()
+
+        entry = MCPAccessLog.objects.get(tool="transfer_stock")
+        self.assertTrue(entry.succeeded)
+        self.assertEqual(entry.object_ref, f"tanks.Transfer:{Transfer.objects.get().pk}")
+
+
 class SubstrateWriteTests(ToolTestCase):
     """Bodengrund anlegen und fortschreiben — mit der heiklen Reihenfolge."""
 
@@ -1130,6 +1268,15 @@ class EveryToolTests(ToolTestCase):
         self.hardscape = HardscapeItem.objects.create(
             tank=self.tank, kind=HardscapeItem.Kind.WOOD, name="Moorkienwurzel", quantity=1
         )
+        # Umsetzen braucht ein zweites eigenes Becken und je einen Eintrag, der
+        # umziehen kann.
+        self.second_tank = make_tank(self.user, "Aufzuchtbecken")
+        self.planting = Planting.objects.create(
+            tank=self.tank,
+            species=self.moss_species,
+            quantity=6,
+            planted_on=timezone.localdate(),
+        )
 
     def valid_arguments(self):
         """Gültige Argumente je Werkzeug — die Vorlage für den Aufruf."""
@@ -1151,6 +1298,16 @@ class EveryToolTests(ToolTestCase):
             "add_stocking": {"tank_id": self.tank.pk, "species_id": self.guppy_species.pk},
             "add_planting": {"tank_id": self.tank.pk, "species_id": self.moss_species.pk},
             "update_stocking": {"stocking_id": self.stocking.pk, "quantity": 9},
+            "transfer_stock": {
+                "stocking_id": self.stocking.pk,
+                "target_tank_id": self.second_tank.pk,
+                "quantity": 2,
+            },
+            "transfer_planting": {
+                "planting_id": self.planting.pk,
+                "target_tank_id": self.second_tank.pk,
+                "quantity": 2,
+            },
             "add_substrate_layer": {"tank_id": self.tank.pk, "kind": "gravel"},
             "update_substrate_layer": {"layer_id": self.layer.pk, "depth_cm": 5},
             "add_hardscape_item": {
@@ -1198,6 +1355,16 @@ class EveryToolTests(ToolTestCase):
                 "species_id": self.moss_species.pk,
             },
             "update_stocking": {"stocking_id": 999_999, "quantity": 1},
+            # Beide Kennungen werden geprüft: hier die des Zielbeckens, denn
+            # ein Umzug in ein fremdes Becken wäre eine Abgabe an Dritte.
+            "transfer_stock": {
+                "stocking_id": self.stocking.pk,
+                "target_tank_id": self.foreign_tank.pk,
+            },
+            "transfer_planting": {
+                "planting_id": 999_999,
+                "target_tank_id": self.second_tank.pk,
+            },
             "add_substrate_layer": {"tank_id": self.foreign_tank.pk, "kind": "gravel"},
             "update_substrate_layer": {"layer_id": 999_999, "depth_cm": 5},
             "add_hardscape_item": {

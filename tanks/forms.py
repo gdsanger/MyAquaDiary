@@ -16,6 +16,7 @@ from catalog.models import AnimalSpecies, PlantSpecies
 from core.forms import BootstrapMixin, DateField, DateTimeField, MultipleImageField
 from core.images import taken_at
 
+from . import transfers
 from .models import (
     NUTRIENT_DEPOT_DAYS,
     CareTask,
@@ -470,6 +471,65 @@ class PlantingForm(BootstrapMixin, forms.ModelForm):
             self.add_error(
                 "removed_on", "Die Pflanze kann nicht vor dem Einsetzen entfernt worden sein."
             )
+        return cleaned
+
+
+class TransferForm(BootstrapMixin, forms.Form):
+    """Umsetzen eines Besatz- oder Pflanzeneintrags in ein anderes Becken.
+
+    Kein ``ModelForm``: der Umzug ändert drei Datensätze und legt drei weitere
+    an. Was davon geschieht, steht in :mod:`tanks.transfers` und nicht hier —
+    dieses Formular sammelt die vier Angaben ein und übergibt sie als
+    :class:`~tanks.transfers.Move`.
+
+    Die Regeln prüft ebenfalls :mod:`tanks.transfers`; das Formular reicht die
+    Meldungen nur an seine Felder weiter. Zwei Fassungen derselben Prüfung —
+    eine fürs Formular, eine für MCP — liefen auseinander.
+    """
+
+    target_tank = forms.ModelChoiceField(
+        label="Zielbecken", queryset=Tank.objects.none(), empty_label="Becken wählen …"
+    )
+    quantity = forms.IntegerField(label="Anzahl", min_value=1)
+    moved_on = DateField(label="Umgesetzt am", initial=timezone.localdate)
+    note = forms.CharField(
+        label="Notiz", required=False, widget=forms.Textarea(attrs={"rows": 2})
+    )
+
+    def __init__(self, *args, entry, **kwargs):
+        self.entry = entry
+        super().__init__(*args, **kwargs)
+        # Nur eigene, aktive Becken — und nicht das, aus dem umgesetzt wird.
+        self.fields["target_tank"].queryset = (
+            Tank.objects.for_user(entry.tank.owner).active().exclude(pk=entry.tank_id)
+        )
+        self.fields["quantity"].initial = entry.quantity
+        # Nur als Hinweis für das Eingabefeld; abgewiesen wird eine zu große
+        # Menge in ``transfers.check`` — die Obergrenze steht dort, wo auch die
+        # MCP-Werkzeuge sie sehen.
+        self.fields["quantity"].widget.attrs["max"] = entry.quantity
+        self.fields["quantity"].help_text = f"Höchstens {entry.quantity} — Teilmengen sind möglich."
+
+    def move(self):
+        """Die geprüften Eingaben als Vorgang."""
+        return transfers.Move(
+            entry=self.entry,
+            target_tank=self.cleaned_data["target_tank"],
+            quantity=self.cleaned_data["quantity"],
+            moved_on=self.cleaned_data["moved_on"],
+            note=self.cleaned_data["note"],
+        )
+
+    def clean(self):
+        cleaned = super().clean()
+        # Nur prüfen, wenn alle Angaben da sind: sonst meldete jeder fehlende
+        # Pflichtwert zusätzlich einen Folgefehler aus ``check``.
+        if self.errors:
+            return cleaned
+        try:
+            transfers.check(self.move())
+        except forms.ValidationError as exc:
+            self.add_error(None, exc)
         return cleaned
 
 

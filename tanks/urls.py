@@ -8,6 +8,7 @@ urlpatterns = [
     path("", views.TankListView.as_view(), name="list"),
     # Feste Pfade stehen vor der Slug-Route, sonst schluckt der Slug-Matcher sie.
     path("neu/", views.TankCreateView.as_view(), name="create"),
+    path("umzuege/", views.TransferListView.as_view(), name="transfer-list"),
     path("<slug:slug>/", views.TankDetailView.as_view(), name="detail"),
     path("<slug:slug>/bearbeiten/", views.TankUpdateView.as_view(), name="update"),
     path("<slug:slug>/aufloesen/", views.TankDissolveView.as_view(), name="dissolve"),
@@ -58,6 +59,11 @@ urlpatterns = [
         views.StockingRemoveView.as_view(),
         name="stocking-remove",
     ),
+    path(
+        "<slug:slug>/besatz/<int:pk>/umsetzen/",
+        views.StockingTransferView.as_view(),
+        name="stocking-transfer",
+    ),
     # Bepflanzung
     path("<slug:slug>/pflanzen/neu/", views.PlantingCreateView.as_view(), name="planting-create"),
     path(
@@ -69,6 +75,11 @@ urlpatterns = [
         "<slug:slug>/pflanzen/<int:pk>/loeschen/",
         views.PlantingDeleteView.as_view(),
         name="planting-delete",
+    ),
+    path(
+        "<slug:slug>/pflanzen/<int:pk>/umsetzen/",
+        views.PlantingTransferView.as_view(),
+        name="planting-transfer",
     ),
     # Einrichtung: Bodengrund
     path(

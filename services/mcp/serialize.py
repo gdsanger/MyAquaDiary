@@ -327,6 +327,29 @@ def planting(instance) -> dict:
     }
 
 
+def transfer(instance) -> dict:
+    """Ein Umzug zwischen zwei eigenen Becken.
+
+    Beide Becken stehen mit Kennung **und** Namen darin: ein Modell, das den
+    Umzug nacherzählt, hat sonst nur zwei Zahlen und muss nachfragen.
+    """
+    return {
+        "transfer_id": instance.pk,
+        "kind": instance.kind,
+        "kind_label": _display(instance, "kind"),
+        "source_tank_id": instance.source_tank_id,
+        "source_tank": instance.source_tank.name,
+        "target_tank_id": instance.target_tank_id,
+        "target_tank": instance.target_tank.name,
+        "species_id": instance.species.pk,
+        "name": str(instance.species),
+        "scientific_name": instance.species.scientific_name,
+        "quantity": instance.quantity,
+        "moved_on": moment(instance.moved_on),
+        "note": instance.note,
+    }
+
+
 # --------------------------------------------------------------------------
 # Einrichtung
 # --------------------------------------------------------------------------

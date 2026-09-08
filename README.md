@@ -70,6 +70,47 @@ Wo Historie dranhängt, wird nicht gelöscht:
 Löschen bleibt der Fehleingabe vorbehalten und verlangt immer einen
 Zwischenschritt; es gibt keinen Link, der beim Klick löscht.
 
+### Umsetzen zwischen zwei Becken
+
+Ein Umzug ist ein häufiger Vorgang: Jungtiere ziehen um, ein Becken wird
+aufgelöst, Pflanzen aus einem Bestand vermehrt und verteilt. Als zwei
+unverbundene Buchungen — hier `removed_on`, dort ein neuer Eintrag — geht der
+Zusammenhang verloren; im Rückblick sieht es aus, als wären im einen Becken
+Tiere verschwunden und im anderen welche aufgetaucht.
+
+Die Schaltfläche *Umsetzen* am Besatz- oder Pflanzeneintrag fragt Zielbecken,
+Menge, Datum und eine Notiz ab. Gebucht wird in **einer** Transaktion
+(`tanks/transfers.py`):
+
+- Im Quellbecken sinkt die Menge; bleibt null, wird `removed_on` gesetzt.
+- Im Zielbecken wird ein vorhandener aktiver Eintrag derselben Art **erhöht**,
+  nicht verdoppelt. Gibt es keinen, entsteht einer mit `added_on` bzw.
+  `planted_on` am Umzugstag.
+- Beide Becken bekommen ein Ereignis der Kategorie *Besatzänderung*, jedes mit
+  Verweis auf das andere Becken.
+- Der `Transfer` bleibt als Nachweis stehen und trägt am Zieleintrag die
+  Herkunft: „aus 80er Cube, 15.10.2026“.
+
+Ein halb ausgeführter Umzug — im Quellbecken abgezogen, im Zielbecken nie
+angekommen — wäre schlimmer als gar keine Funktion.
+
+Umgesetzt wird **nur zwischen eigenen, nicht aufgelösten Becken**. Eine Abgabe
+an Dritte ist kein Umzug, sondern ein Abgang.
+
+Vor dem Buchen zeigt die Ansicht, was zu bedenken ist: Wasserwerte, die
+zwischen den Becken deutlich auseinanderliegen (von KH 18 nach KH 5 ist für
+Wirbellose kritisch), Werte im Zielbecken außerhalb dessen, was der Steckbrief
+nennt, und eine Gruppe, die im Quellbecken unter `min_group_size` fällt. Das
+ist **keine Sperre**: der Knopf heißt dann „Trotzdem umsetzen“, und der Halter
+entscheidet. Der Zwischenschritt ist zugleich der einzige Weg, den Hinweis ohne
+JavaScript *vor* den Umzug zu stellen — hinterher wäre er ein Vorwurf statt
+einer Entscheidungshilfe.
+
+Alle Umzüge stehen becken- und artübergreifend unter `/becken/umzuege/`. In der
+Beckengeschichte steht ein Umzug zweimal, einmal je Becken; wer nachvollziehen
+will, wohin eine Art gewandert ist, sucht sonst in zwei Zeitleisten nach zwei
+Hälften desselben Vorgangs.
+
 ### CO₂: gerechnet, nicht gemessen
 
 CO₂ lässt sich mit einem Tröpfchentest nicht sinnvoll bestimmen, wohl aber aus
@@ -842,6 +883,14 @@ Clients schicken keinen, und gegen die richtet sich die Prüfung nicht.
 | `complete_schedule` | Termin quittieren (erzeugt Ereignis, rechnet fort) |
 | `add_tank_animal` / `add_tank_plant` | Besatz und Bepflanzung ergänzen |
 | `record_animal_movement` | Zu- oder Abgang buchen |
+| `transfer_stock` / `transfer_planting` | Tiere bzw. Pflanzen in ein anderes **eigenes** Becken umsetzen |
+
+`transfer_stock` und `transfer_planting` prüfen **beide** Becken gegen den
+Token-Inhaber: das Zielbecken wird über dieselbe `data.tank()` aufgelöst wie
+das Quellbecken, ein fremdes ist damit nicht von einem unbekannten zu
+unterscheiden. Was zu bedenken war — abweichende Wasserwerte, Artansprüche,
+eine zu klein gewordene Gruppe im Quellbecken —, steht in der Antwort unter
+`hints`; aufgehalten wird der Aufruf davon nicht.
 
 Ein Token ohne Schreibrecht bekommt die schreibenden Werkzeuge gar nicht erst
 zu sehen — geprüft wird trotzdem beim Aufruf.

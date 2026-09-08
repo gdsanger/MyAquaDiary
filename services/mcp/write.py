@@ -25,6 +25,8 @@ Benutzer sehen, entsteht nicht über die Einzelnutzer-Schnittstelle.
 from django.db import transaction
 from django.utils import timezone
 
+from tanks import transfers
+
 from . import data, serialize
 from .audit import mark_source
 from .registry import Written, tool
@@ -321,6 +323,124 @@ def update_stocking(context, arguments):
     stocking.full_clean()
     stocking.save()
     return Written(serialize.stocking(stocking), data.label(stocking))
+
+
+# --------------------------------------------------------------------------
+# Umsetzen zwischen zwei eigenen Becken
+# --------------------------------------------------------------------------
+#
+# Die beiden Werkzeuge sind eine dünne Hülle um :mod:`tanks.transfers` — dort
+# steht, was ein Umzug ist, und dort steht es nur einmal. Beide Becken werden
+# über :mod:`services.mcp.data` aufgelöst und gehören damit dem Token-Inhaber;
+# ein fremdes Zielbecken sieht für den Client aus wie ein unbekanntes.
+#
+# Die Hinweise (Wasserwerte, Artansprüche, Gruppengröße) gehen als ``hints``
+# mit zurück, halten den Aufruf aber nicht auf. In der Oberfläche entscheidet
+# der Halter nach dem Hinweis; über MCP entscheidet er, bevor er den Auftrag
+# gibt. Ein Rückfrageschritt im Protokoll wäre eine Bestätigung, die niemand
+# gelesen hat.
+
+#: Gemeinsame Parameter beider Umzugs-Werkzeuge.
+_TRANSFER_PROPERTIES = {
+    "target_tank_id": {"type": "integer", "description": "Zielbecken; muss ein eigenes, nicht aufgelöstes Becken sein."},
+    "quantity": {
+        "type": "integer",
+        "description": "Wie viele umziehen. Ohne Angabe: der gesamte Bestand des Eintrags.",
+    },
+    "moved_on": {
+        "type": "string",
+        "description": "Tag des Umzugs (JJJJ-MM-TT). Ohne Angabe: heute.",
+    },
+    "note": {"type": "string", "description": "Bemerkung zum Umzug."},
+}
+
+
+def _move(context, arguments, entry):
+    """Führt einen Umzug aus und beschreibt ihn für die Antwort."""
+    target = data.tank(context.user, arguments.integer("target_tank_id", required=True))
+    move = transfers.Move(
+        entry=entry,
+        target_tank=target,
+        # Ohne Untergrenze: was zu klein oder zu groß ist, sagt ``check`` — und
+        # zwar in einem Satz, der das Quellbecken nennt.
+        quantity=arguments.integer("quantity", default=entry.quantity),
+        moved_on=arguments.date("moved_on", default=timezone.localdate()),
+        note=arguments.text("note", max_length=5000),
+    )
+    # ``check`` wirft ValidationError; der Rahmen macht daraus die
+    # Fehlermeldung des Werkzeugs (services.mcp.runner).
+    transfers.check(move)
+    hints = transfers.hints(move)
+    return transfers.perform(move, user=context.user), hints
+
+
+@tool(
+    "transfer_stock",
+    "Setzt Tiere aus einem eigenen Becken in ein anderes eigenes Becken um. Ein "
+    "Umzug ist ein Vorgang, kein Abgang plus Neuzugang: der Bestand im "
+    "Quellbecken sinkt (bei null wird er auf entnommen gesetzt), im Zielbecken "
+    "wird ein vorhandener Eintrag derselben Art erhöht statt verdoppelt, beide "
+    "Becken bekommen ein Ereignis, und der Umzug bleibt als Nachweis stehen. "
+    "Teilmengen sind möglich, höchstens der vorhandene Bestand. Die "
+    "stocking_id steht im Besatz eines Beckens (get_tank). Für eine Abgabe an "
+    "Dritte ist das nicht der richtige Weg — das ist ein Abgang "
+    "(update_stocking mit removed_on). In der Antwort steht unter hints, was zu "
+    "bedenken war: abweichende Wasserwerte, Artansprüche, eine zu klein "
+    "gewordene Gruppe im Quellbecken.",
+    writes=True,
+    schema={
+        "type": "object",
+        "properties": {
+            "stocking_id": {"type": "integer", "description": "Besatzposten aus get_tank."},
+            **_TRANSFER_PROPERTIES,
+        },
+        "required": ["stocking_id", "target_tank_id"],
+    },
+)
+def transfer_stock(context, arguments):
+    stocking = data.stocking(context.user, arguments.integer("stocking_id", required=True))
+    transfer, hints = _move(context, arguments, stocking)
+    return Written(
+        {
+            "transfer": serialize.transfer(transfer),
+            "source": serialize.stocking(stocking),
+            "target": serialize.stocking(transfer.arrived),
+            "hints": hints,
+        },
+        data.label(transfer),
+    )
+
+
+@tool(
+    "transfer_planting",
+    "Setzt Pflanzen aus einem eigenen Becken in ein anderes eigenes Becken um — "
+    "der übliche Fall nach dem Vermehren. Wie transfer_stock: der Bestand im "
+    "Quellbecken sinkt, im Zielbecken wird ein vorhandener Eintrag derselben Art "
+    "erhöht statt verdoppelt, beide Becken bekommen ein Ereignis, und der Umzug "
+    "bleibt als Nachweis stehen. Die planting_id steht in der Bepflanzung eines "
+    "Beckens (get_tank). Unter hints steht, was zu bedenken war.",
+    writes=True,
+    schema={
+        "type": "object",
+        "properties": {
+            "planting_id": {"type": "integer", "description": "Bepflanzung aus get_tank."},
+            **_TRANSFER_PROPERTIES,
+        },
+        "required": ["planting_id", "target_tank_id"],
+    },
+)
+def transfer_planting(context, arguments):
+    planting = data.planting(context.user, arguments.integer("planting_id", required=True))
+    transfer, hints = _move(context, arguments, planting)
+    return Written(
+        {
+            "transfer": serialize.transfer(transfer),
+            "source": serialize.planting(planting),
+            "target": serialize.planting(transfer.arrived),
+            "hints": hints,
+        },
+        data.label(transfer),
+    )
 
 
 # --------------------------------------------------------------------------
