@@ -14,6 +14,7 @@ from .models import (
     TankParameterTarget,
     TankPhoto,
     TaskCompletion,
+    Transfer,
 )
 
 
@@ -100,6 +101,21 @@ class StockingAdmin(admin.ModelAdmin):
 class PlantingAdmin(admin.ModelAdmin):
     list_display = ["species", "tank", "quantity", "planted_on", "removed_on"]
     list_filter = ["tank"]
+
+
+@admin.register(Transfer)
+class TransferAdmin(admin.ModelAdmin):
+    """Nur lesen und im Notfall korrigieren.
+
+    Angelegt wird ein Umzug über :mod:`tanks.transfers` — dort hängen die
+    Bestandsänderungen und die beiden Ereignisse daran. Ein hier von Hand
+    getippter Datensatz wäre ein Nachweis über einen Vorgang, den es nicht
+    gegeben hat.
+    """
+
+    list_display = ["moved_on", "kind", "quantity", "source_tank", "target_tank"]
+    list_filter = ["kind", "source_tank", "target_tank"]
+    raw_id_fields = ["animal", "plant"]
 
 
 class TaskCompletionInline(admin.TabularInline):

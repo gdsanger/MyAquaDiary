@@ -240,6 +240,37 @@ removed_on
 note
 ```
 
+### `tanks.Transfer`
+
+Ein Umzug von Tieren oder Pflanzen zwischen zwei **eigenen** Becken. Der
+schlanke Bewegungsdatensatz aus #1247 — nicht die vollständige
+Bewegungshistorie aus #1218: Zukauf, Nachwuchs und Abgang bleiben eine
+geänderte Stückzahl am Besatz. Erfasst wird der eine Fall, in dem zwei Becken
+zugleich betroffen sind und die Verbindung sonst verloren ginge.
+
+```
+kind                 animal | plant
+source_tank          FK Tank · PROTECT (related_name transfers_out)
+target_tank          FK Tank · PROTECT (related_name transfers_in)
+animal               FK catalog.AnimalSpecies · PROTECT · nur bei kind=animal
+plant                FK catalog.PlantSpecies · PROTECT · nur bei kind=plant
+quantity
+moved_on
+note                 TextField
+created_by           FK User · SET_NULL
+```
+
+Bedingungen in der Datenbank: die beiden Becken müssen verschieden sein, und
+genau der zu `kind` passende Katalogeintrag muss gesetzt sein.
+
+Abgeleitet: `species` (der Eintrag zu `kind`), `origin_label`
+(„aus 80er Cube, 15.10.2026“ am Zieleintrag).
+
+Gebucht wird ausschließlich über `tanks/transfers.py`: dort hängen in **einer**
+Transaktion die Mengenänderung im Quellbecken, das Zusammenführen im
+Zielbecken, die beiden `Event`-Einträge mit gegenseitigem Verweis und dieser
+Datensatz zusammen.
+
 ### `tanks.SubstrateLayer`
 
 Eine Schicht des Bodengrunds. `position` zählt von unten, `0` ist die unterste

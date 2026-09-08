@@ -199,6 +199,11 @@ class Tank(CoverImageMixin, models.Model):
             self.photos,
             self.substrate_layers,
             self.hardscape,
+            # Umzüge in beide Richtungen: sie hängen mit ``PROTECT`` am Becken.
+            # Fehlten sie hier, versuchte die Löschansicht ein Becken zu
+            # löschen, das die Datenbank nicht hergibt.
+            self.transfers_out,
+            self.transfers_in,
         ]
         return any(manager.exists() for manager in related)
 
@@ -613,6 +618,97 @@ class Planting(models.Model):
     @property
     def is_active(self):
         return self.removed_on is None
+
+
+class Transfer(models.Model):
+    """Ein Umzug von Tieren oder Pflanzen zwischen zwei eigenen Becken.
+
+    Ohne diesen Datensatz sind ein Umzug und ein Verlust nicht zu
+    unterscheiden: im Quellbecken sinkt die Stückzahl, im Zielbecken taucht
+    eine auf, und dass beides derselbe Vorgang war, weiß nur noch der Halter.
+
+    Es ist bewusst **kein** vollständiges Bewegungskonto (#1218): Zukauf,
+    Nachwuchs und Abgang bleiben eine geänderte Stückzahl am Besatz. Erfasst
+    wird der eine Fall, in dem zwei Becken zugleich betroffen sind und die
+    Verbindung sonst verloren ginge.
+
+    ``source_tank`` und ``target_tank`` sind ``PROTECT``: ein Becken, das
+    einmal Tiere abgegeben hat, ist Teil der Geschichte des anderen. Gelöscht
+    werden kann es damit nicht mehr — aufgelöst schon (:attr:`Tank.has_history`
+    zählt Umzüge deshalb mit).
+    """
+
+    class Kind(models.TextChoices):
+        ANIMAL = "animal", "Tiere"
+        PLANT = "plant", "Pflanzen"
+
+    kind = models.CharField("Art", max_length=6, choices=Kind.choices)
+    source_tank = models.ForeignKey(
+        Tank, related_name="transfers_out", on_delete=models.PROTECT, verbose_name="Quellbecken"
+    )
+    target_tank = models.ForeignKey(
+        Tank, related_name="transfers_in", on_delete=models.PROTECT, verbose_name="Zielbecken"
+    )
+    # Zwei Fremdschlüssel statt einer generischen Beziehung: es gibt genau zwei
+    # Kataloge, und beide sollen ``PROTECT`` und ``select_related`` behalten.
+    animal = models.ForeignKey(
+        "catalog.AnimalSpecies",
+        related_name="transfers",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        verbose_name="Tierart",
+    )
+    plant = models.ForeignKey(
+        "catalog.PlantSpecies",
+        related_name="transfers",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        verbose_name="Pflanzenart",
+    )
+    quantity = models.PositiveIntegerField("Anzahl")
+    moved_on = models.DateField("Umgesetzt am")
+    note = models.TextField("Notiz", blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+
+    class Meta:
+        ordering = ["-moved_on", "-pk"]
+        verbose_name = "Umzug"
+        verbose_name_plural = "Umzüge"
+        indexes = [models.Index(fields=["target_tank", "kind", "moved_on"])]
+        constraints = [
+            models.CheckConstraint(
+                check=~Q(source_tank=models.F("target_tank")),
+                name="transfer_between_two_tanks",
+                violation_error_message="Quell- und Zielbecken sind dasselbe Becken.",
+            ),
+            # Genau ein Katalogeintrag, und zwar der zur Art passende. Ohne die
+            # Bedingung wäre ein Umzug ohne Art speicherbar — und der ließe sich
+            # später nicht mehr zuordnen.
+            models.CheckConstraint(
+                # Die Werte als Zeichenkette: ``Kind`` steht im Klassenkörper
+                # von ``Transfer`` und ist aus ``Meta`` heraus nicht zu sehen.
+                check=Q(kind="animal", animal__isnull=False, plant__isnull=True)
+                | Q(kind="plant", plant__isnull=False, animal__isnull=True),
+                name="transfer_species_matches_kind",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.quantity}× {self.species} → {self.target_tank}"
+
+    @property
+    def species(self):
+        """Die umgesetzte Art — je nach ``kind`` die Tier- oder die Pflanzenart."""
+        return self.animal if self.kind == self.Kind.ANIMAL else self.plant
+
+    @property
+    def origin_label(self):
+        """Herkunft in einer Zeile: „aus 80er Cube, 15.10.2026“."""
+        return f"aus {self.source_tank.name}, {self.moved_on:%d.%m.%Y}"
 
 
 class SubstrateLayer(models.Model):
