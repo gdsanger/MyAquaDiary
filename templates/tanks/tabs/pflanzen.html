@@ -18,6 +18,7 @@
               · {{ planting.species.get_placement_display }}
               · gepflanzt {{ planting.planted_on|date:"d.m.Y" }}
               {% if planting.removed_on %}· entfernt {{ planting.removed_on|date:"d.m.Y" }}{% endif %}
+              {% if planting.origin %}· {{ planting.origin.origin_label }}{% endif %}
             </p>
           </div>
           {% if planting.is_active %}
@@ -27,7 +28,12 @@
           {% endif %}
           {% url 'tanks:planting-update' tank.slug planting.pk as edit_url %}
           {% url 'tanks:planting-delete' tank.slug planting.pk as delete_url %}
-          {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=delete_url %}
+          {% if planting.is_active %}
+            {% url 'tanks:planting-transfer' tank.slug planting.pk as transfer_url %}
+            {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=delete_url third_url=transfer_url third_label="Umsetzen" %}
+          {% else %}
+            {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=delete_url %}
+          {% endif %}
         </div>
       </li>
     {% empty %}

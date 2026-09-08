@@ -18,6 +18,7 @@
               · {{ stocking.species.get_category_display }}
               · eingesetzt {{ stocking.added_on|date:"d.m.Y" }}
               {% if stocking.removed_on %}· entnommen {{ stocking.removed_on|date:"d.m.Y" }}{% endif %}
+              {% if stocking.origin %}· {{ stocking.origin.origin_label }}{% endif %}
             </p>
           </div>
           {% if not stocking.is_active %}
@@ -36,7 +37,8 @@
           {% url 'tanks:stocking-update' tank.slug stocking.pk as edit_url %}
           {% if stocking.is_active %}
             {% url 'tanks:stocking-remove' tank.slug stocking.pk as remove_url %}
-            {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=remove_url second_label="Abgang buchen" %}
+            {% url 'tanks:stocking-transfer' tank.slug stocking.pk as transfer_url %}
+            {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url=remove_url second_label="Abgang buchen" third_url=transfer_url third_label="Umsetzen" %}
           {% else %}
             {% include "tanks/partials/row_actions.html" with edit_url=edit_url second_url="" %}
           {% endif %}

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Umzüge – MyAquaDiary{% endblock %}
+
+{% block content %}
+<div class="mad-page-header">
+  <div>
+    <h1 class="mad-page-title">Umzüge</h1>
+    <p class="mad-page-subtitle">Tiere und Pflanzen zwischen den eigenen Becken</p>
+  </div>
+  <a href="{% url 'tanks:list' %}" class="btn btn-outline-secondary btn-sm">Zu den Becken</a>
+</div>
+
+<section class="mad-card">
+  <ul class="mad-list">
+    {% for transfer in transfers %}
+      <li>
+        <div class="mad-list__row">
+          <div class="mad-list__main">
+            <p class="mad-list__title">
+              {{ transfer.quantity }}×
+              <a href="{{ transfer.species.get_absolute_url }}">{{ transfer.species.display_name }}</a>
+            </p>
+            <p class="mad-list__meta">
+              {{ transfer.moved_on|date:"d.m.Y" }}
+              · {% include "partials/tank_label.html" with tank=transfer.source_tank %}
+              → {% include "partials/tank_label.html" with tank=transfer.target_tank %}
+              {% if transfer.note %}· {{ transfer.note }}{% endif %}
+            </p>
+          </div>
+          <span class="mad-status">{{ transfer.get_kind_display }}</span>
+        </div>
+      </li>
+    {% empty %}
+      <li class="mad-empty">
+        Noch nichts umgesetzt. Der Weg dahin führt über den Besatz- oder
+        Pflanzeneintrag eines Beckens.
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

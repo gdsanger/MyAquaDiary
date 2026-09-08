@@ -18,6 +18,12 @@ Seite zurück, das Formular sendet dann regulär per POST.
       </div>
       <div class="mad-modal__body">
         {% if modal_hint %}<p class="mad-muted">{{ modal_hint }}</p>{% endif %}
+        {% comment %}
+        Platz für das, was über die Felder hinausgeht — Hinweise vor dem
+        Umsetzen etwa. Steht innerhalb des Formulars, damit ein verstecktes
+        Feld darin mitgesendet wird.
+        {% endcomment %}
+        {% if modal_before_fields %}{% include modal_before_fields %}{% endif %}
         {% include "partials/form_fields.html" %}
       </div>
       <div class="mad-modal__footer">

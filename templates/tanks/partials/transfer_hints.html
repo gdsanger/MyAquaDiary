@@ -1,0 +1,16 @@
+{% comment %}
+Was vor einem Umzug zu bedenken ist: abweichende Wasserwerte, Artansprüche,
+eine zu klein werdende Gruppe. Keine Sperre — das versteckte Feld nimmt die
+Kenntnisnahme entgegen, der Knopf darunter heißt dann „Trotzdem umsetzen".
+{% endcomment %}
+{% if transfer_hints %}
+  <div class="mad-alert mad-alert--warn mb-3" role="status">
+    <div>
+      <p class="mad-alert__title">Vor dem Umsetzen zu bedenken</p>
+      {% for hint in transfer_hints %}
+        <p class="mad-alert__meta">{{ hint }}</p>
+      {% endfor %}
+    </div>
+  </div>
+  <input type="hidden" name="bestaetigt" value="1">
+{% endif %}
