@@ -219,6 +219,13 @@ img {
 
 /* --------------------------------------------------------------- Karten */
 
+/*
+ * `height: 100%` streckt eine Karte auf die Höhe ihrer Rasterspalte, damit
+ * nebeneinander liegende Karten unten bündig abschließen. Das gilt nur für die
+ * einzige Karte einer Spalte: stehen mehrere übereinander, beansprucht jede die
+ * volle Spaltenhöhe und schiebt die nächste unter den Seitenrand. Für den Fall
+ * gibt es `.mad-card-stack`.
+ */
 .mad-card {
   background-color: var(--mad-surface);
   border: 1px solid var(--mad-border);
@@ -227,6 +234,18 @@ img {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+/* Mehrere Karten untereinander in derselben Rasterspalte. */
+.mad-card-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mad-gap);
+}
+
+/* Im Stapel bestimmt der Inhalt die Höhe — sonst deckt Karte 1 Karte 2 zu. */
+.mad-card-stack > .mad-card {
+  height: auto;
 }
 
 .mad-card__header {

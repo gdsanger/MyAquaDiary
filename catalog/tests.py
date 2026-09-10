@@ -17,6 +17,7 @@ from core.testing import (
     create_user,
     image_upload,
     stock,
+    unbalanced_tags,
 )
 
 
@@ -949,3 +950,53 @@ class SpeciesImageTests(TestCase):
         content = response.content.decode()
         self.assertNotIn("<html", content)
         self.assertIn('id="katalog-galerie"', content)
+
+
+class DetailLayoutTests(TestCase):
+    """Die rechte Spalte der Detailseite trägt zwei Karten untereinander.
+
+    Ohne Stapel gilt für beide `.mad-card { height: 100% }` — jede beansprucht
+    dann die volle Spaltenhöhe, und die zweite rutscht unter die erste (#1252).
+    """
+
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.animal = create_animal()
+        self.plant = create_plant()
+
+    def detail_pages(self):
+        return {"Tier": self.animal, "Pflanze": self.plant}
+
+    def test_both_cards_of_the_right_column_sit_in_one_stack(self):
+        for label, species in self.detail_pages().items():
+            with self.subTest(label):
+                content = self.client.get(species.get_absolute_url()).content.decode()
+                stack = content.index('class="mad-card-stack"')
+                gallery = content.index('id="katalog-galerie"')
+                for heading in ("In eigenen Becken", 'id="katalog-quellen"'):
+                    self.assertLess(stack, content.index(heading))
+                    self.assertLess(content.index(heading), gallery)
+
+    def test_the_rendered_page_has_no_unbalanced_element(self):
+        tank = create_tank(self.user)
+        stock(tank, self.animal, quantity=12)
+        SpeciesLink.objects.create(
+            animal=self.animal, title="DRTA-Archiv", url="https://www.drta-archiv.de/"
+        )
+        for label, species in self.detail_pages().items():
+            with self.subTest(label):
+                content = self.client.get(species.get_absolute_url()).content.decode()
+                self.assertEqual(unbalanced_tags(content), [])
+
+    def test_an_empty_own_tanks_card_keeps_the_page_intact(self):
+        # Die Art in keinem eigenen Becken: die Karte schrumpft auf ihren
+        # Hinweistext, die Quellen-Karte muss trotzdem darunter stehen.
+        for label, species in self.detail_pages().items():
+            with self.subTest(label):
+                content = self.client.get(species.get_absolute_url()).content.decode()
+                self.assertIn("kommt in keinem deiner Becken vor", content)
+                self.assertLess(
+                    content.index("In eigenen Becken"), content.index('id="katalog-quellen"')
+                )
+                self.assertEqual(unbalanced_tags(content), [])

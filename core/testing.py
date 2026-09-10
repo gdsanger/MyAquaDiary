@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 from decimal import Decimal
+from html.parser import HTMLParser
 from io import BytesIO
 
 from django.contrib.auth import get_user_model
@@ -122,6 +123,56 @@ def photo_upload(name="foto.jpg", taken_at=None, size=(2, 2), orientation=None, 
     buffer = BytesIO()
     Image.new("RGB", size, "white").save(buffer, format="JPEG", exif=exif)
     return SimpleUploadedFile(name, buffer.getvalue(), content_type="image/jpeg")
+
+
+#: Elemente ohne Inhalt und ohne Endtag.
+_VOID_ELEMENTS = frozenset(
+    "area base br col embed hr img input link meta param source track wbr".split()
+)
+
+
+class _TagBalance(HTMLParser):
+    """Zählt Start- und Endtags mit und merkt sich, was nicht zusammenpasst."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack = []
+        self.problems = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag not in _VOID_ELEMENTS:
+            self.stack.append((tag, self.getpos()[0]))
+
+    def handle_endtag(self, tag):
+        if tag in _VOID_ELEMENTS:
+            return
+        if not self.stack:
+            self.problems.append(f"</{tag}> in Zeile {self.getpos()[0]} ohne Anfang")
+        elif self.stack[-1][0] != tag:
+            open_tag, line = self.stack[-1]
+            self.problems.append(
+                f"</{tag}> in Zeile {self.getpos()[0]} schließt <{open_tag}> aus Zeile {line}"
+            )
+        else:
+            self.stack.pop()
+
+    def close(self):
+        super().close()
+        self.problems += [f"<{tag}> aus Zeile {line} bleibt offen" for tag, line in self.stack]
+        return self.problems
+
+
+def unbalanced_tags(markup):
+    """Nicht geschlossene oder falsch geschachtelte Elemente in ``markup``.
+
+    Leere Liste heißt: sauber verschachtelt. Kein vollständiger Validator —
+    aber genau der Fehler, der eine Karte in die nächste rutschen lässt.
+    Setzt voraus, dass auch die optionalen Endtags (``</li>``, ``</p>``)
+    geschrieben sind; in diesem Projekt ist das so.
+    """
+    parser = _TagBalance()
+    parser.feed(markup)
+    return parser.close()
 
 
 def stock(tank, species, quantity=12, days_ago=30):
