@@ -218,18 +218,31 @@ nicht — eine Änderung ist eine neue Stückzahl, ein Abgang ein `removed_on`.
 tank                 FK Tank · CASCADE
 species              FK catalog.AnimalSpecies · PROTECT
 quantity
+quantity_male        null zulässig — bei einem Schwarm zählt sie niemand
+quantity_female      null zulässig
 added_on
 removed_on           null = im Becken
+provenance           wild | bred_local | bred_de | bred_asia | retail | unknown
+provenance_detail    CharField(200) — Züchter oder Händler
 note                 CharField(200) — siehe Lücke 5 (kein Abgangsgrund)
 ```
 
 Abgeleitet: `is_active`, `group_status` (Warnung bei unterschrittener
-Mindestgruppengröße).
+Mindestgruppengröße), `sex_label`, `social_hints` (Hinweise zu Paar-, Harem- und
+Einzelhaltung), `provenance_label`.
+
+Die Bezugsquelle steht hier und nicht am Katalogeintrag: dieselbe Art kann aus
+verschiedenen Quellen stammen, und bei *Mikrogeophagus ramirezi* entscheidet
+genau das über Lebenserwartung und Brutverhalten. Beim Umsetzen
+(`tanks.transfers.perform`) zieht sie an einen neu angelegten Zieleintrag mit —
+es sind dieselben Tiere; beim Zusammenführen bleibt die des Zielbestands stehen.
 
 ### `tanks.Planting`
 
 Wie `Stocking`, aber mit `planted_on` statt `added_on` — beim Schreiben von
-Code der häufigste Griff daneben.
+Code der häufigste Griff daneben. Auch die Auswahlliste der Bezugsquelle ist
+eine eigene: bei Pflanzen machen InVitro, submers und emers vorgezogen die
+Unterschiede beim Anwachsen.
 
 ```
 tank                 FK Tank · CASCADE
@@ -237,8 +250,12 @@ species              FK catalog.PlantSpecies · PROTECT
 quantity
 planted_on           nicht „added_on“
 removed_on
+provenance           in_vitro | submersed | emersed | own_cutting | retail | unknown
+provenance_detail    CharField(200) — Gärtnerei oder Händler
 note
 ```
+
+Abgeleitet: `is_active`, `provenance_label`.
 
 ### `tanks.Transfer`
 
@@ -388,6 +405,8 @@ common_name
 slug                 unique · aus Name und Sorte abgeleitet (unique_slug)
 summary              CharField(250)
 description
+origin_region        natürliche Verbreitung: south_america | central_america | north_america | africa | asia | australia | europe | cultivar | unknown · leer = nicht erfasst
+origin_detail        CharField(200) — der Einzug im Klartext, z. B. „Orinoco-Einzug, Venezuela und Kolumbien“
 water_type           WaterType
 difficulty           Difficulty
 temperature_min
@@ -401,7 +420,15 @@ updated_at
 ```
 
 Abgeleitet: `display_name` (setzt die Anführungszeichen um die Sorte),
-`primary_image`, `temperature_range`, `ph_range`, `gh_range`.
+`primary_image`, `temperature_range`, `ph_range`, `gh_range`, `origin_display`
+(Gebiet und Einzug in einer Zeile).
+
+`origin_region` ist ein Auswahlfeld **und** `origin_detail` ein Freitext: das
+Auswahlfeld macht den Filter „nur Südamerika" möglich, der Freitext trägt die
+eigentliche Information. `cultivar` ist dabei eine Aussage und keine Lücke —
+'Electric Blue' hat kein Wildvorkommen. Die Bezugsquelle eines einzelnen Tiers
+steht **nicht** hier, sondern am Besatzeintrag (`tanks.Stocking.provenance`):
+dieselbe Art kann aus ganz verschiedenen Quellen stammen.
 
 ### `catalog.PlantSpecies` — erbt `Species`
 
@@ -418,10 +445,44 @@ max_height_cm
 ```
 category             fish | shrimp | crayfish | snail | mussel | other
 temperament          peaceful | robust | territorial | predatory
+zone                 Aufenthaltsbereich: bottom | lower | middle | upper | surface | all
+diet                 carnivore | herbivore | omnivore — Feinheiten gehören in die Beschreibung
+social_structure     solitary | pair | harem | group | shoal
 adult_size_cm
 min_group_size       Unterschreitung meldet das Dashboard als Warnung
 min_tank_volume_l
 ```
+
+`social_structure` trägt, was `min_group_size` nicht sagen kann: bei einem Paar
+steht dort 2, und dass es ein Männchen und ein Weibchen sein müssen, geht dabei
+verloren. Die Geschlechterverteilung selbst steht am Besatz
+(`tanks.Stocking.quantity_male` / `quantity_female`).
+
+### `catalog.SpeciesLink`
+
+Ein Verweis von einem Steckbrief auf eine fremde Wissensquelle — DRTA-Archiv
+bei den Tieren, Flowgrow bei den Pflanzen, dazu Hersteller, Artikel, Forum,
+Video. **Ein** Modell für beide Kataloge mit zwei optionalen Fremdschlüsseln,
+von denen die Bedingung `catalog_specieslink_one_species` genau einen zulässt;
+zwei getrennte Modelle wären dieselbe Logik doppelt.
+
+```
+plant                FK PlantSpecies · CASCADE · null · related_name="links"
+animal               FK AnimalSpecies · CASCADE · null · related_name="links"
+kind                 database | supplier | article | forum | video | other
+title
+url                  URLField(500)
+position             kleinere Zahlen stehen oben
+```
+
+Abgeleitet: `species` (die Art, an der der Link hängt), `species_kind`
+(`plant` / `animal`).
+
+Abgerufen wird keine dieser Adressen: es gibt keine öffentliche Schnittstelle,
+die Steckbriefe sind redaktionelle Inhalte Dritter, und ein Scraper bräche bei
+jeder Layoutänderung. Beim Pflegen hilft stattdessen eine Suchadresse aus dem
+wissenschaftlichen Namen (`catalog.sources`, Muster in
+`settings.CATALOG_SEARCH_SOURCES`).
 
 ### `SpeciesImage` (abstrakt)
 

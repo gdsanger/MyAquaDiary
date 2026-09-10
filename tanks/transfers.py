@@ -205,10 +205,30 @@ def group_hints(move: Move) -> list[str]:
     ]
 
 
+def sex_hints(move: Move) -> list[str]:
+    """Erfasste Geschlechterverteilung: der Umzug kann sie nicht aufteilen.
+
+    Welche Tiere mitgehen, weiß nur der Halter — und ein geratener Schnitt
+    wäre an beiden Einträgen eine falsche Angabe. Deshalb ein Hinweis und keine
+    automatische Verteilung.
+    """
+    if not isinstance(move.entry, Stocking) or not move.entry.sex_label:
+        return []
+    return [
+        f"Die Geschlechterverteilung ist erfasst ({move.entry.sex_label}) — "
+        "welche Tiere umziehen, ist danach in beiden Becken nachzutragen."
+    ]
+
+
 def hints(move: Move) -> list[str]:
     """Alles, was vor dem Umsetzen zu bedenken ist — in Sätzen, ohne Sperre."""
     latest = _latest_by_key([move.source_tank, move.target_tank])
-    return [*water_hints(move, latest), *species_hints(move, latest), *group_hints(move)]
+    return [
+        *water_hints(move, latest),
+        *species_hints(move, latest),
+        *group_hints(move),
+        *sex_hints(move),
+    ]
 
 
 # --------------------------------------------------------------------------
@@ -272,6 +292,12 @@ def perform(move: Move, user=None) -> Transfer:
             tank=move.target_tank,
             species=species,
             quantity=move.quantity,
+            # Die Bezugsquelle zieht mit: es sind dieselben Tiere bzw. Pflanzen,
+            # und woher sie stammen, ändert der Umzug nicht. Beim
+            # Zusammenführen bleibt sie dagegen, wie sie am Zielbestand steht —
+            # zwei Quellen in einem Feld wären eine Behauptung.
+            provenance=entry.provenance,
+            provenance_detail=entry.provenance_detail,
             **{move.date_field: move.moved_on},
         )
 

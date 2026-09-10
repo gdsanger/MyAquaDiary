@@ -27,7 +27,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
 
-from catalog.models import AnimalSpecies, PlantSpecies
+from catalog.models import AnimalSpecies, PlantSpecies, SpeciesLink
 from services.mcp import Context, call_tool, registry
 from services.mcp.exceptions import ToolError, WriteNotAllowed
 from services.models import MCPAccessLog, MCPToken
@@ -222,6 +222,58 @@ class GetTankTests(ToolTestCase):
 
         self.assertEqual(stock["min_group_size"], 6)
         self.assertEqual(stock["group_status"], "warn")
+
+    def test_the_stock_carries_source_sexes_and_social_hints(self):
+        guppy = self.guppy()
+        AnimalSpecies.objects.filter(pk=guppy.pk).update(
+            social_structure=AnimalSpecies.Social.HAREM
+        )
+        Stocking.objects.create(
+            tank=self.tank,
+            species=AnimalSpecies.objects.get(pk=guppy.pk),
+            quantity=8,
+            quantity_male=3,
+            quantity_female=5,
+            added_on=timezone.localdate(),
+            provenance=Stocking.Provenance.BRED_DE,
+            provenance_detail="Nachzucht Müller",
+        )
+
+        stock = self.call("get_tank", tank_id=self.tank.pk)["animals"][0]
+
+        self.assertEqual(stock["provenance"], "bred_de")
+        self.assertEqual(stock["provenance_label"], "Deutsche / europäische Nachzucht")
+        self.assertEqual(stock["provenance_detail"], "Nachzucht Müller")
+        self.assertEqual((stock["quantity_male"], stock["quantity_female"]), (3, 5))
+        self.assertEqual(stock["social_structure"], "harem")
+        # Derselbe Abgleich, den die Oberfläche zeigt — ein Modell soll die
+        # Regel nicht nachbauen.
+        self.assertTrue(any("nur ein Männchen" in hint for hint in stock["social_hints"]))
+
+    def test_unrecorded_sexes_are_null_and_not_zero(self):
+        Stocking.objects.create(
+            tank=self.tank, species=self.guppy(), quantity=8, added_on=timezone.localdate()
+        )
+
+        stock = self.call("get_tank", tank_id=self.tank.pk)["animals"][0]
+
+        self.assertIsNone(stock["quantity_male"])
+        self.assertEqual(stock["provenance"], "")
+        self.assertEqual(stock["social_hints"], [])
+
+    def test_the_plants_carry_how_they_were_grown(self):
+        Planting.objects.create(
+            tank=self.tank,
+            species=self.moss(),
+            quantity=3,
+            planted_on=timezone.localdate(),
+            provenance=Planting.Provenance.IN_VITRO,
+        )
+
+        plant = self.call("get_tank", tank_id=self.tank.pk)["plants"][0]
+
+        self.assertEqual(plant["provenance"], "in_vitro")
+        self.assertEqual(plant["provenance_label"], "InVitro")
 
     def test_a_foreign_tank_is_not_found(self):
         with self.assertRaises(ToolError) as caught:
@@ -601,6 +653,72 @@ class CatalogReadTests(ToolTestCase):
     def test_an_unknown_kind_is_refused(self):
         with self.assertRaises(ToolError):
             self.call("get_catalog_entry", kind="mineral", entry_id=1)
+
+    def test_the_search_carries_the_region_so_a_biotope_can_be_filtered(self):
+        guppy = self.guppy()
+        AnimalSpecies.objects.filter(pk=guppy.pk).update(
+            origin_region=AnimalSpecies.Region.SOUTH_AMERICA
+        )
+
+        entry = self.call("search_catalog", query="Poecilia")["entries"][0]
+
+        self.assertEqual(entry["origin_region"], "south_america")
+        self.assertEqual(entry["origin_region_label"], "Südamerika")
+
+    def test_the_profile_carries_the_husbandry_traits(self):
+        guppy = self.guppy()
+        AnimalSpecies.objects.filter(pk=guppy.pk).update(
+            origin_region=AnimalSpecies.Region.SOUTH_AMERICA,
+            origin_detail="Nordosten Südamerikas",
+            zone=AnimalSpecies.Zone.UPPER,
+            diet=AnimalSpecies.Diet.OMNIVORE,
+            social_structure=AnimalSpecies.Social.HAREM,
+        )
+
+        result = self.call("get_catalog_entry", kind="animal", entry_id=guppy.pk)
+
+        self.assertEqual(result["origin_detail"], "Nordosten Südamerikas")
+        self.assertEqual(result["zone_label"], "Oberer Bereich")
+        self.assertEqual(result["diet"], "omnivore")
+        self.assertEqual(result["social_structure_label"], "Harem (1 ♂ + mehrere ♀)")
+
+    def test_a_plant_profile_carries_the_origin_too(self):
+        moss = self.moss()
+        PlantSpecies.objects.filter(pk=moss.pk).update(
+            origin_region=PlantSpecies.Region.ASIA, origin_detail="Südostasien"
+        )
+
+        result = self.call("get_catalog_entry", kind="plant", entry_id=moss.pk)
+
+        self.assertEqual(result["origin_region"], "asia")
+        self.assertEqual(result["origin_detail"], "Südostasien")
+
+    def test_the_profile_names_the_sources_it_points_at(self):
+        guppy = self.guppy()
+        SpeciesLink.objects.create(
+            animal=guppy,
+            kind=SpeciesLink.Kind.DATABASE,
+            title="DRTA-Archiv: Guppy",
+            url="https://www.drta-archiv.de/guppy/",
+        )
+
+        result = self.call("get_catalog_entry", kind="animal", entry_id=guppy.pk)
+
+        self.assertEqual(
+            result["links"],
+            [
+                {
+                    "kind": "database",
+                    "kind_label": "Artdatenbank",
+                    "title": "DRTA-Archiv: Guppy",
+                    "url": "https://www.drta-archiv.de/guppy/",
+                }
+            ],
+        )
+
+    def test_a_profile_without_sources_says_so_with_an_empty_list(self):
+        result = self.call("get_catalog_entry", kind="animal", entry_id=self.guppy().pk)
+        self.assertEqual(result["links"], [])
 
 
 class CreateMeasurementTests(ToolTestCase):

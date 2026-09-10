@@ -86,7 +86,10 @@ def list_tanks(context, arguments):
     "Besatz, Bepflanzung und die Einrichtung — Bodengrund als Schichtung von "
     "unten nach oben samt Standzeit eines Nährstoffdepots, dazu Hardscape "
     "(Wurzeln, Steine, Erlenzapfen, Rückwand) mit dem Hinweis, ob es auf die "
-    "Wasserwerte wirkt.",
+    "Wasserwerte wirkt. Je Besatzposten steht die Bezugsquelle dabei "
+    "(provenance: Wildfang, Nachzucht, Handel), die Geschlechterverteilung, "
+    "soweit erfasst, und unter social_hints, was an Paar-, Harem- oder "
+    "Einzelhaltung nicht zusammenpasst.",
     schema={
         "type": "object",
         "properties": {"tank_id": {"type": "integer", "description": "Kennung des Beckens."}},
@@ -293,7 +296,9 @@ def list_due_tasks(context, arguments):
 @tool(
     "search_catalog",
     "Sucht im Pflanzen- und Tierkatalog nach wissenschaftlichem oder deutschem "
-    "Namen. Der Katalog ist für alle Benutzer derselbe und über MCP nur lesbar.",
+    "Namen. Je Treffer steht das Verbreitungsgebiet dabei (origin_region: "
+    "south_america, asia, cultivar …) — für ein Biotopbecken die zentrale "
+    "Angabe. Der Katalog ist für alle Benutzer derselbe und über MCP nur lesbar.",
     schema={
         "type": "object",
         "properties": {
@@ -328,8 +333,12 @@ def search_catalog(context, arguments):
 
 @tool(
     "get_catalog_entry",
-    "Der vollständige Steckbrief eines Katalogeintrags: Herkunft, Größe, "
-    "Ansprüche an Wasserwerte und Becken, Vergesellschaftung, Pflege.",
+    "Der vollständige Steckbrief eines Katalogeintrags: Herkunft "
+    "(Verbreitungsgebiet und Einzug), Größe, Ansprüche an Wasserwerte und "
+    "Becken, Vergesellschaftung, Pflege. Beim Tier dazu Aufenthaltsbereich "
+    "(zone), Ernährung (diet) und Sozialstruktur (social_structure: solitary, "
+    "pair, harem, group, shoal). Unter links stehen Verweise auf fremde "
+    "Wissensquellen — Adressen, kein Inhalt: abgerufen wird dort nichts.",
     schema={
         "type": "object",
         "properties": {

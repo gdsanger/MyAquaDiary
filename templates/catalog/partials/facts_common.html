@@ -6,6 +6,11 @@
     {% if species.is_cultivated_form %}<span class="mad-status">Zuchtform</span>{% endif %}
   </dd>
 {% endif %}
+{% if species.origin_display %}
+  {# Verbreitungsgebiet und Einzug in einer Zeile — für ein Biotopbecken die zentrale Angabe. #}
+  <dt>Herkunft</dt>
+  <dd>{{ species.origin_display }}</dd>
+{% endif %}
 <dt>Wassertyp</dt>
 <dd><span class="mad-watertype mad-watertype--{{ species.water_type }}">{{ species.get_water_type_display }}</span></dd>
 <dt>Anspruch</dt>

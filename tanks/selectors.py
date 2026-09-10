@@ -273,8 +273,9 @@ def _warning(status, title, detail, tank):
 def warnings(user, limit=None):
     """Alle Auffälligkeiten über alle aktiven Becken, kritischste zuerst.
 
-    Fünf Quellen: Messwerte außerhalb des Zielbereichs, Gerätefehler, fällige
-    Wartung, ablaufende Garantie und unterschrittene Gruppengrößen.
+    Sechs Quellen: Messwerte außerhalb des Zielbereichs, Gerätefehler, fällige
+    Wartung, ablaufende Garantie, unterschrittene Gruppengrößen und eine
+    Sozialstruktur, zu der die Tiere im Becken nicht passen.
 
     Der Gerätestatus wird gelesen, wie er am Gerät steht — bei angebundenen
     Geräten hat ihn die letzte Abfrage geschrieben (ein Eheim-Fehlercode wird
@@ -334,18 +335,29 @@ def warnings(user, limit=None):
                 )
             )
 
-    stockings = (
-        Stocking.objects.filter(tank__in=tanks, removed_on__isnull=True)
-        .select_related("species", "tank")
-        .filter(species__min_group_size__gt=1)
+    stockings = Stocking.objects.filter(tank__in=tanks, removed_on__isnull=True).select_related(
+        "species", "tank"
     )
     for stocking in stockings:
-        if stocking.quantity < stocking.species.min_group_size:
+        # Ohne Vorfilter auf ``min_group_size``: die Sozialstruktur ist auch bei
+        # Einzel- und Paarhaltung zu prüfen, und ob die Gruppe zu klein ist,
+        # entscheidet ``group_status`` selbst.
+        if stocking.group_status == Status.WARN:
             items.append(
                 _warning(
                     Status.WARN,
                     f"Gruppengröße unterschritten: {stocking.species.display_name}",
                     f"{stocking.quantity} statt mindestens {stocking.species.min_group_size} Tiere",
+                    stocking.tank,
+                )
+            )
+        # Paar-, Harem- und Einzelhaltung: ein Hinweis, keine Sperre.
+        for hint in stocking.social_hints:
+            items.append(
+                _warning(
+                    Status.WARN,
+                    f"Sozialstruktur: {stocking.species.display_name}",
+                    hint,
                     stocking.tank,
                 )
             )

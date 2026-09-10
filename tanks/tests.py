@@ -12,6 +12,7 @@ from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from PIL import Image
 
+from catalog.models import AnimalSpecies
 from core.enums import Status, WaterType
 from core.images import GPS_IFD
 from core.testing import (
@@ -36,6 +37,7 @@ from tanks.models import (
     Measurement,
     Parameter,
     Planting,
+    Stocking,
     SubstrateLayer,
     Tank,
     TankParameterTarget,
@@ -1045,6 +1047,249 @@ class PlantingWriteTests(TestCase):
         self.assertFalse(Planting.objects.exists())
 
 
+class ProvenanceTests(TestCase):
+    """Bezugsquelle am Eintrag, nicht im Katalog."""
+
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.tank = create_tank(self.user)
+        self.animal = create_animal("Mikrogeophagus ramirezi", slug="mikrogeophagus-ramirezi")
+        self.plant = create_plant()
+
+    def test_the_source_of_a_stocking_is_recorded(self):
+        self.client.post(
+            reverse("tanks:stocking-create", args=[self.tank.slug]),
+            {
+                "species": self.animal.pk,
+                "quantity": "2",
+                "added_on": timezone.localdate().isoformat(),
+                "provenance": Stocking.Provenance.BRED_DE,
+                "provenance_detail": "Nachzucht Müller, Landshut",
+                "note": "",
+            },
+        )
+        stocking = self.tank.stockings.get()
+        self.assertEqual(stocking.provenance, Stocking.Provenance.BRED_DE)
+        self.assertEqual(
+            stocking.provenance_label,
+            "Deutsche / europäische Nachzucht · Nachzucht Müller, Landshut",
+        )
+
+    def test_without_a_source_nothing_is_claimed(self):
+        stocking = stock(self.tank, self.animal)
+        self.assertEqual(stocking.provenance, "")
+        self.assertEqual(stocking.provenance_label, "")
+
+    def test_the_stocking_tab_names_the_source(self):
+        stock(self.tank, self.animal)
+        self.tank.stockings.update(provenance=Stocking.Provenance.BRED_ASIA)
+        response = self.client.get(f"{self.tank.get_absolute_url()}?reiter=besatz")
+        self.assertContains(response, "Asiatische Nachzucht")
+
+    def test_plants_have_their_own_choices(self):
+        self.client.post(
+            reverse("tanks:planting-create", args=[self.tank.slug]),
+            {
+                "species": self.plant.pk,
+                "quantity": "5",
+                "planted_on": timezone.localdate().isoformat(),
+                "removed_on": "",
+                "provenance": Planting.Provenance.IN_VITRO,
+                "provenance_detail": "Tropica 1-2-Grow",
+                "note": "",
+            },
+        )
+        planting = self.tank.plantings.get()
+        self.assertEqual(planting.provenance_label, "InVitro · Tropica 1-2-Grow")
+        # Was bei der Pflanze zählt, sagt beim Tier nichts — und umgekehrt.
+        self.assertNotIn("in_vitro", Stocking.Provenance.values)
+        self.assertNotIn("wild", Planting.Provenance.values)
+
+    def test_the_plant_tab_names_the_source(self):
+        Planting.objects.create(
+            tank=self.tank,
+            species=self.plant,
+            quantity=5,
+            planted_on=self.tank.setup_date,
+            provenance=Planting.Provenance.EMERSED,
+        )
+        response = self.client.get(f"{self.tank.get_absolute_url()}?reiter=pflanzen")
+        self.assertContains(response, "Emers vorgezogen")
+
+
+class SexDistributionTests(TestCase):
+    """Geschlechterverteilung — optional, aber nicht widersprüchlich."""
+
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.tank = create_tank(self.user)
+        self.species = create_animal(
+            "Apistogramma cacatuoides",
+            slug="apistogramma-cacatuoides",
+            min_group_size=1,
+            social_structure=AnimalSpecies.Social.HAREM,
+        )
+
+    def payload(self, **overrides):
+        data = {
+            "species": self.species.pk,
+            "quantity": "4",
+            "quantity_male": "1",
+            "quantity_female": "3",
+            "added_on": timezone.localdate().isoformat(),
+            "note": "",
+        }
+        data.update(overrides)
+        return data
+
+    def test_the_distribution_is_recorded(self):
+        self.client.post(
+            reverse("tanks:stocking-create", args=[self.tank.slug]), self.payload()
+        )
+        stocking = self.tank.stockings.get()
+        self.assertEqual((stocking.quantity_male, stocking.quantity_female), (1, 3))
+        self.assertEqual(stocking.sex_label, "1 ♂ · 3 ♀")
+
+    def test_more_sexed_animals_than_animals_is_refused(self):
+        response = self.client.post(
+            reverse("tanks:stocking-create", args=[self.tank.slug]),
+            self.payload(quantity="2"),
+        )
+        self.assertFalse(self.tank.stockings.exists())
+        self.assertContains(response, "mehr als die erfasste Anzahl")
+
+    def test_fewer_is_fine_because_juveniles_are_not_sexable(self):
+        self.client.post(
+            reverse("tanks:stocking-create", args=[self.tank.slug]),
+            self.payload(quantity="10", quantity_male="1", quantity_female="3"),
+        )
+        self.assertEqual(self.tank.stockings.get().quantity, 10)
+
+    def test_nothing_recorded_means_no_label(self):
+        stocking = stock(self.tank, self.species)
+        self.assertEqual(stocking.sex_label, "")
+
+    def test_the_stocking_tab_shows_the_distribution(self):
+        self.client.post(
+            reverse("tanks:stocking-create", args=[self.tank.slug]), self.payload()
+        )
+        response = self.client.get(f"{self.tank.get_absolute_url()}?reiter=besatz")
+        self.assertContains(response, "1 ♂")
+
+
+class SocialStructureHintTests(TestCase):
+    """Paar, Harem, Einzelhaltung: Hinweise — keine Sperre.
+
+    ``min_group_size`` allein trägt nicht: bei einem Paar steht dort 2, was
+    auch „mindestens zwei Tiere" heißen könnte.
+    """
+
+    def setUp(self):
+        self.user = create_user()
+        self.tank = create_tank(self.user)
+
+    def species(self, structure, **kwargs):
+        return create_animal(
+            f"Testart {structure}",
+            slug=f"testart-{structure}",
+            # Ohne deutschen Namen ist der Anzeigename der wissenschaftliche —
+            # so steht die geprüfte Sozialstruktur im Meldungstext.
+            common_name="",
+            min_group_size=1,
+            social_structure=structure,
+            **kwargs,
+        )
+
+    def stocking(self, structure, quantity=2, male=None, female=None):
+        return Stocking.objects.create(
+            tank=self.tank,
+            species=self.species(structure),
+            quantity=quantity,
+            quantity_male=male,
+            quantity_female=female,
+            added_on=self.tank.setup_date,
+        )
+
+    def test_a_pair_of_two_males_is_pointed_out(self):
+        stocking = self.stocking(AnimalSpecies.Social.PAIR, male=2, female=0)
+        self.assertEqual(
+            stocking.social_hints, ["Ein Paar braucht ein Männchen und ein Weibchen."]
+        )
+
+    def test_a_real_pair_is_quiet(self):
+        self.assertEqual(
+            self.stocking(AnimalSpecies.Social.PAIR, male=1, female=1).social_hints, []
+        )
+
+    def test_a_pair_without_a_recorded_distribution_is_quiet(self):
+        # Ein Hinweis auf eine fehlende Angabe stünde sonst an jedem Posten.
+        self.assertEqual(self.stocking(AnimalSpecies.Social.PAIR).social_hints, [])
+
+    def test_a_harem_with_several_males_is_pointed_out(self):
+        stocking = self.stocking(AnimalSpecies.Social.HAREM, quantity=5, male=2, female=3)
+        self.assertEqual(len(stocking.social_hints), 1)
+        self.assertIn("nur ein Männchen", stocking.social_hints[0])
+
+    def test_a_harem_with_one_male_is_quiet(self):
+        self.assertEqual(
+            self.stocking(AnimalSpecies.Social.HAREM, quantity=4, male=1, female=3).social_hints,
+            [],
+        )
+
+    def test_a_solitary_species_in_company_is_pointed_out(self):
+        stocking = self.stocking(AnimalSpecies.Social.SOLITARY, quantity=3)
+        self.assertIn("einzeln", stocking.social_hints[0])
+
+    def test_a_single_solitary_animal_is_quiet(self):
+        self.assertEqual(
+            self.stocking(AnimalSpecies.Social.SOLITARY, quantity=1).social_hints, []
+        )
+
+    def test_a_shoal_is_never_asked_about_sexes(self):
+        self.assertEqual(
+            self.stocking(AnimalSpecies.Social.SHOAL, quantity=12).social_hints, []
+        )
+
+    def test_a_species_without_a_structure_is_quiet(self):
+        stocking = Stocking.objects.create(
+            tank=self.tank,
+            species=create_animal(),
+            quantity=3,
+            added_on=self.tank.setup_date,
+        )
+        self.assertEqual(stocking.social_hints, [])
+
+    def test_a_removed_stocking_is_no_longer_judged(self):
+        stocking = self.stocking(AnimalSpecies.Social.SOLITARY, quantity=3)
+        stocking.removed_on = timezone.localdate()
+        stocking.save()
+        self.assertEqual(stocking.social_hints, [])
+
+    def test_the_dashboard_warns_about_the_structure(self):
+        self.stocking(AnimalSpecies.Social.HAREM, quantity=5, male=3, female=2)
+        titles = [item["title"] for item in selectors.warnings(self.user)]
+        self.assertIn("Sozialstruktur: Testart harem", titles)
+
+    def test_a_too_small_group_is_still_reported(self):
+        # Die bestehende Prüfung bleibt, sie wird nur ergänzt.
+        Stocking.objects.create(
+            tank=self.tank,
+            species=create_animal(min_group_size=10),
+            quantity=3,
+            added_on=self.tank.setup_date,
+        )
+        titles = [item["title"] for item in selectors.warnings(self.user)]
+        self.assertTrue(any("Gruppengröße unterschritten" in title for title in titles))
+
+    def test_the_stocking_tab_shows_the_hint(self):
+        self.stocking(AnimalSpecies.Social.SOLITARY, quantity=3)
+        self.client.force_login(self.user)
+        response = self.client.get(f"{self.tank.get_absolute_url()}?reiter=besatz")
+        self.assertContains(response, "im Becken stehen 3 Tiere")
+
+
 class TransferTestCase(TestCase):
     """Zwei eigene Becken und zehn Panzerwelse im ersten davon.
 
@@ -1331,6 +1576,51 @@ class TransferHintTests(TransferTestCase):
         self.assertEqual(Transfer.objects.get().quantity, 8)
         self.stocking.refresh_from_db()
         self.assertEqual(self.stocking.quantity, 2)
+
+
+class TransferProvenanceTests(TransferTestCase):
+    """Die Bezugsquelle zieht mit — es sind dieselben Tiere."""
+
+    def setUp(self):
+        super().setUp()
+        Stocking.objects.filter(pk=self.stocking.pk).update(
+            provenance=Stocking.Provenance.WILD, provenance_detail="Importeur Rio"
+        )
+        self.stocking.refresh_from_db()
+
+    def test_a_new_target_entry_keeps_the_source(self):
+        self.post_transfer(quantity=4)
+        arrived = self.target.stockings.get()
+        self.assertEqual(arrived.provenance, Stocking.Provenance.WILD)
+        self.assertEqual(arrived.provenance_detail, "Importeur Rio")
+
+    def test_merging_leaves_the_target_as_it_stands(self):
+        """Zwei Quellen in einem Feld wären eine Behauptung."""
+        existing = stock(self.target, self.species, quantity=5)
+        Stocking.objects.filter(pk=existing.pk).update(
+            provenance=Stocking.Provenance.BRED_LOCAL, provenance_detail=""
+        )
+        self.post_transfer(quantity=4)
+        existing.refresh_from_db()
+        self.assertEqual(existing.quantity, 9)
+        self.assertEqual(existing.provenance, Stocking.Provenance.BRED_LOCAL)
+
+    def test_a_recorded_sex_distribution_is_pointed_out(self):
+        Stocking.objects.filter(pk=self.stocking.pk).update(quantity_male=4, quantity_female=6)
+        self.stocking.refresh_from_db()
+        hints = transfers.hints(self.move(quantity=4))
+        self.assertTrue(any("Geschlechterverteilung" in hint for hint in hints))
+
+    def test_without_a_distribution_the_move_stays_quiet(self):
+        self.assertEqual(transfers.hints(self.move(quantity=4)), [])
+
+    def move(self, quantity=4):
+        return transfers.Move(
+            entry=self.stocking,
+            target_tank=self.target,
+            quantity=quantity,
+            moved_on=timezone.localdate(),
+        )
 
 
 class TransferDisplayTests(TransferTestCase):

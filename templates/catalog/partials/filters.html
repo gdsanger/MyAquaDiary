@@ -31,15 +31,22 @@ Listenseite; mit HTMX wird nur das Raster ersetzt.
     </select>
   </div>
 
-  <div class="mad-filterbar__field">
-    <label class="form-label" for="filter-extra">{{ extra_filter_label }}</label>
-    <select class="form-select" id="filter-extra" name="filter">
-      <option value="">Alle</option>
-      {% for value, label in extra_filter_choices %}
-        <option value="{{ value }}"{% if filters.extra == value %} selected{% endif %}>{{ label }}</option>
-      {% endfor %}
-    </select>
-  </div>
+  {% comment %}
+  Die Auswahlfilter kommen aus der Ansicht (catalog.views.ChoiceFilter): je
+  Katalog andere. Nach Aufenthaltsbereich und Verbreitungsgebiet zu filtern
+  sind die beiden häufigsten Fälle beim Zusammenstellen eines Besatzes.
+  {% endcomment %}
+  {% for row in filter_rows %}
+    <div class="mad-filterbar__field">
+      <label class="form-label" for="filter-{{ row.param }}">{{ row.label }}</label>
+      <select class="form-select" id="filter-{{ row.param }}" name="{{ row.param }}">
+        <option value="">Alle</option>
+        {% for value, label in row.choices %}
+          <option value="{{ value }}"{% if row.value == value %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  {% endfor %}
 
   <div class="mad-filterbar__field">
     <span class="form-label d-block">Zuchtformen</span>

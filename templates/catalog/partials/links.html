@@ -1,0 +1,90 @@
+{% comment %}
+Quellen einer Art: Artdatenbank, Hersteller, Artikel, Forenbeitrag, Video.
+Wird bei jeder Aktion als Ganzes ersetzt, deshalb trägt der äußere Container
+die Zielkennung.
+
+Die Suchschaltflächen bauen aus dem wissenschaftlichen Namen eine Suchadresse
+(catalog.sources) und öffnen sie in einem neuen Tab. Abgerufen wird nichts:
+die Steckbriefe der Quellen sind redaktionelle Inhalte Dritter, und ein
+Scraper bräche bei jeder Layoutänderung.
+
+Ohne `can_edit_catalog` ist das hier reine Anzeige — die Pflegeadressen
+antworten für diese Benutzer mit 403.
+{% endcomment %}
+<section class="mad-card" id="katalog-quellen">
+  <div class="mad-card__header">
+    <h2 class="mad-card__title">Quellen</h2>
+    {% if can_edit_catalog %}
+      <a class="btn btn-outline-primary btn-sm" href="{{ link_create_url }}"
+         hx-get="{{ link_create_url }}" hx-target="#katalog-quellen" hx-swap="outerHTML">Quelle hinzufügen</a>
+    {% endif %}
+  </div>
+  <div class="mad-card__body">
+    {% if link_rows %}
+      <ul class="mad-list">
+        {% for row in link_rows %}
+          <li>
+            <div class="mad-list__row">
+              <div class="mad-list__main">
+                <p class="mad-list__title">
+                  <a href="{{ row.link.url }}" target="_blank" rel="noopener noreferrer">{{ row.link.title }}</a>
+                </p>
+                <p class="mad-list__meta">{{ row.link.get_kind_display }} · {{ row.link.url }}</p>
+              </div>
+              {% if can_edit_catalog %}
+                {% if confirm_link and confirm_link.pk == row.link.pk %}
+                  <form method="post" action="{{ link_action }}" class="mad-actions"
+                        hx-post="{{ link_action }}" hx-target="#katalog-quellen" hx-swap="outerHTML">
+                    {% csrf_token %}
+                    <span class="mad-muted">Quelle entfernen?</span>
+                    <button type="submit" class="btn btn-primary btn-sm">Löschen</button>
+                    <a class="btn btn-outline-secondary btn-sm" href="{{ link_section_url }}"
+                       hx-get="{{ link_section_url }}" hx-target="#katalog-quellen" hx-swap="outerHTML">Abbrechen</a>
+                  </form>
+                {% else %}
+                  <div class="mad-actions">
+                    <a class="btn btn-outline-secondary btn-sm" href="{{ row.update_url }}"
+                       hx-get="{{ row.update_url }}" hx-target="#katalog-quellen" hx-swap="outerHTML">Bearbeiten</a>
+                    <a class="btn btn-outline-secondary btn-sm" href="{{ row.delete_url }}"
+                       hx-get="{{ row.delete_url }}" hx-target="#katalog-quellen" hx-swap="outerHTML">Löschen</a>
+                  </div>
+                {% endif %}
+              {% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="mad-empty">Noch keine Quelle hinterlegt.</p>
+    {% endif %}
+
+    {% if link_form %}
+      <form method="post" action="{{ link_action }}" class="mad-inline-form"
+            hx-post="{{ link_action }}" hx-target="#katalog-quellen" hx-swap="outerHTML">
+        {% csrf_token %}
+        <p class="mad-list__title">{{ link_title }}</p>
+        {% include "partials/form_fields.html" with form=link_form %}
+        <div class="mad-actions">
+          <button type="submit" class="btn btn-primary btn-sm">Speichern</button>
+          <a class="btn btn-outline-secondary btn-sm" href="{{ link_section_url }}"
+             hx-get="{{ link_section_url }}" hx-target="#katalog-quellen" hx-swap="outerHTML">Abbrechen</a>
+        </div>
+      </form>
+    {% endif %}
+
+    {% if can_edit_catalog and search_links %}
+      <div class="mad-inline-form">
+        <p class="mad-muted">
+          Steckbrief in einer Fachdatenbank nachschlagen — was dort steht, ist von
+          Hand zu übernehmen; abgerufen wird nichts.
+        </p>
+        <div class="mad-actions">
+          {% for source in search_links %}
+            <a class="btn btn-outline-secondary btn-sm" href="{{ source.url }}"
+               target="_blank" rel="noopener noreferrer">{{ source.label }} durchsuchen</a>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</section>

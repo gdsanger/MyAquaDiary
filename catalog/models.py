@@ -1,5 +1,6 @@
 """Userübergreifender Katalog für Pflanzen- und Tierarten."""
 
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models.functions import Lower
 from django.urls import reverse
@@ -121,6 +122,25 @@ class Species(models.Model):
     ``scientific_name`` **plus** ``variant``.
     """
 
+    class Region(models.TextChoices):
+        """Natürliche Verbreitung — das Gebiet, aus dem die Art stammt.
+
+        Nicht zu verwechseln mit der Bezugsquelle: aus welcher Zucht ein
+        einzelnes Tier kommt, steht am Besatzeintrag (``tanks.Stocking``) und
+        nicht hier — dieselbe Art kann aus ganz verschiedenen Quellen stammen.
+        """
+
+        SOUTH_AMERICA = "south_america", "Südamerika"
+        CENTRAL_AMERICA = "central_america", "Mittelamerika"
+        NORTH_AMERICA = "north_america", "Nordamerika"
+        AFRICA = "africa", "Afrika"
+        ASIA = "asia", "Asien"
+        AUSTRALIA = "australia", "Australien / Ozeanien"
+        EUROPE = "europe", "Europa"
+        # Eine Aussage, keine Lücke: 'Electric Blue' hat kein Wildvorkommen.
+        CULTIVAR = "cultivar", "Zuchtform ohne Wildvorkommen"
+        UNKNOWN = "unknown", "Unbekannt"
+
     scientific_name = models.CharField("wissenschaftlicher Name", max_length=150)
     variant = models.CharField(
         "Sorte / Zuchtform",
@@ -138,6 +158,21 @@ class Species(models.Model):
     slug = models.SlugField("Slug", max_length=160, unique=True)
     summary = models.CharField("Kurzbeschreibung", max_length=250, blank=True)
     description = models.TextField("Beschreibung", blank=True)
+
+    # Auswahlfeld **und** Freitext: das Auswahlfeld macht Filtern und Auswerten
+    # möglich („nur Südamerika“ beim Zusammenstellen eines Biotopbeckens), der
+    # Freitext trägt die eigentliche Information. Nur Freitext wäre nicht
+    # filterbar, nur Auswahl zu grob. Leer heißt „nicht erfasst“ — ``UNKNOWN``
+    # dagegen „nachgesehen, niemand weiß es“.
+    origin_region = models.CharField(
+        "Verbreitungsgebiet", max_length=15, choices=Region.choices, blank=True
+    )
+    origin_detail = models.CharField(
+        "Herkunft im Detail",
+        max_length=200,
+        blank=True,
+        help_text="z. B. „Orinoco-Einzug, Venezuela und Kolumbien“.",
+    )
 
     water_type = models.CharField(
         "Wassertyp", max_length=10, choices=WaterType.choices, default=WaterType.FRESHWATER
@@ -228,6 +263,16 @@ class Species(models.Model):
     def gh_range(self):
         return self._range_text(self.gh_min, self.gh_max, " °dH")
 
+    @property
+    def origin_display(self):
+        """Verbreitungsgebiet und Freitext in einer Zeile.
+
+        Beides steht nebeneinander, weil beides gemeint ist: das Gebiet für den
+        Überblick, der Freitext für den Einzug, in dem die Art wirklich lebt.
+        """
+        region = self.get_origin_region_display() if self.origin_region else ""
+        return " · ".join(part for part in (region, self.origin_detail) if part)
+
 
 class PlantSpecies(Species):
     class Placement(models.TextChoices):
@@ -283,11 +328,58 @@ class AnimalSpecies(Species):
         TERRITORIAL = "territorial", "Revierbildend"
         PREDATORY = "predatory", "Räuberisch"
 
+    class Zone(models.TextChoices):
+        """Wo sich die Art im Becken aufhält.
+
+        Grundlage jeder sinnvollen Besatzzusammenstellung: drei Bodenbewohner
+        nebeneinander ergeben ein leeres Becken mit Gedränge am Boden.
+        """
+
+        BOTTOM = "bottom", "Boden"
+        LOWER = "lower", "Unterer Bereich"
+        MIDDLE = "middle", "Mittlerer Bereich"
+        UPPER = "upper", "Oberer Bereich"
+        SURFACE = "surface", "Oberfläche"
+        ALL = "all", "Alle Bereiche"
+
+    class Diet(models.TextChoices):
+        """Ernährung in drei Stufen.
+
+        Bewusst nur drei Werte: Feinheiten wie Aufwuchs- oder Insektenfresser
+        gehören in die Beschreibung. Eine feiner gegliederte Auswahl wäre
+        schwerer auszufüllen und im Alltag nicht nützlicher.
+        """
+
+        CARNIVORE = "carnivore", "Fleischlich"
+        HERBIVORE = "herbivore", "Pflanzlich"
+        OMNIVORE = "omnivore", "Beides"
+
+    class Social(models.TextChoices):
+        """Sozialstruktur — was ``min_group_size`` nicht sagen kann.
+
+        Bei einem Paar steht dort 2, was auch „mindestens zwei Tiere“ heißen
+        könnte; dass es ein Männchen und ein Weibchen sein müssen, geht dabei
+        verloren. Genau diese Aussage steht hier.
+        """
+
+        SOLITARY = "solitary", "Einzeln"
+        PAIR = "pair", "Paar (♂ + ♀)"
+        HAREM = "harem", "Harem (1 ♂ + mehrere ♀)"
+        GROUP = "group", "Gruppe"
+        SHOAL = "shoal", "Schwarm"
+
     category = models.CharField(
         "Kategorie", max_length=10, choices=Category.choices, default=Category.FISH
     )
     temperament = models.CharField(
         "Verhalten", max_length=12, choices=Temperament.choices, default=Temperament.PEACEFUL
+    )
+    zone = models.CharField(
+        "Aufenthaltsbereich", max_length=7, choices=Zone.choices, blank=True
+    )
+    diet = models.CharField("Ernährung", max_length=9, choices=Diet.choices, blank=True)
+    social_structure = models.CharField(
+        "Sozialstruktur", max_length=8, choices=Social.choices, blank=True
     )
     adult_size_cm = models.DecimalField(
         "Endgröße (cm)", max_digits=4, decimal_places=1, null=True, blank=True
@@ -306,6 +398,102 @@ class AnimalSpecies(Species):
 
     def get_absolute_url(self):
         return reverse("catalog:animal-detail", args=[self.slug])
+
+
+class SpeciesLink(models.Model):
+    """Ein Verweis von einem Steckbrief auf eine fremde Wissensquelle.
+
+    Ein Steckbrief im eigenen Katalog wird nie so vollständig sein wie eine
+    Fachdatenbank. Statt alles nachzupflegen, verweist er auf die Quelle —
+    DRTA-Archiv bei den Tieren, Flowgrow bei den Pflanzen, dazu Hersteller,
+    Artikel und Forenbeiträge.
+
+    **Ein** Modell für beide Kataloge mit zwei optionalen Fremdschlüsseln, von
+    denen genau einer gesetzt ist (Bedingung in ``Meta.constraints``). Zwei
+    getrennte Modelle wären dieselbe Logik doppelt; eine generische Beziehung
+    verlöre ``CASCADE`` und die Vorabladung.
+
+    Die Adresse wird nicht abgerufen: ein automatischer Datenabruf aus den
+    Quellen ist nicht vorgesehen (#1250). Es gibt keine Schnittstelle, die
+    Steckbriefe sind redaktionelle Inhalte Dritter, und ein Scraper bräche bei
+    jeder Layoutänderung — auffallen würde das erst beim Nutzer. Beim Pflegen
+    hilft stattdessen eine Suchadresse (siehe :mod:`catalog.sources`).
+    """
+
+    class Kind(models.TextChoices):
+        DATABASE = "database", "Artdatenbank"
+        SUPPLIER = "supplier", "Hersteller / Händler"
+        ARTICLE = "article", "Artikel"
+        FORUM = "forum", "Forenbeitrag"
+        VIDEO = "video", "Video"
+        OTHER = "other", "Sonstiges"
+
+    plant = models.ForeignKey(
+        PlantSpecies,
+        verbose_name="Pflanzenart",
+        null=True,
+        blank=True,
+        related_name="links",
+        on_delete=models.CASCADE,
+    )
+    animal = models.ForeignKey(
+        AnimalSpecies,
+        verbose_name="Tierart",
+        null=True,
+        blank=True,
+        related_name="links",
+        on_delete=models.CASCADE,
+    )
+    kind = models.CharField(
+        "Art der Quelle", max_length=8, choices=Kind.choices, default=Kind.DATABASE
+    )
+    title = models.CharField("Titel", max_length=200)
+    url = models.URLField("Adresse", max_length=500)
+    position = models.PositiveSmallIntegerField(
+        "Reihenfolge", default=0, help_text="Kleinere Zahlen stehen oben."
+    )
+
+    class Meta:
+        verbose_name = "Quellenlink"
+        verbose_name_plural = "Quellenlinks"
+        ordering = ["position", "title"]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(plant__isnull=False, animal__isnull=True)
+                    | models.Q(plant__isnull=True, animal__isnull=False)
+                ),
+                name="catalog_specieslink_one_species",
+                violation_error_message="Ein Link gehört zu genau einer Art.",
+            )
+        ]
+
+    def __str__(self):
+        return self.title
+
+    def clean(self):
+        """Dieselbe Bedingung wie in der Datenbank, nur mit lesbarer Meldung.
+
+        Die Oberfläche setzt die Art aus der Adresse und zeigt die beiden
+        Felder nicht; im Admin wären sie ohne diese Prüfung ein
+        ``IntegrityError`` statt einer Fehlermeldung am Formular.
+        """
+        super().clean()
+        if bool(self.plant_id) == bool(self.animal_id):
+            raise ValidationError(
+                "Ein Link gehört zu genau einer Art — entweder zu einer Pflanze "
+                "oder zu einem Tier."
+            )
+
+    @property
+    def species(self):
+        """Die Art, an der der Link hängt — Pflanze oder Tier."""
+        return self.plant if self.plant_id else self.animal
+
+    @property
+    def species_kind(self):
+        """``plant`` oder ``animal`` — der Schlüssel, unter dem die Adressen stehen."""
+        return "plant" if self.plant_id else "animal"
 
 
 class SpeciesImage(ImageVariantsMixin, models.Model):

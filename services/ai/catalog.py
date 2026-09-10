@@ -41,8 +41,8 @@ MATCH_LIMIT = 3
 
 #: Steckbrief-Feld -> Katalogfeld, nur wo die Namen auseinandergehen. Alles
 #: andere heißt hier wie dort gleich; was der Katalog gar nicht kennt
-#: (``family``, ``origin``, ``care_notes``, ``uncertainties``), bleibt am
-#: Vorschlag stehen und ist dort weiter zu lesen.
+#: (``family``, ``care_notes``, ``uncertainties``), bleibt am Vorschlag stehen
+#: und ist dort weiter zu lesen.
 FIELD_NAMES = {
     "temp_min_c": "temperature_min",
     "temp_max_c": "temperature_max",
@@ -51,6 +51,12 @@ FIELD_NAMES = {
     "height_max_cm": "max_height_cm",
     "group": "category",
     "co2_demand": "co2_required",
+    # Der Entwurf nennt das Herkunftsgebiet als Freitext; das Auswahlfeld
+    # ``origin_region`` bleibt dem Menschen, der den Entwurf übernimmt. Aus
+    # „Südamerika, Orinoco-Einzug" ein Gebiet zu raten hieße, eine Angabe zu
+    # erfinden, die hinterher filterbar aussieht.
+    "origin": "origin_detail",
+    "social_behavior": "social_structure",
 }
 
 #: Katalogfeld -> {Wert im Entwurf: Wert im Katalog}. Die Auswahllisten des
@@ -68,6 +74,25 @@ FIELD_VALUES = {
     # Ältere Entwürfe kennen „demanding“, der Katalog nur „hard“.
     "difficulty": {"demanding": "hard"},
     "co2_required": {"low": False, "medium": False, "high": True},
+    "social_structure": {
+        "einzeln": "solitary",
+        "paar": "pair",
+        "harem": "harem",
+        "gruppe": "group",
+        "schwarm": "shoal",
+    },
+    # Der Prompt kennt drei Bereiche, der Katalog sechs: die feineren bleiben
+    # dem Menschen. „mitte“ auf ``middle`` abzubilden ist keine Verfeinerung,
+    # sondern dieselbe Aussage.
+    "zone": {"boden": "bottom", "mitte": "middle", "oberflaeche": "surface"},
+    # „aufwuchs“ ist eine Ernährung von pflanzlichem Aufwuchs. Der Katalog
+    # führt die Feinheit bewusst nicht — sie gehört in die Beschreibung.
+    "diet": {
+        "allesfresser": "omnivore",
+        "fleisch": "carnivore",
+        "pflanzen": "herbivore",
+        "aufwuchs": "herbivore",
+    },
 }
 
 

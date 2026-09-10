@@ -171,6 +171,35 @@ ANTHROPIC = {
     "MODEL": env("ANTHROPIC_MODEL", default="claude-opus-5"),
 }
 
+# Suchmuster der Wissensquellen, auf die ein Steckbrief verweisen kann.
+# ``{query}`` wird durch den wissenschaftlichen Namen ersetzt (siehe
+# catalog.sources). Abgerufen wird nichts: ein automatischer Datenabruf ist
+# nicht vorgesehen (#1250) — die Steckbriefe sind redaktionelle Inhalte Dritter,
+# eine Schnittstelle gibt es nicht, und ein Scraper bräche bei jeder
+# Layoutänderung. Die Adressen stehen hier, damit eine geänderte Suchadresse
+# ohne Codeänderung nachzuziehen ist.
+CATALOG_SEARCH_SOURCES = {
+    "animal": [
+        {
+            "key": "drta",
+            "label": "DRTA-Archiv",
+            "url": env(
+                "CATALOG_SEARCH_URL_ANIMAL", default="https://www.drta-archiv.de/?s={query}"
+            ),
+        },
+    ],
+    "plant": [
+        {
+            "key": "flowgrow",
+            "label": "Flowgrow",
+            "url": env(
+                "CATALOG_SEARCH_URL_PLANT",
+                default="https://www.flowgrow.de/db/wasserpflanzen?search={query}",
+            ),
+        },
+    ],
+}
+
 # Längste Bildkante, auf die ein Foto vor dem Versand an Claude gerechnet wird.
 # Bilder sind der teure Teil der Bilderkennung; 1024 px reichen für eine
 # Artbestimmung und kosten einen Bruchteil der Token eines Originalfotos.

@@ -18,7 +18,9 @@
               · {{ planting.species.get_placement_display }}
               · gepflanzt {{ planting.planted_on|date:"d.m.Y" }}
               {% if planting.removed_on %}· entfernt {{ planting.removed_on|date:"d.m.Y" }}{% endif %}
+              {# Herkunft = Umzug aus einem anderen Becken, Bezugsquelle = wie vorgezogen. #}
               {% if planting.origin %}· {{ planting.origin.origin_label }}{% endif %}
+              {% if planting.provenance_label %}· {{ planting.provenance_label }}{% endif %}
             </p>
           </div>
           {% if planting.is_active %}
