@@ -6,6 +6,8 @@ Ansichten und Templates fragen dieselbe Funktion, damit keine Schaltfläche
 erscheint, deren Ziel hinterher mit 403 antwortet.
 """
 
+from dataclasses import dataclass
+
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.http import HttpResponseRedirect
@@ -17,9 +19,45 @@ from core.enums import Difficulty, WaterType
 from core.views import NavSectionMixin
 from tanks.models import species_in_own_tanks
 
-from .forms import AnimalSpeciesForm, PlantSpeciesForm, SpeciesImageUploadForm
-from .models import AnimalImage, AnimalSpecies, PlantImage, PlantSpecies
+from . import sources
+from .forms import (
+    AnimalSpeciesForm,
+    PlantSpeciesForm,
+    SpeciesImageUploadForm,
+    SpeciesLinkForm,
+)
+from .models import AnimalImage, AnimalSpecies, PlantImage, PlantSpecies, SpeciesLink
 from .permissions import may_edit_catalog
+
+
+@dataclass(frozen=True)
+class ChoiceFilter:
+    """Ein Auswahlfilter der Katalogliste.
+
+    Eine Liste solcher Filter statt je Katalog ein festes „Zusatzfeld": beim
+    Besatz wird nach Bereich, Ernährung und Sozialstruktur gefiltert, bei den
+    Pflanzen nach Standort — und nach Verbreitungsgebiet in beiden. Mit einem
+    einzigen Zusatzfeld wäre das vier Sonderfälle in Ansicht und Template.
+    """
+
+    #: Name im Query-String — deutsch, weil er in der Adresse steht.
+    param: str
+    #: Feld am Katalogmodell.
+    field: str
+    label: str
+    choices: tuple
+
+    def value(self, params):
+        """Der gewählte Wert, sofern er zur Auswahlliste gehört — sonst leer."""
+        chosen = params.get(self.param, "")
+        return chosen if chosen in {value for value, _ in self.choices} else ""
+
+
+#: Verbreitungsgebiet — derselbe Filter in beiden Katalogen, das Feld steht an
+#: ``Species``. Für ein Biotopbecken ist es die zentrale Angabe.
+REGION_FILTER = ChoiceFilter(
+    "verbreitung", "origin_region", "Verbreitungsgebiet", PlantSpecies.Region.choices
+)
 
 
 class SpeciesFilterMixin(LoginRequiredMixin):
@@ -30,10 +68,8 @@ class SpeciesFilterMixin(LoginRequiredMixin):
     """
 
     model = None
-    #: Zusätzliches Auswahlfeld neben Wassertyp und Anspruch.
-    extra_filter_field = None
-    extra_filter_label = ""
-    extra_filter_choices = ()
+    #: Auswahlfilter neben Suche, Wassertyp und Anspruch.
+    choice_filters = ()
 
     def get_filters(self):
         params = self.request.GET
@@ -41,7 +77,8 @@ class SpeciesFilterMixin(LoginRequiredMixin):
             "q": params.get("q", "").strip(),
             "water_type": params.get("wassertyp", ""),
             "difficulty": params.get("anspruch", ""),
-            "extra": params.get("filter", ""),
+            # Je Auswahlfilter der gewählte Wert; unbekannte Werte fallen weg.
+            "choices": {item.param: item.value(params) for item in self.choice_filters},
             # Nur die Stammformen — wer nach robustem Besatz sucht, will die
             # Zuchtformen nicht dazwischen haben.
             "wild_only": params.get("nur_stammformen", "") == "1",
@@ -55,10 +92,23 @@ class SpeciesFilterMixin(LoginRequiredMixin):
             queryset = queryset.filter(difficulty=filters["difficulty"])
         if filters["wild_only"]:
             queryset = queryset.wild_forms()
-        valid_extra = [value for value, _ in self.extra_filter_choices]
-        if self.extra_filter_field and filters["extra"] in valid_extra:
-            queryset = queryset.filter(**{self.extra_filter_field: filters["extra"]})
+        for item in self.choice_filters:
+            chosen = filters["choices"].get(item.param, "")
+            if chosen:
+                queryset = queryset.filter(**{item.field: chosen})
         return queryset
+
+    def filter_rows(self, filters):
+        """Die Auswahlfilter samt gewähltem Wert — fertig für das Template."""
+        return [
+            {
+                "param": item.param,
+                "label": item.label,
+                "choices": item.choices,
+                "value": filters["choices"].get(item.param, ""),
+            }
+            for item in self.choice_filters
+        ]
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -71,8 +121,7 @@ class SpeciesFilterMixin(LoginRequiredMixin):
                 "result_count": len(species),
                 "water_types": WaterType.choices,
                 "difficulties": Difficulty.choices,
-                "extra_filter_label": self.extra_filter_label,
-                "extra_filter_choices": self.extra_filter_choices,
+                "filter_rows": self.filter_rows(filters),
                 "list_url": reverse(self.list_url_name),
                 "grid_url": reverse(self.grid_url_name),
                 "can_edit_catalog": may_edit_catalog(self.request.user),
@@ -85,9 +134,10 @@ class SpeciesFilterMixin(LoginRequiredMixin):
 class PlantCatalogMixin(SpeciesFilterMixin, NavSectionMixin):
     model = PlantSpecies
     nav_section = "plants"
-    extra_filter_field = "placement"
-    extra_filter_label = "Standort"
-    extra_filter_choices = PlantSpecies.Placement.choices
+    choice_filters = (
+        ChoiceFilter("filter", "placement", "Standort", PlantSpecies.Placement.choices),
+        REGION_FILTER,
+    )
     list_url_name = "catalog:plant-list"
     grid_url_name = "catalog:plant-grid"
     create_url_name = "catalog:plant-create"
@@ -96,9 +146,15 @@ class PlantCatalogMixin(SpeciesFilterMixin, NavSectionMixin):
 class AnimalCatalogMixin(SpeciesFilterMixin, NavSectionMixin):
     model = AnimalSpecies
     nav_section = "animals"
-    extra_filter_field = "category"
-    extra_filter_label = "Kategorie"
-    extra_filter_choices = AnimalSpecies.Category.choices
+    choice_filters = (
+        ChoiceFilter("filter", "category", "Kategorie", AnimalSpecies.Category.choices),
+        REGION_FILTER,
+        ChoiceFilter("bereich", "zone", "Aufenthaltsbereich", AnimalSpecies.Zone.choices),
+        ChoiceFilter("ernaehrung", "diet", "Ernährung", AnimalSpecies.Diet.choices),
+        ChoiceFilter(
+            "sozialstruktur", "social_structure", "Sozialstruktur", AnimalSpecies.Social.choices
+        ),
+    )
     list_url_name = "catalog:animal-list"
     grid_url_name = "catalog:animal-grid"
     create_url_name = "catalog:animal-create"
@@ -132,9 +188,11 @@ class PlantSpeciesMixin:
     form_class = PlantSpeciesForm
     image_model = PlantImage
     nav_section = "plants"
+    #: Zugleich der Name des Fremdschlüssels am ``SpeciesLink``.
     kind = "plant"
     label = "Pflanzenart"
     list_url_name = "catalog:plant-list"
+    detail_template = "catalog/plant_detail.html"
     tank_kwarg = "plant"
     #: Beziehung, über die die Art in Becken steckt.
     usage_related = "plantings"
@@ -148,6 +206,7 @@ class AnimalSpeciesMixin:
     kind = "animal"
     label = "Tierart"
     list_url_name = "catalog:animal-list"
+    detail_template = "catalog/animal_detail.html"
     tank_kwarg = "animal"
     usage_related = "stockings"
 
@@ -184,30 +243,84 @@ def gallery_context(request, species, kind, *, confirm_image=None):
     }
 
 
+def link_rows(species, kind, may_edit):
+    """Quellenlinks samt ihren Pflege-Adressen — wie :func:`image_rows`."""
+    rows = []
+    for link in species.links.all():
+        row = {"link": link, "update_url": "", "delete_url": ""}
+        if may_edit:
+            row["update_url"] = reverse(
+                f"catalog:{kind}-link-update", args=[species.slug, link.pk]
+            )
+            row["delete_url"] = reverse(
+                f"catalog:{kind}-link-delete", args=[species.slug, link.pk]
+            )
+        rows.append(row)
+    return rows
+
+
+def links_context(request, species, kind):
+    """Der Quellenabschnitt einer Art.
+
+    ``search_links`` sind die Suchadressen der hinterlegten Wissensquellen
+    (:mod:`catalog.sources`) — die Hilfe beim Pflegen, an die Stelle eines
+    automatischen Datenabrufs gesetzt.
+    """
+    may_edit = may_edit_catalog(request.user)
+    return {
+        "species": species,
+        "link_rows": link_rows(species, kind, may_edit),
+        "can_edit_catalog": may_edit,
+        "link_section_url": reverse(f"catalog:{kind}-links", args=[species.slug]),
+        "link_create_url": reverse(f"catalog:{kind}-link-create", args=[species.slug]),
+        "search_links": sources.search_links(kind, species),
+    }
+
+
+def detail_context(request, species, *, kind, tank_kwarg):
+    """Alles, was die Detailseite einer Art zeigt.
+
+    Steht als Funktion da und nicht nur in der Detailansicht, weil die
+    Linkpflege ohne JavaScript dieselbe Seite samt offenem Formular
+    zurückgeben muss: ein Redirect verlöre das Formular, und „Link hinzufügen"
+    bliebe ohne Wirkung.
+    """
+    context = {
+        "species": species,
+        # „In welchen eigenen Becken kommt die Art vor?"
+        "own_tanks": species_in_own_tanks(request.user, **{tank_kwarg: species}),
+        "edit_url": reverse(f"catalog:{kind}-update", args=[species.slug]),
+        "delete_url": reverse(f"catalog:{kind}-delete", args=[species.slug]),
+    }
+    context.update(gallery_context(request, species, kind))
+    context.update(links_context(request, species, kind))
+    return context
+
+
 class SpeciesDetailView(LoginRequiredMixin, NavSectionMixin, TemplateView):
     model = None
     tank_kwarg = None
 
+    def get_template_names(self):
+        return [self.detail_template]
+
     def get_context_data(self, slug, **kwargs):
         context = super().get_context_data(**kwargs)
-        species = get_object_or_404(self.model.objects.prefetch_related("images"), slug=slug)
-        context["species"] = species
-        # „In welchen eigenen Becken kommt die Art vor?"
-        context["own_tanks"] = species_in_own_tanks(
-            self.request.user, **{self.tank_kwarg: species}
+        species = get_object_or_404(
+            self.model.objects.prefetch_related("images", "links"), slug=slug
         )
-        context.update(gallery_context(self.request, species, self.kind))
-        context["edit_url"] = reverse(f"catalog:{self.kind}-update", args=[species.slug])
-        context["delete_url"] = reverse(f"catalog:{self.kind}-delete", args=[species.slug])
+        context.update(
+            detail_context(self.request, species, kind=self.kind, tank_kwarg=self.tank_kwarg)
+        )
         return context
 
 
 class PlantDetailView(PlantSpeciesMixin, SpeciesDetailView):
-    template_name = "catalog/plant_detail.html"
+    pass
 
 
 class AnimalDetailView(AnimalSpeciesMixin, SpeciesDetailView):
-    template_name = "catalog/animal_detail.html"
+    pass
 
 
 # --------------------------------------------------------------------------
@@ -432,4 +545,128 @@ class PlantImageDeleteView(PlantSpeciesMixin, SpeciesImageDeleteView):
 
 
 class AnimalImageDeleteView(AnimalSpeciesMixin, SpeciesImageDeleteView):
+    pass
+
+
+# --------------------------------------------------------------------------
+# Quellenlinks
+# --------------------------------------------------------------------------
+
+
+class SpeciesLinkSectionView(CatalogEditMixin, View):
+    """Basis der Linkpflege: antwortet mit dem Quellenabschnitt.
+
+    Mit HTMX kommt nur der Abschnitt zurück, ohne HTMX die ganze Detailseite
+    mit dem Formular an seinem Platz. Anders als bei der Galerie ist ein
+    Redirect hier nicht genug: das Linkformular erscheint erst auf Anforderung
+    und wäre danach wieder zu.
+    """
+
+    template_name = "catalog/partials/links.html"
+
+    def get_link(self, species, pk):
+        return get_object_or_404(species.links, pk=pk)
+
+    def render_section(self, species, **extra):
+        if getattr(self.request, "htmx", False):
+            context = links_context(self.request, species, self.kind)
+            context.update(extra)
+            return render(self.request, self.template_name, context)
+        context = detail_context(
+            self.request, species, kind=self.kind, tank_kwarg=self.tank_kwarg
+        )
+        context.update({"nav_section": self.nav_section, **extra})
+        return render(self.request, self.detail_template, context)
+
+    def form_context(self, form, action, title):
+        return {"link_form": form, "link_action": action, "link_title": title}
+
+
+class SpeciesLinkView(SpeciesLinkSectionView):
+    """Abschnitt frisch ausliefern — das Ziel jedes „Abbrechen"."""
+
+    def get(self, request, slug):
+        return self.render_section(self.get_species())
+
+
+class SpeciesLinkFormView(SpeciesLinkSectionView):
+    """Link anlegen und bearbeiten — derselbe Ablauf, nur einmal mit Objekt."""
+
+    def get(self, request, slug, pk=None):
+        species = self.get_species()
+        form = SpeciesLinkForm(instance=self.link_instance(species, pk))
+        return self.render_section(species, **self.form_extra(species, form, pk))
+
+    def post(self, request, slug, pk=None):
+        species = self.get_species()
+        form = SpeciesLinkForm(request.POST, instance=self.link_instance(species, pk))
+        if not form.is_valid():
+            return self.render_section(species, **self.form_extra(species, form, pk))
+        form.save()
+        if not getattr(request, "htmx", False):
+            messages.success(request, "Quelle gespeichert." if pk else "Quelle hinzugefügt.")
+        return self.render_section(species)
+
+    def link_instance(self, species, pk):
+        """Der Link, der bearbeitet wird — oder ein neuer, der schon an der Art hängt.
+
+        Die Art steht **vor** der Prüfung am Objekt: :meth:`SpeciesLink.clean`
+        verlangt genau einen Fremdschlüssel, und ein erst nach dem Speichern
+        gesetzter wäre für das Formular noch keiner. Der Fremdschlüssel heißt
+        wie die Katalogart — ``plant`` bzw. ``animal``.
+        """
+        if pk:
+            return self.get_link(species, pk)
+        return SpeciesLink(**{self.kind: species})
+
+    def form_extra(self, species, form, pk):
+        action = (
+            reverse(f"catalog:{self.kind}-link-update", args=[species.slug, pk])
+            if pk
+            else reverse(f"catalog:{self.kind}-link-create", args=[species.slug])
+        )
+        return self.form_context(form, action, "Quelle bearbeiten" if pk else "Quelle hinzufügen")
+
+
+class SpeciesLinkDeleteView(SpeciesLinkSectionView):
+    """Link löschen — mit Rückfrage im Abschnitt."""
+
+    def get(self, request, slug, pk):
+        species = self.get_species()
+        link = self.get_link(species, pk)
+        return self.render_section(
+            species,
+            confirm_link=link,
+            link_action=reverse(f"catalog:{self.kind}-link-delete", args=[species.slug, pk]),
+        )
+
+    def post(self, request, slug, pk):
+        species = self.get_species()
+        self.get_link(species, pk).delete()
+        if not getattr(request, "htmx", False):
+            messages.success(request, "Quelle entfernt.")
+        return self.render_section(species)
+
+
+class PlantLinkView(PlantSpeciesMixin, SpeciesLinkView):
+    pass
+
+
+class AnimalLinkView(AnimalSpeciesMixin, SpeciesLinkView):
+    pass
+
+
+class PlantLinkFormView(PlantSpeciesMixin, SpeciesLinkFormView):
+    pass
+
+
+class AnimalLinkFormView(AnimalSpeciesMixin, SpeciesLinkFormView):
+    pass
+
+
+class PlantLinkDeleteView(PlantSpeciesMixin, SpeciesLinkDeleteView):
+    pass
+
+
+class AnimalLinkDeleteView(AnimalSpeciesMixin, SpeciesLinkDeleteView):
     pass

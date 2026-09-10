@@ -9,7 +9,7 @@ from django import forms
 
 from core.forms import BootstrapMixin, MultipleImageField
 
-from .models import AnimalSpecies, PlantSpecies, normalize_variant, unique_slug
+from .models import AnimalSpecies, PlantSpecies, SpeciesLink, normalize_variant, unique_slug
 
 #: Steckbrieffelder, die sich Pflanzen und Tiere teilen.
 SHARED_FIELDS = [
@@ -19,6 +19,8 @@ SHARED_FIELDS = [
     "common_name",
     "summary",
     "description",
+    "origin_region",
+    "origin_detail",
     "water_type",
     "difficulty",
     "temperature_min",
@@ -98,10 +100,37 @@ class AnimalSpeciesForm(SpeciesForm):
         fields = SHARED_FIELDS + [
             "category",
             "temperament",
+            "zone",
+            "diet",
+            "social_structure",
             "adult_size_cm",
             "min_group_size",
             "min_tank_volume_l",
         ]
+
+
+class SpeciesLinkForm(BootstrapMixin, forms.ModelForm):
+    """Ein Verweis auf eine fremde Wissensquelle.
+
+    ``plant`` und ``animal`` stehen nicht im Formular: an welcher Art der Link
+    hängt, sagt die Adresse, unter der gespeichert wird — eine Auswahlliste mit
+    allen Arten wäre eine Fehlerquelle ohne Nutzen.
+    """
+
+    class Meta:
+        model = SpeciesLink
+        fields = ["kind", "title", "url", "position"]
+
+    def clean_url(self):
+        """Nur ``http`` und ``https``.
+
+        ``URLField`` nimmt auch ``ftp://`` an; in einem Verweis, der in einem
+        neuen Tab aufgeht, hat ein anderes Schema nichts zu suchen.
+        """
+        url = self.cleaned_data["url"]
+        if not url.lower().startswith(("http://", "https://")):
+            raise forms.ValidationError("Die Adresse muss mit http:// oder https:// beginnen.")
+        return url
 
 
 class SpeciesImageUploadForm(BootstrapMixin, forms.Form):

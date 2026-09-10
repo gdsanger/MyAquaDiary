@@ -29,6 +29,18 @@
           <dd>{{ species.get_category_display }}</dd>
           <dt>Verhalten</dt>
           <dd>{{ species.get_temperament_display }}</dd>
+          {% if species.zone %}
+            <dt>Aufenthaltsbereich</dt>
+            <dd>{{ species.get_zone_display }}</dd>
+          {% endif %}
+          {% if species.diet %}
+            <dt>Ernährung</dt>
+            <dd>{{ species.get_diet_display }}</dd>
+          {% endif %}
+          {% if species.social_structure %}
+            <dt>Sozialstruktur</dt>
+            <dd>{{ species.get_social_structure_display }}</dd>
+          {% endif %}
           {% if species.adult_size_cm %}
             <dt>Endgröße</dt>
             <dd>{{ species.adult_size_cm|floatformat:1 }} cm</dd>
@@ -55,6 +67,7 @@
 
   <div class="col-12 col-lg-6">
     {% include "catalog/partials/own_tanks.html" %}
+    {% include "catalog/partials/links.html" %}
   </div>
 
   <div class="col-12">

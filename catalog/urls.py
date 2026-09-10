@@ -36,6 +36,22 @@ urlpatterns = [
         views.PlantImageDeleteView.as_view(),
         name="plant-image-delete",
     ),
+    path("pflanzen/<slug:slug>/quellen/", views.PlantLinkView.as_view(), name="plant-links"),
+    path(
+        "pflanzen/<slug:slug>/quellen/neu/",
+        views.PlantLinkFormView.as_view(),
+        name="plant-link-create",
+    ),
+    path(
+        "pflanzen/<slug:slug>/quellen/<int:pk>/bearbeiten/",
+        views.PlantLinkFormView.as_view(),
+        name="plant-link-update",
+    ),
+    path(
+        "pflanzen/<slug:slug>/quellen/<int:pk>/loeschen/",
+        views.PlantLinkDeleteView.as_view(),
+        name="plant-link-delete",
+    ),
     path("tiere/", views.AnimalListView.as_view(), name="animal-list"),
     path("tiere/raster/", views.AnimalGridView.as_view(), name="animal-grid"),
     path("tiere/neu/", views.AnimalSpeciesFormView.as_view(), name="animal-create"),
@@ -64,5 +80,21 @@ urlpatterns = [
         "tiere/<slug:slug>/bilder/<int:pk>/loeschen/",
         views.AnimalImageDeleteView.as_view(),
         name="animal-image-delete",
+    ),
+    path("tiere/<slug:slug>/quellen/", views.AnimalLinkView.as_view(), name="animal-links"),
+    path(
+        "tiere/<slug:slug>/quellen/neu/",
+        views.AnimalLinkFormView.as_view(),
+        name="animal-link-create",
+    ),
+    path(
+        "tiere/<slug:slug>/quellen/<int:pk>/bearbeiten/",
+        views.AnimalLinkFormView.as_view(),
+        name="animal-link-update",
+    ),
+    path(
+        "tiere/<slug:slug>/quellen/<int:pk>/loeschen/",
+        views.AnimalLinkDeleteView.as_view(),
+        name="animal-link-delete",
     ),
 ]

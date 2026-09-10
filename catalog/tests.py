@@ -2,11 +2,13 @@ import tempfile
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from catalog.models import AnimalSpecies, PlantSpecies
+from catalog import sources
+from catalog.models import AnimalSpecies, PlantSpecies, SpeciesLink
 from core.enums import Difficulty, WaterType
 from core.testing import (
     create_animal,
@@ -243,6 +245,350 @@ def grant_catalog_edit(user):
     return get_user_model().objects.get(pk=user.pk)
 
 
+class OriginTests(TestCase):
+    """Natürliche Verbreitung: Auswahlfeld zum Filtern, Freitext zum Lesen."""
+
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.tetra = create_animal(
+            "Paracheirodon innesi",
+            origin_region=AnimalSpecies.Region.SOUTH_AMERICA,
+            origin_detail="Oberer Rio Negro, Brasilien und Kolumbien",
+        )
+        self.shrimp = create_animal(
+            "Neocaridina davidi",
+            slug="neocaridina-davidi",
+            common_name="Zwerggarnele",
+            origin_region=AnimalSpecies.Region.ASIA,
+        )
+
+    def test_the_profile_names_region_and_detail(self):
+        response = self.client.get(self.tetra.get_absolute_url())
+        self.assertContains(response, "Südamerika")
+        self.assertContains(response, "Oberer Rio Negro")
+
+    def test_a_species_without_an_origin_shows_no_row(self):
+        species = create_animal("Danio rerio", slug="danio-rerio", common_name="Zebrabärbling")
+        response = self.client.get(species.get_absolute_url())
+        self.assertNotContains(response, "<dt>Herkunft</dt>")
+
+    def test_the_catalog_can_be_narrowed_to_one_region(self):
+        response = self.client.get(
+            reverse("catalog:animal-list"), {"verbreitung": AnimalSpecies.Region.SOUTH_AMERICA}
+        )
+        self.assertEqual(
+            [species.pk for species in response.context["species_list"]], [self.tetra.pk]
+        )
+
+    def test_an_unknown_region_is_ignored(self):
+        response = self.client.get(reverse("catalog:animal-list"), {"verbreitung": "atlantis"})
+        self.assertEqual(response.context["result_count"], 2)
+
+    def test_plants_carry_the_same_field(self):
+        crypto = create_plant(origin_region=PlantSpecies.Region.ASIA, origin_detail="Sri Lanka")
+        response = self.client.get(
+            reverse("catalog:plant-list"), {"verbreitung": PlantSpecies.Region.ASIA}
+        )
+        self.assertEqual([species.pk for species in response.context["species_list"]], [crypto.pk])
+
+    def test_a_cultivar_without_a_wild_population_says_so(self):
+        # „Zuchtform ohne Wildvorkommen" ist eine Aussage und keine Lücke.
+        blue = create_animal(
+            "Mikrogeophagus ramirezi",
+            slug="mikrogeophagus-ramirezi-electric-blue",
+            variant="Electric Blue",
+            is_cultivated_form=True,
+            origin_region=AnimalSpecies.Region.CULTIVAR,
+        )
+        response = self.client.get(blue.get_absolute_url())
+        self.assertContains(response, "Zuchtform ohne Wildvorkommen")
+
+
+class AnimalTraitTests(TestCase):
+    """Aufenthaltsbereich, Ernährung und Sozialstruktur — Steckbrief und Filter."""
+
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.catfish = create_animal(
+            "Corydoras paleatus",
+            slug="corydoras-paleatus",
+            common_name="Marmorierter Panzerwels",
+            zone=AnimalSpecies.Zone.BOTTOM,
+            diet=AnimalSpecies.Diet.OMNIVORE,
+            social_structure=AnimalSpecies.Social.SHOAL,
+        )
+        self.cichlid = create_animal(
+            "Apistogramma cacatuoides",
+            slug="apistogramma-cacatuoides",
+            common_name="Kakadu-Zwergbuntbarsch",
+            zone=AnimalSpecies.Zone.LOWER,
+            diet=AnimalSpecies.Diet.CARNIVORE,
+            social_structure=AnimalSpecies.Social.HAREM,
+        )
+
+    def test_the_profile_names_all_three(self):
+        response = self.client.get(self.catfish.get_absolute_url())
+        self.assertContains(response, "Aufenthaltsbereich")
+        self.assertContains(response, "Boden")
+        self.assertContains(response, "Beides")
+        self.assertContains(response, "Schwarm")
+
+    def test_an_unset_trait_shows_no_row(self):
+        plain = create_animal("Danio rerio", slug="danio-rerio")
+        response = self.client.get(plain.get_absolute_url())
+        self.assertNotContains(response, "Aufenthaltsbereich")
+
+    def test_each_trait_is_a_filter(self):
+        cases = [
+            ({"bereich": AnimalSpecies.Zone.BOTTOM}, self.catfish),
+            ({"ernaehrung": AnimalSpecies.Diet.CARNIVORE}, self.cichlid),
+            ({"sozialstruktur": AnimalSpecies.Social.HAREM}, self.cichlid),
+        ]
+        for query, expected in cases:
+            with self.subTest(query=query):
+                response = self.client.get(reverse("catalog:animal-list"), query)
+                self.assertEqual(
+                    [species.pk for species in response.context["species_list"]], [expected.pk]
+                )
+
+    def test_filters_combine_with_the_search(self):
+        response = self.client.get(
+            reverse("catalog:animal-list"),
+            {"q": "Corydoras", "ernaehrung": AnimalSpecies.Diet.CARNIVORE},
+        )
+        self.assertEqual(response.context["result_count"], 0)
+
+    def test_the_filter_bar_offers_them(self):
+        response = self.client.get(reverse("catalog:animal-list"))
+        params = [row["param"] for row in response.context["filter_rows"]]
+        self.assertEqual(
+            params, ["filter", "verbreitung", "bereich", "ernaehrung", "sozialstruktur"]
+        )
+
+    def test_the_plant_catalog_keeps_its_own_filters(self):
+        response = self.client.get(reverse("catalog:plant-list"))
+        params = [row["param"] for row in response.context["filter_rows"]]
+        self.assertEqual(params, ["filter", "verbreitung"])
+
+
+class SpeciesLinkModelTests(TestCase):
+    """Ein Link gehört zu genau einer Art — sonst nimmt ihn die Datenbank nicht."""
+
+    def setUp(self):
+        self.plant = create_plant()
+        self.animal = create_animal()
+
+    def test_a_link_to_a_plant_is_stored(self):
+        link = SpeciesLink.objects.create(
+            plant=self.plant, title="Flowgrow", url="https://www.flowgrow.de/"
+        )
+        self.assertEqual(list(self.plant.links.all()), [link])
+        self.assertEqual(link.species, self.plant)
+        self.assertEqual(link.species_kind, "plant")
+
+    def test_two_species_at_once_are_refused(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            SpeciesLink.objects.create(
+                plant=self.plant, animal=self.animal, title="Beides", url="https://example.org/"
+            )
+
+    def test_a_link_without_a_species_is_refused(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            SpeciesLink.objects.create(title="Nirgends", url="https://example.org/")
+
+    def test_the_form_level_check_reports_both_cases(self):
+        for link in (
+            SpeciesLink(plant=self.plant, animal=self.animal, title="x", url="https://e.org/"),
+            SpeciesLink(title="x", url="https://e.org/"),
+        ):
+            with self.subTest(plant=link.plant_id, animal=link.animal_id):
+                with self.assertRaises(ValidationError):
+                    link.clean()
+
+    def test_links_are_sorted_by_position(self):
+        second = SpeciesLink.objects.create(
+            animal=self.animal, title="Forum", url="https://example.org/2", position=2
+        )
+        first = SpeciesLink.objects.create(
+            animal=self.animal, title="DRTA-Archiv", url="https://example.org/1", position=1
+        )
+        self.assertEqual(list(self.animal.links.all()), [first, second])
+
+    def test_deleting_the_species_takes_its_links(self):
+        SpeciesLink.objects.create(animal=self.animal, title="x", url="https://example.org/")
+        self.animal.delete()
+        self.assertFalse(SpeciesLink.objects.exists())
+
+
+@override_settings(
+    CATALOG_SEARCH_SOURCES={
+        "animal": [{"key": "drta", "label": "DRTA-Archiv", "url": "https://drta.test/?s={query}"}],
+        "plant": [{"key": "flowgrow", "label": "Flowgrow", "url": "https://flowgrow.test/?q={query}"}],
+    }
+)
+class SearchLinkTests(TestCase):
+    """Suchlink-Hilfe statt Datenabruf."""
+
+    def setUp(self):
+        self.user = grant_catalog_edit(create_user())
+        self.client.force_login(self.user)
+        self.animal = create_animal()
+
+    def test_the_address_carries_the_scientific_name(self):
+        links = sources.search_links("animal", self.animal)
+        self.assertEqual(
+            links, [{"label": "DRTA-Archiv", "url": "https://drta.test/?s=Paracheirodon+innesi"}]
+        )
+
+    def test_the_cultivar_is_searched_by_its_species_name(self):
+        # Eine Fachdatenbank führt keine Zuchtformen — mit „Electric Blue" im
+        # Suchbegriff liefert sie nichts.
+        blue = create_animal(
+            "Mikrogeophagus ramirezi",
+            slug="mikrogeophagus-ramirezi-electric-blue",
+            variant="Electric Blue",
+            is_cultivated_form=True,
+        )
+        self.assertIn("Mikrogeophagus+ramirezi", sources.search_links("animal", blue)[0]["url"])
+        self.assertNotIn("Electric", sources.search_links("animal", blue)[0]["url"])
+
+    @override_settings(CATALOG_SEARCH_SOURCES={"animal": [{"label": "Ohne", "url": "https://x.test/"}]})
+    def test_a_pattern_without_a_placeholder_is_skipped(self):
+        self.assertEqual(sources.search_links("animal", self.animal), [])
+
+    def test_without_a_configured_source_there_is_nothing_to_offer(self):
+        with override_settings(CATALOG_SEARCH_SOURCES={}):
+            self.assertEqual(sources.search_links("animal", self.animal), [])
+
+    def test_the_detail_page_offers_the_search(self):
+        response = self.client.get(self.animal.get_absolute_url())
+        self.assertContains(response, "DRTA-Archiv durchsuchen")
+        self.assertContains(response, "https://drta.test/?s=Paracheirodon+innesi")
+
+    def test_the_plant_catalog_points_at_its_own_source(self):
+        plant = create_plant()
+        response = self.client.get(plant.get_absolute_url())
+        self.assertContains(response, "Flowgrow durchsuchen")
+
+    def test_without_the_permission_there_is_no_search_button(self):
+        self.client.force_login(create_user("leser"))
+        response = self.client.get(self.animal.get_absolute_url())
+        self.assertNotContains(response, "DRTA-Archiv durchsuchen")
+
+
+class SpeciesLinkViewTests(TestCase):
+    """Links auf der Detailseite pflegen — mit HTMX als Fragment, ohne als Seite."""
+
+    def setUp(self):
+        self.user = grant_catalog_edit(create_user())
+        self.client.force_login(self.user)
+        self.animal = create_animal()
+
+    def payload(self, **overrides):
+        data = {
+            "kind": SpeciesLink.Kind.DATABASE,
+            "title": "DRTA-Archiv: Neonsalmler",
+            "url": "https://www.drta-archiv.de/paracheirodon-innesi/",
+            "position": "0",
+        }
+        data.update(overrides)
+        return data
+
+    def create_url(self):
+        return reverse("catalog:animal-link-create", args=[self.animal.slug])
+
+    def test_a_link_is_added_and_shown_on_the_detail_page(self):
+        self.client.post(self.create_url(), self.payload())
+        link = self.animal.links.get()
+        self.assertEqual(link.animal, self.animal)
+        response = self.client.get(self.animal.get_absolute_url())
+        self.assertContains(response, "DRTA-Archiv: Neonsalmler")
+        self.assertContains(response, "Artdatenbank")
+
+    def test_the_section_comes_back_as_a_fragment(self):
+        response = self.client.post(self.create_url(), self.payload(), HTTP_HX_REQUEST="true")
+        content = response.content.decode()
+        self.assertNotIn("<html", content)
+        self.assertIn('id="katalog-quellen"', content)
+
+    def test_without_htmx_the_form_stays_on_the_page(self):
+        # Ohne JavaScript muss „Quelle hinzufügen" eine Seite mit Formular
+        # liefern — ein Redirect auf die Detailseite hätte keine Wirkung.
+        response = self.client.get(self.create_url())
+        self.assertContains(response, "Quelle hinzufügen")
+        self.assertContains(response, 'name="url"')
+
+    def test_an_address_without_a_scheme_is_refused(self):
+        response = self.client.post(
+            self.create_url(), self.payload(url="ftp://example.org/datei"), HTTP_HX_REQUEST="true"
+        )
+        self.assertFalse(self.animal.links.exists())
+        self.assertContains(response, "http://")
+
+    def test_a_link_is_edited(self):
+        self.client.post(self.create_url(), self.payload())
+        link = self.animal.links.get()
+        self.client.post(
+            reverse("catalog:animal-link-update", args=[self.animal.slug, link.pk]),
+            self.payload(title="Neu benannt", kind=SpeciesLink.Kind.FORUM),
+        )
+        link.refresh_from_db()
+        self.assertEqual(link.title, "Neu benannt")
+        self.assertEqual(link.kind, SpeciesLink.Kind.FORUM)
+
+    def test_deleting_asks_first(self):
+        self.client.post(self.create_url(), self.payload())
+        link = self.animal.links.get()
+        url = reverse("catalog:animal-link-delete", args=[self.animal.slug, link.pk])
+
+        response = self.client.get(url, HTTP_HX_REQUEST="true")
+        self.assertContains(response, "Quelle entfernen?")
+        self.assertTrue(self.animal.links.exists())
+
+        self.client.post(url, HTTP_HX_REQUEST="true")
+        self.assertFalse(self.animal.links.exists())
+
+    def test_a_link_of_another_species_is_not_reachable(self):
+        other = create_animal("Danio rerio", slug="danio-rerio")
+        link = SpeciesLink.objects.create(animal=other, title="x", url="https://example.org/")
+        response = self.client.get(
+            reverse("catalog:animal-link-update", args=[self.animal.slug, link.pk])
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_the_plant_catalog_has_its_own_addresses(self):
+        plant = create_plant()
+        self.client.post(
+            reverse("catalog:plant-link-create", args=[plant.slug]),
+            self.payload(title="Flowgrow", url="https://www.flowgrow.de/db/cryptocoryne-wendtii"),
+        )
+        self.assertEqual(plant.links.get().plant, plant)
+
+    def test_without_the_permission_no_link_can_be_touched(self):
+        link = SpeciesLink.objects.create(
+            animal=self.animal, title="x", url="https://example.org/"
+        )
+        self.client.force_login(create_user("leser"))
+        urls = [
+            self.create_url(),
+            reverse("catalog:animal-link-update", args=[self.animal.slug, link.pk]),
+            reverse("catalog:animal-link-delete", args=[self.animal.slug, link.pk]),
+        ]
+        for url in urls:
+            with self.subTest(url=url):
+                self.assertEqual(self.client.get(url).status_code, 403)
+                self.assertEqual(self.client.post(url, {}).status_code, 403)
+
+    def test_a_reader_sees_the_links_but_no_buttons(self):
+        SpeciesLink.objects.create(animal=self.animal, title="Quelle", url="https://example.org/")
+        self.client.force_login(create_user("leser"))
+        response = self.client.get(self.animal.get_absolute_url())
+        self.assertContains(response, "Quelle")
+        self.assertNotContains(response, "Quelle hinzufügen")
+
+
 class CatalogPermissionTests(TestCase):
     """Der Katalog ist userübergreifend — hier entscheidet das Recht."""
 
@@ -397,9 +743,31 @@ class SpeciesWriteTests(TestCase):
                 "category": AnimalSpecies.Category.FISH,
                 "temperament": AnimalSpecies.Temperament.PEACEFUL,
                 "min_group_size": "6",
+                "origin_region": AnimalSpecies.Region.SOUTH_AMERICA,
+                "origin_detail": "Südostbrasilien",
+                "zone": AnimalSpecies.Zone.BOTTOM,
+                "diet": AnimalSpecies.Diet.HERBIVORE,
+                "social_structure": AnimalSpecies.Social.GROUP,
             },
         )
-        self.assertTrue(AnimalSpecies.objects.filter(slug="otocinclus-affinis").exists())
+        species = AnimalSpecies.objects.get(slug="otocinclus-affinis")
+        self.assertEqual(species.origin_region, AnimalSpecies.Region.SOUTH_AMERICA)
+        self.assertEqual(species.origin_detail, "Südostbrasilien")
+        self.assertEqual(species.zone, AnimalSpecies.Zone.BOTTOM)
+        self.assertEqual(species.diet, AnimalSpecies.Diet.HERBIVORE)
+        self.assertEqual(species.social_structure, AnimalSpecies.Social.GROUP)
+
+    def test_the_profile_fields_stay_optional(self):
+        """Ein Steckbrief ohne Haltungsmerkmale muss speicherbar bleiben.
+
+        Der Katalog wird nachgepflegt; wer einen Eintrag anlegt, hat selten
+        alles zur Hand.
+        """
+        response = self.client.post(reverse("catalog:plant-create"), self.plant_payload())
+        species = PlantSpecies.objects.get(scientific_name="Anubias barteri")
+        self.assertRedirects(response, species.get_absolute_url())
+        self.assertEqual(species.origin_region, "")
+        self.assertEqual(species.origin_display, "")
 
     def test_a_species_kept_in_a_tank_is_not_deleted(self):
         animal = create_animal()
