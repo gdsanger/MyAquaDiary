@@ -298,7 +298,10 @@ def list_due_tasks(context, arguments):
     "Sucht im Pflanzen- und Tierkatalog nach wissenschaftlichem oder deutschem "
     "Namen. Je Treffer steht das Verbreitungsgebiet dabei (origin_region: "
     "south_america, asia, cultivar …) — für ein Biotopbecken die zentrale "
-    "Angabe. Der Katalog ist für alle Benutzer derselbe und über MCP nur lesbar.",
+    "Angabe. Bei Pflanzen kommt die Kultivierbarkeit mit (growth_form_water: "
+    "submersed, emersed, both): „emersed“ heißt, dass die Art untergetaucht "
+    "nicht dauerhaft wächst, auch wenn sie als Aquarienpflanze verkauft wird. "
+    "Der Katalog ist für alle Benutzer derselbe und über MCP nur lesbar.",
     schema={
         "type": "object",
         "properties": {
@@ -337,7 +340,9 @@ def search_catalog(context, arguments):
     "(Verbreitungsgebiet und Einzug), Größe, Ansprüche an Wasserwerte und "
     "Becken, Vergesellschaftung, Pflege. Beim Tier dazu Aufenthaltsbereich "
     "(zone), Ernährung (diet) und Sozialstruktur (social_structure: solitary, "
-    "pair, harem, group, shoal). Unter links stehen Verweise auf fremde "
+    "pair, harem, group, shoal). Bei der Pflanze dazu die Kultivierbarkeit "
+    "(growth_form_water: submersed, emersed, both) und emersed_notes zu Blüte, "
+    "Umgewöhnung und Luftfeuchte. Unter links stehen Verweise auf fremde "
     "Wissensquellen — Adressen, kein Inhalt: abgerufen wird dort nichts.",
     schema={
         "type": "object",
