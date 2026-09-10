@@ -425,7 +425,9 @@ class SpeciesLinkModelTests(TestCase):
 @override_settings(
     CATALOG_SEARCH_SOURCES={
         "animal": [{"key": "drta", "label": "DRTA-Archiv", "url": "https://drta.test/?s={query}"}],
-        "plant": [{"key": "flowgrow", "label": "Flowgrow", "url": "https://flowgrow.test/?q={query}"}],
+        "plant": [
+            {"key": "flowgrow", "label": "Flowgrow", "url": "https://flowgrow.test/?q={query}"}
+        ],
     }
 )
 class SearchLinkTests(TestCase):
@@ -454,7 +456,9 @@ class SearchLinkTests(TestCase):
         self.assertIn("Mikrogeophagus+ramirezi", sources.search_links("animal", blue)[0]["url"])
         self.assertNotIn("Electric", sources.search_links("animal", blue)[0]["url"])
 
-    @override_settings(CATALOG_SEARCH_SOURCES={"animal": [{"label": "Ohne", "url": "https://x.test/"}]})
+    @override_settings(
+        CATALOG_SEARCH_SOURCES={"animal": [{"label": "Ohne", "url": "https://x.test/"}]}
+    )
     def test_a_pattern_without_a_placeholder_is_skipped(self):
         self.assertEqual(sources.search_links("animal", self.animal), [])
 

@@ -270,8 +270,8 @@ class Species(models.Model):
         Beides steht nebeneinander, weil beides gemeint ist: das Gebiet für den
         Überblick, der Freitext für den Einzug, in dem die Art wirklich lebt.
         """
-        parts = [self.get_origin_region_display() if self.origin_region else "", self.origin_detail]
-        return " · ".join(part for part in parts if part)
+        region = self.get_origin_region_display() if self.origin_region else ""
+        return " · ".join(part for part in (region, self.origin_detail) if part)
 
 
 class PlantSpecies(Species):

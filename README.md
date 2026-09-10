@@ -375,6 +375,61 @@ Sortenbezeichnung, und der Filter *nur Stammformen* blendet die Zuchtformen
 aus. Bewertet wird in der Oberfläche nichts: was eine Zuchtform in der Haltung
 bedeutet, gehört in `description` und `summary`, wo es begründet werden kann.
 
+### Herkunft — zwei verschiedene Dinge
+
+Das Wort meint zweierlei, und beides steht an einer anderen Stelle:
+
+| Angabe | Ort | Warum dort |
+|---|---|---|
+| **Natürliche Verbreitung** (`origin_region`, `origin_detail`) | Katalogeintrag | gilt für die Art, nicht für einen Bestand |
+| **Bezugsquelle** (`provenance`, `provenance_detail`) | `Stocking` / `Planting` | dieselbe Art kann aus verschiedenen Quellen kommen |
+
+Das Verbreitungsgebiet ist ein Auswahlfeld **und** ein Freitext: das
+Auswahlfeld macht den Filter „nur Südamerika“ möglich — der häufigste
+Anwendungsfall beim Zusammenstellen eines Biotopbeckens —, der Freitext trägt
+den Einzug, in dem die Art wirklich lebt. `cultivar` ist dabei eine Aussage und
+keine Lücke: 'Electric Blue' hat kein Wildvorkommen.
+
+Die Bezugsquelle zählt, weil sie über die Haltung entscheidet: asiatische
+Massennachzuchten von *Mikrogeophagus ramirezi* sind oft hormonbehandelt und
+zeigen keine Brutpflege mehr, europäische Privatnachzuchten sind
+unproblematisch. Bei Pflanzen machen InVitro, submers und emers vorgezogen den
+Unterschied beim Anwachsen — deshalb hat `Planting` eine eigene Auswahlliste.
+
+### Aufenthaltsbereich, Ernährung, Sozialstruktur
+
+Drei Felder an `AnimalSpecies`, alle im Steckbrief und alle als Filter der
+Katalogliste: `zone`, `diet` und `social_structure`. Die Ernährung kennt
+bewusst nur drei Stufen; Feinheiten wie Aufwuchs- oder Insektenfresser gehören
+in die Beschreibung, wo sie begründet werden können.
+
+`social_structure` trägt, was `min_group_size` nicht sagen kann: bei einem Paar
+steht dort 2, und dass es ein Männchen und ein Weibchen sein müssen, ging dabei
+verloren. Am Besatz stehen deshalb `quantity_male` und `quantity_female` —
+optional, weil bei einem Schwarm niemand die Geschlechter zählt. Wo sie erfasst
+sind, meldet `Stocking.social_hints` (und mit ihm das Dashboard) ein Paar aus
+zwei gleichgeschlechtlichen Tieren, einen Harem mit mehreren Männchen und einen
+Einzelgänger in Gesellschaft. Alles als Hinweis, nichts als Sperre.
+
+### Quellen und Suchlink-Hilfe
+
+Ein Steckbrief im eigenen Katalog wird nie so vollständig sein wie eine
+Fachdatenbank. `catalog.SpeciesLink` verweist deshalb auf die Quelle —
+DRTA-Archiv bei den Tieren, Flowgrow bei den Pflanzen, dazu Hersteller,
+Artikel, Forenbeitrag, Video. Ein Modell für beide Kataloge mit zwei
+Fremdschlüsseln, von denen eine Bedingung genau einen zulässt; gepflegt wird im
+Abschnitt *Quellen* der Detailseite, sortiert über `position`.
+
+**Einen automatischen Datenabruf gibt es nicht** — und das ist eine
+Entscheidung: es gibt keine öffentliche Schnittstelle, die Steckbriefe sind
+redaktionelle Inhalte Dritter, und ein Scraper bräche bei jeder Layoutänderung,
+wobei der Fehler erst beim Nutzer auffiele. Stattdessen baut `catalog.sources`
+aus dem wissenschaftlichen Namen eine Suchadresse, die in einem neuen Tab
+aufgeht; übernommen wird von Hand. Die Muster stehen in
+`settings.CATALOG_SEARCH_SOURCES` und sind über `CATALOG_SEARCH_URL_ANIMAL` /
+`CATALOG_SEARCH_URL_PLANT` aus dem Environment zu setzen — ändert eine Quelle
+ihre Suchadresse, ist das eine Einstellung und keine Codeänderung.
+
 ## Mailversand (Microsoft Graph)
 
 Ausgehende Mail läuft über die Microsoft Graph API, authentifiziert per
