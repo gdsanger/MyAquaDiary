@@ -411,6 +411,35 @@ sind, meldet `Stocking.social_hints` (und mit ihm das Dashboard) ein Paar aus
 zwei gleichgeschlechtlichen Tieren, einen Harem mit mehreren Männchen und einen
 Einzelgänger in Gesellschaft. Alles als Hinweis, nichts als Sperre.
 
+### Kultivierbarkeit: emers, submers oder beides
+
+`PlantSpecies.growth_form_water` sagt, in welcher Form eine Art dauerhaft
+wächst. Das ist mehr als eine Fußnote: eine nur submerse Art stirbt über Wasser
+ab, eine nur emerse wächst untergetaucht nicht dauerhaft — und genau die werden
+im Handel als „Aquarienpflanze“ angeboten (*Fittonia*, *Dracaena*) und gehen
+nach Wochen ein. `both` heißt, dass die Art zwischen zwei Erscheinungsformen
+wechselt, oft mit deutlich unterschiedlichem Blattbild: *Anubias barteri* wächst
+emers schneller und blüht dort regelmäßig, *Hydrocotyle leucocephala* und
+*Bacopa* wachsen über die Wasserlinie einfach weiter.
+
+Im Steckbrief steht die Angabe als Zeile, in der Katalogliste als Filter. **Der
+Filter „nur submers“ ist beim Kauf die praktisch nützliche Abfrage** — er
+schließt genau die falsch etikettierten Arten aus.
+
+Daneben steht `emersed_notes` als Freitext, für das, wofür eine Auswahl zu grob
+ist: dass Anubias emers blüht, dass der Übergang langsam erfolgen muss, weil
+submers gebildete Blätter trockene Luft schlecht vertragen, dass hohe
+Luftfeuchte unter einer Abdeckung Voraussetzung ist.
+
+**Nicht dasselbe wie die Bezugsquelle.** `Planting.provenance` beschreibt, wie
+das gekaufte Exemplar vorgezogen wurde (InVitro, submers, emers);
+`growth_form_water` beschreibt, was die Art grundsätzlich kann. Beides wird
+gebraucht und ist nicht zusammenzulegen — eine emers gezogene *Alternanthera*
+ist trotzdem eine submers kultivierbare Art.
+
+Das Feld heißt bewusst nicht `growth_form`: diesen Namen trägt die Wuchsform
+(Stängel, Rosette, Aufsitzer) bereits.
+
 ### Quellen und Suchlink-Hilfe
 
 Ein Steckbrief im eigenen Katalog wird nie so vollständig sein wie eine
