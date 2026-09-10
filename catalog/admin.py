@@ -40,7 +40,7 @@ class PlantSpeciesAdmin(admin.ModelAdmin):
     ]
     list_filter = [
         "water_type", "difficulty", "is_cultivated_form", "placement", "growth_rate",
-        "light_demand", "origin_region",
+        "light_demand", "origin_region", "growth_form_water",
     ]
     search_fields = ["scientific_name", "variant", "common_name"]
     # Der Slug nimmt die Sorte mit auf, sonst kollidieren Stamm- und Zuchtform.

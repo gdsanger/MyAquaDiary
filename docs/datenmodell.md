@@ -438,7 +438,22 @@ growth_rate          slow | medium | fast
 light_demand         low | medium | high
 co2_required
 max_height_cm
+growth_form_water    Kultivierbarkeit: submersed | emersed | both · leer = nicht erfasst
+emersed_notes        Freitext zur emersen Kultur — Blüte, Umgewöhnung, Luftfeuchte
 ```
+
+`growth_form_water` heißt so und **nicht** `growth_form`: diesen Namen trägt
+die Wuchsform (Stängel, Rosette, Aufsitzer) aus #1212 bereits, im KI-Steckbrief
+unter `services.ai.schemas.GROWTH_FORMS`. Zwei Bedeutungen unter einem Namen
+sind genau der Fehler, den #1236 gekostet hat.
+
+Die Angabe beschreibt, **was die Art grundsätzlich kann** — nicht, wie ein
+gekauftes Exemplar vorgezogen wurde. Das steht als `provenance` am
+Bepflanzungseintrag (`tanks.Planting`) und ist etwas anderes: eine emers
+gezogene *Alternanthera* ist trotzdem eine submers kultivierbare Art. `emersed`
+heißt, dass die Art untergetaucht nicht dauerhaft wächst — der Filter
+„nur submers“ schließt beim Kauf genau die Arten aus, die im Handel falsch
+etikettiert werden.
 
 ### `catalog.AnimalSpecies` — erbt `Species`
 

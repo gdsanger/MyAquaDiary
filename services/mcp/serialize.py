@@ -435,9 +435,11 @@ def catalog_entry(kind: str, instance) -> dict:
 
     Das Verbreitungsgebiet steht schon in der Kurzform: „nur Südamerika“ ist
     der häufigste Grund, im Katalog zu suchen, und dafür sollte niemand je
-    Treffer einen zweiten Aufruf brauchen.
+    Treffer einen zweiten Aufruf brauchen. Bei der Pflanze gilt dasselbe für
+    die Kultivierbarkeit — sie entscheidet darüber, ob eine Art untergetaucht
+    überhaupt hält.
     """
-    return {
+    entry = {
         "kind": kind,
         "entry_id": instance.pk,
         "name": instance.display_name,
@@ -459,6 +461,12 @@ def catalog_entry(kind: str, instance) -> dict:
         "difficulty": instance.difficulty,
         "difficulty_label": _display(instance, "difficulty"),
     }
+    if kind == "plant":
+        # Nur an der Pflanze: am Tier wäre der Schlüssel eine leere Behauptung.
+        # Leer heißt „nicht erfasst“ und nicht „wächst nirgends“.
+        entry["growth_form_water"] = instance.growth_form_water
+        entry["growth_form_water_label"] = _display(instance, "growth_form_water")
+    return entry
 
 
 #: Steckbrief-Felder je Art. Nur Felder, die es im jeweiligen Katalogmodell
@@ -472,7 +480,8 @@ CATALOG_FIELDS = {
     ],
     "plant": [
         "placement", "growth_rate", "light_demand", "co2_required",
-        "max_height_cm", "origin_detail", "temperature_min", "temperature_max",
+        "max_height_cm", "emersed_notes", "origin_detail",
+        "temperature_min", "temperature_max",
         "ph_min", "ph_max", "gh_min", "gh_max", "description",
     ],
 }

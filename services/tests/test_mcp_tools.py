@@ -693,6 +693,39 @@ class CatalogReadTests(ToolTestCase):
         self.assertEqual(result["origin_region"], "asia")
         self.assertEqual(result["origin_detail"], "Südostasien")
 
+    def test_a_plant_profile_says_in_which_form_it_can_be_grown(self):
+        moss = self.moss()
+        PlantSpecies.objects.filter(pk=moss.pk).update(
+            growth_form_water=PlantSpecies.Growth.BOTH,
+            emersed_notes="Emers langsamer, aber möglich; hohe Luftfeuchte nötig.",
+        )
+
+        result = self.call("get_catalog_entry", kind="plant", entry_id=moss.pk)
+
+        self.assertEqual(result["growth_form_water"], "both")
+        self.assertEqual(result["growth_form_water_label"], "Beides")
+        self.assertIn("hohe Luftfeuchte", result["emersed_notes"])
+
+    def test_the_search_carries_the_cultivation_form_of_a_plant(self):
+        """Sonst bräuchte „nur submers“ je Treffer einen zweiten Aufruf."""
+        moss = self.moss()
+        PlantSpecies.objects.filter(pk=moss.pk).update(
+            growth_form_water=PlantSpecies.Growth.SUBMERSED
+        )
+
+        entry = self.call("search_catalog", query="Vesicularia")["entries"][0]
+
+        self.assertEqual(entry["growth_form_water"], "submersed")
+        self.assertEqual(entry["growth_form_water_label"], "Nur submers")
+
+    def test_an_animal_hit_has_no_cultivation_form(self):
+        """Die Angabe gibt es nur an der Pflanze — am Tier wäre sie sinnlos."""
+        self.guppy()
+
+        entry = self.call("search_catalog", query="Poecilia")["entries"][0]
+
+        self.assertNotIn("growth_form_water", entry)
+
     def test_the_profile_names_the_sources_it_points_at(self):
         guppy = self.guppy()
         SpeciesLink.objects.create(

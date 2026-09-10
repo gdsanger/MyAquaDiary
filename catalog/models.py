@@ -292,6 +292,26 @@ class PlantSpecies(Species):
         MEDIUM = "medium", "Mittel"
         HIGH = "high", "Viel"
 
+    class Growth(models.TextChoices):
+        """In welcher Form die Art dauerhaft wächst — über oder unter Wasser.
+
+        Mehr als eine Fußnote: eine nur emerse Art geht untergetaucht nach
+        Wochen ein, auch wenn sie als „Aquarienpflanze“ verkauft wurde
+        (*Fittonia*, *Dracaena*). Umgekehrt stirbt eine nur submerse Art über
+        Wasser ab. ``BOTH`` heißt, dass die Art zwischen zwei Erscheinungsformen
+        wechselt — *Anubias barteri* stellt sich Blatt für Blatt um, sobald sie
+        durch die Oberfläche stößt.
+
+        Nicht zu verwechseln mit der Bezugsquelle (``tanks.Planting.provenance``):
+        die sagt, wie das gekaufte Exemplar vorgezogen wurde, diese Angabe, was
+        die Art grundsätzlich kann. Eine emers gezogene *Alternanthera* ist
+        trotzdem eine submers kultivierbare Art.
+        """
+
+        SUBMERSED = "submersed", "Nur submers"
+        EMERSED = "emersed", "Nur emers"
+        BOTH = "both", "Beides"
+
     placement = models.CharField(
         "Standort", max_length=12, choices=Placement.choices, default=Placement.MIDGROUND
     )
@@ -303,6 +323,29 @@ class PlantSpecies(Species):
     )
     co2_required = models.BooleanField("CO₂ erforderlich", default=False)
     max_height_cm = models.PositiveSmallIntegerField("Wuchshöhe (cm)", null=True, blank=True)
+
+    # ``growth_form_water`` und nicht ``growth_form``: die Wuchsform (Stängel,
+    # Rosette, Aufsitzer) trägt diesen Namen bereits (#1212, im KI-Steckbrief
+    # unter ``services.ai.schemas.GROWTH_FORMS``). Zwei Bedeutungen unter einem
+    # Namen wären der Fehler, den #1236 schon einmal gekostet hat.
+    growth_form_water = models.CharField(
+        "Kultivierbarkeit",
+        max_length=9,
+        choices=Growth.choices,
+        blank=True,
+        help_text="Ob die Art über Wasser, unter Wasser oder in beiden Formen "
+        "dauerhaft wächst. Leer lassen, wenn es nicht erfasst ist.",
+    )
+    # Auswahlfeld **und** Freitext, wie schon bei der Herkunft: die Auswahl
+    # macht den Filter „nur submers“ möglich, der Freitext trägt, wofür sie zu
+    # grob ist — dass Anubias emers blüht, dass der Übergang langsam erfolgen
+    # muss, weil submers gebildete Blätter trockene Luft schlecht vertragen,
+    # dass es ohne hohe Luftfeuchte unter einer Abdeckung nicht geht.
+    emersed_notes = models.TextField(
+        "Hinweise zur emersen Kultur",
+        blank=True,
+        help_text="Blüte, Umgewöhnung, Luftfeuchte — was die Auswahl nicht sagen kann.",
+    )
 
     class Meta(Species.Meta):
         abstract = False

@@ -91,7 +91,12 @@ class PlantSpeciesForm(SpeciesForm):
             "light_demand",
             "co2_required",
             "max_height_cm",
+            "growth_form_water",
+            "emersed_notes",
         ]
+        # Kürzer als die Beschreibung: hier stehen Umgewöhnung und Luftfeuchte,
+        # nicht der halbe Steckbrief.
+        widgets = {**SpeciesForm.Meta.widgets, "emersed_notes": forms.Textarea(attrs={"rows": 3})}
 
 
 class AnimalSpeciesForm(SpeciesForm):
