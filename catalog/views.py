@@ -137,6 +137,13 @@ class PlantCatalogMixin(SpeciesFilterMixin, NavSectionMixin):
     choice_filters = (
         ChoiceFilter("filter", "placement", "Standort", PlantSpecies.Placement.choices),
         REGION_FILTER,
+        # „Nur submers“ ist beim Kauf die praktisch nützliche Abfrage: sie
+        # schließt genau die Arten aus, die im Handel als Aquarienpflanze
+        # etikettiert sind und untergetaucht nach Wochen eingehen.
+        ChoiceFilter(
+            "kultivierbarkeit", "growth_form_water", "Kultivierbarkeit",
+            PlantSpecies.Growth.choices,
+        ),
     )
     list_url_name = "catalog:plant-list"
     grid_url_name = "catalog:plant-grid"

@@ -370,7 +370,95 @@ class AnimalTraitTests(TestCase):
     def test_the_plant_catalog_keeps_its_own_filters(self):
         response = self.client.get(reverse("catalog:plant-list"))
         params = [row["param"] for row in response.context["filter_rows"]]
-        self.assertEqual(params, ["filter", "verbreitung"])
+        self.assertEqual(params, ["filter", "verbreitung", "kultivierbarkeit"])
+
+
+class PlantCultivationTests(TestCase):
+    """Kultivierbarkeit emers / submers / beides — Steckbrief und Filter."""
+
+    def setUp(self):
+        self.user = create_user()
+        self.client.force_login(self.user)
+        self.anubias = create_plant(
+            "Anubias barteri",
+            slug="anubias-barteri",
+            common_name="Speerblatt",
+            growth_form_water=PlantSpecies.Growth.BOTH,
+            emersed_notes="Blüht emers regelmäßig; der Übergang braucht hohe Luftfeuchte.",
+        )
+        self.eleocharis = create_plant(
+            "Eleocharis acicularis",
+            slug="eleocharis-acicularis",
+            common_name="Nadelsimse",
+            growth_form_water=PlantSpecies.Growth.SUBMERSED,
+        )
+        self.fittonia = create_plant(
+            "Fittonia albivenis",
+            slug="fittonia-albivenis",
+            common_name="Silbernetzblatt",
+            growth_form_water=PlantSpecies.Growth.EMERSED,
+        )
+
+    def test_the_profile_names_the_cultivation_form(self):
+        response = self.client.get(self.anubias.get_absolute_url())
+        self.assertContains(response, "Kultivierbarkeit")
+        self.assertContains(response, "Beides")
+
+    def test_the_profile_carries_the_notes_the_choice_is_too_coarse_for(self):
+        response = self.client.get(self.anubias.get_absolute_url())
+        self.assertContains(response, "Emerse Kultur")
+        self.assertContains(response, "Blüht emers regelmäßig")
+
+    def test_an_unset_cultivation_form_shows_no_row(self):
+        plain = create_plant("Vesicularia dubyana", slug="vesicularia-dubyana")
+        response = self.client.get(plain.get_absolute_url())
+        self.assertNotContains(response, "Kultivierbarkeit")
+
+    def test_only_submersed_species_can_be_asked_for(self):
+        """Die Abfrage, die beim Kauf zählt: was hält untergetaucht wirklich?"""
+        response = self.client.get(
+            reverse("catalog:plant-list"),
+            {"kultivierbarkeit": PlantSpecies.Growth.SUBMERSED},
+        )
+        self.assertEqual(
+            [species.pk for species in response.context["species_list"]], [self.eleocharis.pk]
+        )
+
+    def test_the_filter_separates_the_three_forms(self):
+        cases = [
+            (PlantSpecies.Growth.EMERSED, self.fittonia),
+            (PlantSpecies.Growth.BOTH, self.anubias),
+        ]
+        for value, expected in cases:
+            with self.subTest(value=value):
+                response = self.client.get(
+                    reverse("catalog:plant-list"), {"kultivierbarkeit": value}
+                )
+                self.assertEqual(
+                    [species.pk for species in response.context["species_list"]], [expected.pk]
+                )
+
+    def test_an_unknown_value_is_ignored(self):
+        response = self.client.get(
+            reverse("catalog:plant-list"), {"kultivierbarkeit": "amphibisch"}
+        )
+        self.assertEqual(response.context["result_count"], 3)
+
+    def test_the_filter_bar_offers_it(self):
+        response = self.client.get(reverse("catalog:plant-list"))
+        self.assertContains(response, 'name="kultivierbarkeit"')
+        self.assertContains(response, "Nur submers")
+
+    def test_the_animal_catalog_has_no_such_field(self):
+        """Der Name darf nicht mit der Wuchsform aus #1212 kollidieren.
+
+        Sie heißt ``growth_form``; diese Angabe heißt ``growth_form_water`` und
+        gibt es nur an der Pflanze. Ein Tier hat weder das eine noch das andere.
+        """
+        self.assertFalse(hasattr(AnimalSpecies, "growth_form_water"))
+        field_names = {field.name for field in PlantSpecies._meta.get_fields()}
+        self.assertIn("growth_form_water", field_names)
+        self.assertNotIn("growth_form", field_names)
 
 
 class SpeciesLinkModelTests(TestCase):
@@ -772,6 +860,20 @@ class SpeciesWriteTests(TestCase):
         self.assertRedirects(response, species.get_absolute_url())
         self.assertEqual(species.origin_region, "")
         self.assertEqual(species.origin_display, "")
+        self.assertEqual(species.growth_form_water, "")
+        self.assertEqual(species.emersed_notes, "")
+
+    def test_the_cultivation_form_is_stored_with_its_notes(self):
+        self.client.post(
+            reverse("catalog:plant-create"),
+            self.plant_payload(
+                growth_form_water=PlantSpecies.Growth.BOTH,
+                emersed_notes="Emers schneller und blühend; langsam umgewöhnen.",
+            ),
+        )
+        species = PlantSpecies.objects.get(slug="anubias-barteri")
+        self.assertEqual(species.growth_form_water, PlantSpecies.Growth.BOTH)
+        self.assertIn("langsam umgewöhnen", species.emersed_notes)
 
     def test_a_species_kept_in_a_tank_is_not_deleted(self):
         animal = create_animal()

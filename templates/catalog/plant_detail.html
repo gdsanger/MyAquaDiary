@@ -37,6 +37,16 @@
             <dt>Wuchshöhe</dt>
             <dd>bis {{ species.max_height_cm }} cm</dd>
           {% endif %}
+          {% if species.growth_form_water %}
+            {# Was die Art grundsätzlich kann — nicht, wie das gekaufte #}
+            {# Exemplar vorgezogen wurde; das steht am Bepflanzungseintrag. #}
+            <dt>Kultivierbarkeit</dt>
+            <dd>{{ species.get_growth_form_water_display }}</dd>
+          {% endif %}
+          {% if species.emersed_notes %}
+            <dt>Emerse Kultur</dt>
+            <dd>{{ species.emersed_notes|linebreaksbr }}</dd>
+          {% endif %}
         </dl>
         {% if species.description %}
           <p class="mt-3 mb-0">{{ species.description|linebreaksbr }}</p>
