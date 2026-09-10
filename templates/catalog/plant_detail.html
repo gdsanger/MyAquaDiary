@@ -56,8 +56,11 @@
   </div>
 
   <div class="col-12 col-lg-6">
-    {% include "catalog/partials/own_tanks.html" %}
-    {% include "catalog/partials/links.html" %}
+    {# Zwei Karten in einer Spalte: der Stapel hält sie auf Inhaltshöhe. #}
+    <div class="mad-card-stack">
+      {% include "catalog/partials/own_tanks.html" %}
+      {% include "catalog/partials/links.html" %}
+    </div>
   </div>
 
   <div class="col-12">
