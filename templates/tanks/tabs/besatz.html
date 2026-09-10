@@ -16,9 +16,12 @@
             <p class="mad-list__meta">
               <i>{{ stocking.species.scientific_name }}</i>
               · {{ stocking.species.get_category_display }}
+              {% if stocking.sex_label %}· {{ stocking.sex_label }}{% endif %}
               · eingesetzt {{ stocking.added_on|date:"d.m.Y" }}
               {% if stocking.removed_on %}· entnommen {{ stocking.removed_on|date:"d.m.Y" }}{% endif %}
+              {# Herkunft = Umzug aus einem anderen Becken, Bezugsquelle = woher die Tiere stammen. #}
               {% if stocking.origin %}· {{ stocking.origin.origin_label }}{% endif %}
+              {% if stocking.provenance_label %}· {{ stocking.provenance_label }}{% endif %}
             </p>
           </div>
           {% if not stocking.is_active %}
@@ -30,6 +33,13 @@
           {% else %}
             <span class="mad-status mad-status--ok">Gruppengröße in Ordnung</span>
           {% endif %}
+          {% comment %}
+          Paar-, Harem- und Einzelhaltung: Hinweise, keine Sperre — erfasst ist
+          der Besatz in jedem Fall.
+          {% endcomment %}
+          {% for hint in stocking.social_hints %}
+            <span class="mad-status mad-status--warn">{{ hint }}</span>
+          {% endfor %}
           {% comment %}
           Kein Löschen: dass hier einmal Tiere schwammen, gehört zur
           Beckengeschichte. Weg sind sie über den gebuchten Abgang.

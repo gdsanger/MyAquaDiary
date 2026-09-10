@@ -218,18 +218,31 @@ nicht — eine Änderung ist eine neue Stückzahl, ein Abgang ein `removed_on`.
 tank                 FK Tank · CASCADE
 species              FK catalog.AnimalSpecies · PROTECT
 quantity
+quantity_male        null zulässig — bei einem Schwarm zählt sie niemand
+quantity_female      null zulässig
 added_on
 removed_on           null = im Becken
+provenance           wild | bred_local | bred_de | bred_asia | retail | unknown
+provenance_detail    CharField(200) — Züchter oder Händler
 note                 CharField(200) — siehe Lücke 5 (kein Abgangsgrund)
 ```
 
 Abgeleitet: `is_active`, `group_status` (Warnung bei unterschrittener
-Mindestgruppengröße).
+Mindestgruppengröße), `sex_label`, `social_hints` (Hinweise zu Paar-, Harem- und
+Einzelhaltung), `provenance_label`.
+
+Die Bezugsquelle steht hier und nicht am Katalogeintrag: dieselbe Art kann aus
+verschiedenen Quellen stammen, und bei *Mikrogeophagus ramirezi* entscheidet
+genau das über Lebenserwartung und Brutverhalten. Beim Umsetzen
+(`tanks.transfers.perform`) zieht sie an einen neu angelegten Zieleintrag mit —
+es sind dieselben Tiere; beim Zusammenführen bleibt die des Zielbestands stehen.
 
 ### `tanks.Planting`
 
 Wie `Stocking`, aber mit `planted_on` statt `added_on` — beim Schreiben von
-Code der häufigste Griff daneben.
+Code der häufigste Griff daneben. Auch die Auswahlliste der Bezugsquelle ist
+eine eigene: bei Pflanzen machen InVitro, submers und emers vorgezogen die
+Unterschiede beim Anwachsen.
 
 ```
 tank                 FK Tank · CASCADE
@@ -237,8 +250,12 @@ species              FK catalog.PlantSpecies · PROTECT
 quantity
 planted_on           nicht „added_on“
 removed_on
+provenance           in_vitro | submersed | emersed | own_cutting | retail | unknown
+provenance_detail    CharField(200) — Gärtnerei oder Händler
 note
 ```
+
+Abgeleitet: `is_active`, `provenance_label`.
 
 ### `tanks.Transfer`
 

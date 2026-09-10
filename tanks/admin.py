@@ -93,14 +93,14 @@ class EventAdmin(admin.ModelAdmin):
 
 @admin.register(Stocking)
 class StockingAdmin(admin.ModelAdmin):
-    list_display = ["species", "tank", "quantity", "added_on", "removed_on"]
-    list_filter = ["tank"]
+    list_display = ["species", "tank", "quantity", "added_on", "removed_on", "provenance"]
+    list_filter = ["tank", "provenance"]
 
 
 @admin.register(Planting)
 class PlantingAdmin(admin.ModelAdmin):
-    list_display = ["species", "tank", "quantity", "planted_on", "removed_on"]
-    list_filter = ["tank"]
+    list_display = ["species", "tank", "quantity", "planted_on", "removed_on", "provenance"]
+    list_filter = ["tank", "provenance"]
 
 
 @admin.register(Transfer)

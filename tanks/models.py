@@ -565,14 +565,58 @@ class Event(models.Model):
         return self.title
 
 
-class Stocking(models.Model):
+class ProvenanceMixin:
+    """Gemeinsame Anzeige der Bezugsquelle an Besatz und Bepflanzung.
+
+    Die Auswahllisten unterscheiden sich — Wildfang und Nachzucht beim Tier,
+    InVitro und Vorkultur bei der Pflanze —, die Darstellung nicht. Gemeinsame
+    Felder gibt es deshalb keine, eine gemeinsame Ausgabe schon.
+    """
+
+    @property
+    def provenance_label(self):
+        """Bezugsquelle samt Händler oder Züchter, sofern erfasst."""
+        if not self.provenance:
+            return ""
+        label = self.get_provenance_display()
+        return f"{label} · {self.provenance_detail}" if self.provenance_detail else label
+
+
+class Stocking(ProvenanceMixin, models.Model):
     """Besatz: eine Tierart in einem Becken."""
+
+    class Provenance(models.TextChoices):
+        """Woher die Tiere dieses Postens stammen.
+
+        Gehört an den Besatz und nicht in den Katalog: dieselbe Art kann aus
+        ganz verschiedenen Quellen kommen, und bei *Mikrogeophagus ramirezi*
+        entscheidet genau das über Lebenserwartung und Brutverhalten —
+        asiatische Massennachzuchten sind oft hormonbehandelt und zeigen keine
+        Brutpflege mehr, europäische Privatnachzuchten sind unproblematisch.
+        """
+
+        WILD = "wild", "Wildfang"
+        BRED_LOCAL = "bred_local", "Eigene Nachzucht"
+        BRED_DE = "bred_de", "Deutsche / europäische Nachzucht"
+        BRED_ASIA = "bred_asia", "Asiatische Nachzucht"
+        RETAIL = "retail", "Handel, Herkunft unbekannt"
+        UNKNOWN = "unknown", "Unbekannt"
 
     tank = models.ForeignKey(Tank, related_name="stockings", on_delete=models.CASCADE)
     species = models.ForeignKey("catalog.AnimalSpecies", related_name="stockings", on_delete=models.PROTECT)
     quantity = models.PositiveSmallIntegerField("Anzahl", default=1)
+    # Optional, weil bei einem Schwarm niemand die Geschlechter zählt. Bei Paar-
+    # und Haremshaltung ist die Verteilung dagegen die eigentliche Aussage.
+    quantity_male = models.PositiveSmallIntegerField("davon Männchen", null=True, blank=True)
+    quantity_female = models.PositiveSmallIntegerField("davon Weibchen", null=True, blank=True)
     added_on = models.DateField("Eingesetzt am")
     removed_on = models.DateField("Entnommen am", null=True, blank=True)
+    provenance = models.CharField(
+        "Bezugsquelle", max_length=10, choices=Provenance.choices, blank=True
+    )
+    provenance_detail = models.CharField(
+        "Züchter / Händler", max_length=200, blank=True, help_text="Wer die Tiere abgegeben hat."
+    )
     note = models.CharField("Notiz", max_length=200, blank=True)
 
     class Meta:
@@ -596,15 +640,76 @@ class Stocking(models.Model):
             return Status.OK
         return Status.WARN
 
+    @property
+    def sex_label(self):
+        """Die erfasste Geschlechterverteilung, z. B. „1 ♂ · 3 ♀“.
 
-class Planting(models.Model):
+        Leer, solange nichts erfasst ist — und ein einzelner erfasster Wert
+        steht für sich: „2 ♂“ heißt nicht, dass es keine Weibchen gibt.
+        """
+        parts = []
+        if self.quantity_male is not None:
+            parts.append(f"{self.quantity_male} ♂")
+        if self.quantity_female is not None:
+            parts.append(f"{self.quantity_female} ♀")
+        return " · ".join(parts)
+
+    @property
+    def social_hints(self):
+        """Hinweise zur Sozialstruktur — Hinweise, keine Sperre.
+
+        Geprüft wird nur, was erfasst ist: ohne Geschlechterverteilung gibt es
+        zu Paar und Harem keinen Hinweis. Das ist Absicht — bei einem Schwarm
+        zählt die Geschlechter niemand, und ein Hinweis auf eine fehlende
+        Angabe stünde dann an jedem zweiten Posten.
+        """
+        if not self.is_active:
+            return []
+        structure = self.species.social_structure
+        social = self.species.Social
+        male, female = self.quantity_male, self.quantity_female
+        hints = []
+        if structure == social.SOLITARY and self.quantity > 1:
+            hints.append(
+                f"Die Art wird einzeln gehalten, im Becken stehen {self.quantity} Tiere."
+            )
+        if structure == social.PAIR and male is not None and female is not None:
+            if not (male and female):
+                hints.append("Ein Paar braucht ein Männchen und ein Weibchen.")
+        if structure == social.HAREM and male is not None and male > 1:
+            hints.append(f"Ein Harem verträgt nur ein Männchen, erfasst sind {male}.")
+        return hints
+
+
+class Planting(ProvenanceMixin, models.Model):
     """Bepflanzung: eine Pflanzenart in einem Becken."""
+
+    class Provenance(models.TextChoices):
+        """Wie die Pflanzen vorgezogen wurden.
+
+        Eigene Auswahlliste und nicht die des Besatzes: bei Pflanzen machen
+        InVitro, submers und emers vorgezogen die erheblichen Unterschiede beim
+        Anwachsen — „Wildfang“ und „Nachzucht“ sagen hier nichts.
+        """
+
+        IN_VITRO = "in_vitro", "InVitro"
+        SUBMERSED = "submersed", "Submers vorgezogen"
+        EMERSED = "emersed", "Emers vorgezogen"
+        OWN_CUTTING = "own_cutting", "Eigener Ableger"
+        RETAIL = "retail", "Handel, Herkunft unbekannt"
+        UNKNOWN = "unknown", "Unbekannt"
 
     tank = models.ForeignKey(Tank, related_name="plantings", on_delete=models.CASCADE)
     species = models.ForeignKey("catalog.PlantSpecies", related_name="plantings", on_delete=models.PROTECT)
     quantity = models.PositiveSmallIntegerField("Anzahl", default=1)
     planted_on = models.DateField("Gepflanzt am")
     removed_on = models.DateField("Entfernt am", null=True, blank=True)
+    provenance = models.CharField(
+        "Bezugsquelle", max_length=11, choices=Provenance.choices, blank=True
+    )
+    provenance_detail = models.CharField(
+        "Gärtnerei / Händler", max_length=200, blank=True, help_text="Woher die Pflanzen kamen."
+    )
     note = models.CharField("Notiz", max_length=200, blank=True)
 
     class Meta:

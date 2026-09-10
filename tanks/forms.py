@@ -413,18 +413,48 @@ class StockingForm(BootstrapMixin, forms.ModelForm):
 
     class Meta:
         model = Stocking
-        fields = ["species", "quantity", "added_on", "note"]
+        fields = [
+            "species",
+            "quantity",
+            "quantity_male",
+            "quantity_female",
+            "added_on",
+            "provenance",
+            "provenance_detail",
+            "note",
+        ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["species"].queryset = AnimalSpecies.objects.all()
         self.fields["species"].label = "Tierart"
+        self.fields["quantity_male"].help_text = self.fields["quantity_female"].help_text = (
+            "Optional — bei Paar- und Haremshaltung die eigentliche Angabe."
+        )
 
     def clean_quantity(self):
         quantity = self.cleaned_data["quantity"]
         if quantity < 1:
             raise forms.ValidationError("Ohne Tiere gibt es keinen Besatz.")
         return quantity
+
+    def clean(self):
+        """Mehr Tiere nach Geschlecht als insgesamt wäre ein Erfassungsfehler.
+
+        Umgekehrt ist weniger in Ordnung: bei Jungtieren ist das Geschlecht
+        noch nicht zu erkennen, und dann sind beide Zahlen bewusst kleiner als
+        die Stückzahl.
+        """
+        cleaned = super().clean()
+        quantity = cleaned.get("quantity")
+        counted = [cleaned.get("quantity_male"), cleaned.get("quantity_female")]
+        if quantity is not None and all(value is not None for value in counted):
+            if sum(counted) > quantity:
+                self.add_error(
+                    "quantity_female",
+                    "Männchen und Weibchen zusammen sind mehr als die erfasste Anzahl.",
+                )
+        return cleaned
 
 
 class StockingRemovalForm(BootstrapMixin, forms.ModelForm):
@@ -457,7 +487,15 @@ class PlantingForm(BootstrapMixin, forms.ModelForm):
 
     class Meta:
         model = Planting
-        fields = ["species", "quantity", "planted_on", "removed_on", "note"]
+        fields = [
+            "species",
+            "quantity",
+            "planted_on",
+            "removed_on",
+            "provenance",
+            "provenance_detail",
+            "note",
+        ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
