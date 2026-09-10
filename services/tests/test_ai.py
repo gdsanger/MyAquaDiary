@@ -743,6 +743,46 @@ class CatalogMatchTests(TestCase):
         self.assertEqual(entry.variant, "Nana")
         self.assertEqual(entry.display_name, "Anubias barteri 'Nana'")
 
+    def test_the_husbandry_traits_of_a_draft_land_in_the_catalog(self):
+        """Der Entwurf fragt Zone, Ernährung und Sozialverhalten schon lange ab.
+
+        Bis #1250 hatte der Katalog dafür kein Feld und die Angaben blieben am
+        Vorschlag liegen — jetzt wandern sie mit, in den Werten der
+        Katalog-Auswahllisten.
+        """
+        suggestion = self.suggestion(
+            AISuggestion.Kind.ANIMAL,
+            {
+                "scientific_name": "Otocinclus affinis",
+                "origin": "Südostbrasilien, Küstenflüsse",
+                "social_behavior": "gruppe",
+                "zone": "boden",
+                "diet": "aufwuchs",
+            },
+        )
+        catalog.publish(suggestion)
+
+        entry = AnimalSpecies.objects.get(scientific_name="Otocinclus affinis")
+        self.assertEqual(entry.origin_detail, "Südostbrasilien, Küstenflüsse")
+        self.assertEqual(entry.social_structure, AnimalSpecies.Social.GROUP)
+        self.assertEqual(entry.zone, AnimalSpecies.Zone.BOTTOM)
+        # „Aufwuchs" ist eine pflanzliche Ernährung; die Feinheit gehört in die
+        # Beschreibung und nicht in die Auswahlliste.
+        self.assertEqual(entry.diet, AnimalSpecies.Diet.HERBIVORE)
+        # Das Verbreitungsgebiet bleibt dem Menschen: aus einem Freitext ein
+        # filterbares Gebiet zu raten hieße, eine Angabe zu erfinden.
+        self.assertEqual(entry.origin_region, "")
+
+    def test_a_plant_draft_keeps_its_origin_as_well(self):
+        suggestion = self.suggestion(
+            AISuggestion.Kind.PLANT,
+            {"scientific_name": "Echinodorus bleheri", "origin": "Südamerika"},
+        )
+        catalog.publish(suggestion)
+
+        entry = PlantSpecies.objects.get(scientific_name="Echinodorus bleheri")
+        self.assertEqual(entry.origin_detail, "Südamerika")
+
     def test_a_high_co2_demand_becomes_a_requirement(self):
         suggestion = self.suggestion(
             AISuggestion.Kind.PLANT,

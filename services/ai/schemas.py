@@ -1,6 +1,6 @@
 """JSON-Schemata der KI-Antworten.
 
-Die Steckbriefe fragen mehr ab, als der Katalog speichert: Herkunft, Familie
+Die Steckbriefe fragen mehr ab, als der Katalog speichert: Familie, Vermehrung
 oder Verträglichkeit stehen am Vorschlag und sind dort zu lesen, im Katalog
 haben sie kein Feld. Wo es eines gibt, heißt es hier möglichst gleich; die
 verbleibenden Unterschiede in Namen und Auswahllisten übersetzt

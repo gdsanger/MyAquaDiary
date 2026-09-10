@@ -241,7 +241,9 @@ def catalog_model(kind: str):
 
 
 def catalog_entry(kind: str, entry_id: int):
-    found = catalog_model(kind).objects.filter(pk=entry_id).first()
+    # Die Quellenlinks stehen im Steckbrief; ohne Vorabladung wären sie eine
+    # zweite Abfrage je Aufruf.
+    found = catalog_model(kind).objects.prefetch_related("links").filter(pk=entry_id).first()
     if found is None:
         raise NotFound("Diesen Katalogeintrag gibt es nicht.")
     return found

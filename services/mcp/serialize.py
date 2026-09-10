@@ -291,6 +291,12 @@ def stocking(instance) -> dict:
 
     Eine Bestandshistorie führt das Modell nicht — eine Änderung ist eine neue
     Stückzahl, ein Abgang ein ``removed_on``.
+
+    ``social_structure`` steht hier neben der Stückzahl, obwohl es eine Angabe
+    des Katalogeintrags ist: ohne sie ist eine Zwei nicht von einem Paar zu
+    unterscheiden, und der Abgleich wäre nur mit einem zweiten Aufruf möglich.
+    ``social_hints`` ist derselbe Abgleich, den die Oberfläche zeigt — ein
+    Modell soll die Regel nicht nachbauen.
     """
     status, status_label = _status(instance.group_status)
     return {
@@ -301,12 +307,24 @@ def stocking(instance) -> dict:
         "scientific_name": instance.species.scientific_name,
         "common_name": instance.species.common_name,
         "quantity": instance.quantity,
+        # ``null`` heißt „nicht erfasst“ und nicht „keine“: bei einem Schwarm
+        # zählt die Geschlechter niemand.
+        "quantity_male": instance.quantity_male,
+        "quantity_female": instance.quantity_female,
         "min_group_size": instance.species.min_group_size,
         "group_status": status,
         "group_status_label": status_label,
+        "social_structure": instance.species.social_structure,
+        "social_structure_label": _display(instance.species, "social_structure"),
+        "social_hints": instance.social_hints,
         "added_on": moment(instance.added_on),
         "removed_on": moment(instance.removed_on),
         "is_active": instance.is_active,
+        # Bezugsquelle, nicht Verbreitungsgebiet: woher diese Tiere stammen,
+        # steht am Besatz — das Herkunftsgebiet der Art im Katalog.
+        "provenance": instance.provenance,
+        "provenance_label": _display(instance, "provenance"),
+        "provenance_detail": instance.provenance_detail,
         "note": instance.note,
     }
 
@@ -323,6 +341,11 @@ def planting(instance) -> dict:
         "planted_on": moment(instance.planted_on),
         "removed_on": moment(instance.removed_on),
         "is_active": instance.is_active,
+        # Wie vorgezogen — InVitro, submers, emers: der Unterschied, der beim
+        # Anwachsen zählt.
+        "provenance": instance.provenance,
+        "provenance_label": _display(instance, "provenance"),
+        "provenance_detail": instance.provenance_detail,
         "note": instance.note,
     }
 
@@ -408,7 +431,12 @@ def hardscape_item(instance) -> dict:
 
 
 def catalog_entry(kind: str, instance) -> dict:
-    """Kurzform für die Suche — Name, Identität, Anspruch."""
+    """Kurzform für die Suche — Name, Identität, Herkunft, Anspruch.
+
+    Das Verbreitungsgebiet steht schon in der Kurzform: „nur Südamerika“ ist
+    der häufigste Grund, im Katalog zu suchen, und dafür sollte niemand je
+    Treffer einen zweiten Aufruf brauchen.
+    """
     return {
         "kind": kind,
         "entry_id": instance.pk,
@@ -421,6 +449,11 @@ def catalog_entry(kind: str, instance) -> dict:
         "is_cultivated_form": instance.is_cultivated_form,
         "common_name": instance.common_name,
         "summary": instance.summary,
+        # Natürliche Verbreitung der Art — nicht die Bezugsquelle eines
+        # einzelnen Bestands, die steht am Besatzeintrag. Leer heißt „nicht
+        # erfasst“, ``cultivar`` dagegen „kein Wildvorkommen“.
+        "origin_region": instance.origin_region,
+        "origin_region_label": _display(instance, "origin_region"),
         "water_type": instance.water_type,
         "water_type_label": _display(instance, "water_type"),
         "difficulty": instance.difficulty,
@@ -432,13 +465,14 @@ def catalog_entry(kind: str, instance) -> dict:
 #: gibt — der Rest wird beim Aufbau übersprungen (siehe :func:`catalog_detail`).
 CATALOG_FIELDS = {
     "animal": [
-        "category", "temperament", "adult_size_cm", "min_group_size",
-        "min_tank_volume_l", "temperature_min", "temperature_max",
+        "category", "temperament", "zone", "diet", "social_structure",
+        "adult_size_cm", "min_group_size", "min_tank_volume_l",
+        "origin_detail", "temperature_min", "temperature_max",
         "ph_min", "ph_max", "gh_min", "gh_max", "description",
     ],
     "plant": [
         "placement", "growth_rate", "light_demand", "co2_required",
-        "max_height_cm", "temperature_min", "temperature_max",
+        "max_height_cm", "origin_detail", "temperature_min", "temperature_max",
         "ph_min", "ph_max", "gh_min", "gh_max", "description",
     ],
 }
@@ -446,6 +480,7 @@ CATALOG_FIELDS = {
 #: Felder mit Auswahlliste — zusätzlich zum Schlüssel kommt der Klartext mit.
 _CHOICE_FIELDS = {
     "category", "temperament", "placement", "growth_rate", "light_demand",
+    "zone", "diet", "social_structure",
 }
 
 #: Zusammengefasste Bereiche als Text. Das Modell rechnet sie ohnehin für die
@@ -455,7 +490,7 @@ _RANGE_PROPERTIES = ["temperature_range", "ph_range", "gh_range"]
 
 
 def catalog_detail(kind: str, instance) -> dict:
-    """Der vollständige Steckbrief."""
+    """Der vollständige Steckbrief samt den Quellen, auf die er verweist."""
     detail = catalog_entry(kind, instance)
     for field in CATALOG_FIELDS[kind]:
         if not hasattr(instance, field):
@@ -465,4 +500,19 @@ def catalog_detail(kind: str, instance) -> dict:
             detail[f"{field}_label"] = _display(instance, field)
     for prop in _RANGE_PROPERTIES:
         detail[prop] = getattr(instance, prop)
+    detail["links"] = [species_link(link) for link in instance.links.all()]
     return detail
+
+
+def species_link(instance) -> dict:
+    """Ein Verweis auf eine fremde Wissensquelle.
+
+    Die Adresse wird mitgegeben, nicht ihr Inhalt: abgerufen wird hier nichts,
+    und was hinter dem Link steht, gehört jemand anderem.
+    """
+    return {
+        "kind": instance.kind,
+        "kind_label": _display(instance, "kind"),
+        "title": instance.title,
+        "url": instance.url,
+    }
